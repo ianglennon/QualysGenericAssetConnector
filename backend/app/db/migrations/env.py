@@ -10,6 +10,7 @@ from app.core.settings import get_settings
 from app.db.base import Base
 # Import all models here so Alembic can see them for autogenerate
 from app.models import user  # noqa: F401 — registers User with Base.metadata
+from app.models import qualys_config  # noqa: F401 — registers QualysConfig with Base.metadata
 
 config = context.config
 settings = get_settings()

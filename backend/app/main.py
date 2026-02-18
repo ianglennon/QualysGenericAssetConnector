@@ -22,7 +22,14 @@ def run_migrations():
 async def lifespan(app: FastAPI):
     settings = get_settings()
     run_migrations()
-    # Admin seed happens in Phase 1 plan 02 when User model exists
+    # Seed admin user on first startup if users table is empty
+    from app.db.session import SessionLocal
+    from app.services.bootstrap_service import seed_admin_if_empty
+    db = SessionLocal()
+    try:
+        seed_admin_if_empty(db)
+    finally:
+        db.close()
     yield
 
 
@@ -38,9 +45,8 @@ def create_app() -> FastAPI:
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
 
-    # Routers added in subsequent plans
-    # from app.routers import auth, qualys
-    # app.include_router(auth.router, prefix="/api/v1")
+    from app.routers import auth
+    app.include_router(auth.router, prefix="/api/v1")
 
     return app
 

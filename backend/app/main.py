@@ -45,8 +45,9 @@ def create_app() -> FastAPI:
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
 
-    from app.routers import auth
+    from app.routers import auth, qualys
     app.include_router(auth.router, prefix="/api/v1")
+    app.include_router(qualys.router, prefix="/api/v1")
 
     return app
 

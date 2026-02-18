@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 from app.core.settings import get_settings
 from app.db.base import Base
 # Import all models here so Alembic can see them for autogenerate
-# from app.models import user, qualys_config  # uncomment as models are added
+from app.models import user  # noqa: F401 — registers User with Base.metadata
 
 config = context.config
 settings = get_settings()

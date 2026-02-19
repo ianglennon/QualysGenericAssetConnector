@@ -5,6 +5,7 @@ from app.models.connector import Connector
 from app.schemas.connector import ConnectorCreate, ConnectorUpdate, ConnectorResponse
 from app.schemas.pagination import PaginationStrategy
 from app.services.credential_crypto import get_crypto
+from app.services.connector_service import test_connector_connection
 from app.core.security import require_role
 from app.core.errors import make_error
 
@@ -167,3 +168,19 @@ def delete_connector(
 
     db.delete(connector)
     db.commit()
+
+
+@router.post("/{connector_id}/test")
+def run_test_connection(
+    connector_id: str,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_role("admin")),
+):
+    """Test connectivity to the source API for this connector. Returns metadata only — no body inspection."""
+    connector = db.query(Connector).filter(Connector.id == connector_id).first()
+    if not connector:
+        raise HTTPException(
+            status_code=404,
+            detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {}),
+        )
+    return test_connector_connection(connector)

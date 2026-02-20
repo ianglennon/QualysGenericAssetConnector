@@ -8,6 +8,7 @@ from app.models.connector import Connector
 from app.models.qualys_config import QualysConfig
 from app.services.credential_crypto import get_crypto
 from app.services.connector_service import HTTPX_TIMEOUT
+from app.services.qualys_formatter import format_qualys_payload
 
 DEFAULT_RETRY_LIMIT = 3
 DEFAULT_BACKOFF_SECONDS = 0.1
@@ -70,18 +71,35 @@ def _decrypt_secret(config: QualysConfig) -> str:
 
 
 def _parse_failure_items(payload: Any) -> list[QualysFailure]:
+    """Parse failures from Qualys CSAM response.
+    
+    Qualys CSAM may return failures in various formats:
+    - assetsError object with array of failed assets
+    - Standard error arrays
+    """
     if not isinstance(payload, dict):
         return []
 
     failure_lists = []
-    for key in ("failedRecords", "failures", "errors", "rejected"):
-        if isinstance(payload.get(key), list):
-            failure_lists = payload[key]
-            break
+    
+    # Check for assetsError (CSAM-specific)
+    if "assetsError" in payload and isinstance(payload["assetsError"], dict):
+        assets_error = payload["assetsError"]
+        for key in ("failed", "errors", "rejected"):
+            if isinstance(assets_error.get(key), list):
+                failure_lists = assets_error[key]
+                break
+    
+    # Fall back to standard error arrays
+    if not failure_lists:
+        for key in ("failedRecords", "failures", "errors", "rejected", "failed"):
+            if isinstance(payload.get(key), list):
+                failure_lists = payload[key]
+                break
 
     if not failure_lists and isinstance(payload.get("data"), dict):
         nested = payload["data"]
-        for key in ("failedRecords", "failures", "errors", "rejected"):
+        for key in ("failedRecords", "failures", "errors", "rejected", "failed"):
             if isinstance(nested.get(key), list):
                 failure_lists = nested[key]
                 break
@@ -90,18 +108,20 @@ def _parse_failure_items(payload: Any) -> list[QualysFailure]:
     for item in failure_lists:
         if isinstance(item, dict):
             record_identifier = (
-                item.get("recordIdentifier")
+                item.get("sourceNativeKey")  # Qualys CSAM uses this
+                or item.get("recordIdentifier")
                 or item.get("record_id")
                 or item.get("recordId")
                 or item.get("id")
-                or item.get("sourceNativeKey")
                 or item.get("identifier")
+                or item.get("hostName")  # Fallback to hostName
                 or ""
             )
             error_message = (
                 item.get("errorMessage")
-                or item.get("message")
                 or item.get("error")
+                or item.get("message")
+                or item.get("reason")
                 or "Unknown error"
             )
         else:
@@ -210,11 +230,18 @@ async def submit_batch(
         close_client = True
 
     try:
+        # Format records into Qualys CSAM payload
+        payload = format_qualys_payload(
+            records=records,
+            connector_name=connector.name,
+            connector_uuid=config.connector_uuid
+        )
+        
         response = await _post_with_retries(
             client,
             url,
             auth,
-            {"data": records},
+            payload,
             effective_retry_limit,
             headers,
         )

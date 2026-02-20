@@ -17,6 +17,7 @@ class QualysConfig(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     api_url: Mapped[str] = mapped_column(String, nullable=False)  # not a secret, stored plaintext
     username: Mapped[str] = mapped_column(String, nullable=False)  # not a secret, stored plaintext
+    connector_uuid: Mapped[str | None] = mapped_column(String, nullable=True)  # Qualys CSAM connector UUID
     # Encrypted columns — Fernet ciphertext:
     encrypted_password: Mapped[str | None] = mapped_column(String, nullable=True)
     encrypted_token: Mapped[str | None] = mapped_column(String, nullable=True)

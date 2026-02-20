@@ -15,6 +15,7 @@ def _to_response(config: QualysConfig) -> QualysConfigResponse:
         id=config.id,
         api_url=config.api_url,
         username=config.username,
+        connector_uuid=config.connector_uuid,
         has_password=bool(config.encrypted_password),
         has_token=bool(config.encrypted_token),
     )
@@ -49,6 +50,7 @@ def upsert_qualys_config(
 
     config.api_url = payload.api_url
     config.username = payload.username
+    config.connector_uuid = payload.connector_uuid
     config.encrypted_password = crypto.encrypt(payload.password) if payload.password else None
     config.encrypted_token = crypto.encrypt(payload.token) if payload.token else None
 

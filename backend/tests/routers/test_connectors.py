@@ -1,37 +1,45 @@
+import os
+import sys
 import uuid
 import pytest
 from fastapi.testclient import TestClient
+
+os.environ.setdefault("DATABASE_URL", "sqlite:///./test_connectors.db")
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+
 from app.main import create_app
-from app.db.session import SessionLocal, engine
-from app.db.base import Base
+from app.db.session import SessionLocal
 from app.services.auth_service import create_user
 from app.models.user import UserRole
 
 
 @pytest.fixture(scope="module")
 def client():
-    Base.metadata.create_all(bind=engine)
+    db_path = os.path.abspath("test_connectors.db")
+    if os.path.exists(db_path):
+        os.remove(db_path)
     app = create_app()
     with TestClient(app) as c:
         yield c
-    Base.metadata.drop_all(bind=engine)
+    if os.path.exists(db_path):
+        os.remove(db_path)
 
 
 @pytest.fixture(scope="module")
 def admin_token(client):
     db = SessionLocal()
-    create_user(db, "conn_admin@test.com", "AdminPass1!", UserRole.admin)
+    create_user(db, "conn_admin@test.com", "AdminPass12!", UserRole.admin)
     db.close()
-    resp = client.post("/api/v1/auth/login", json={"email": "conn_admin@test.com", "password": "AdminPass1!"})
+    resp = client.post("/api/v1/auth/login", json={"email": "conn_admin@test.com", "password": "AdminPass12!"})
     return resp.json()["access_token"]
 
 
 @pytest.fixture(scope="module")
 def operator_token(client):
     db = SessionLocal()
-    create_user(db, "conn_op@test.com", "OperatorPass1!", UserRole.operator)
+    create_user(db, "conn_op@test.com", "OperatorPass12!", UserRole.operator)
     db.close()
-    resp = client.post("/api/v1/auth/login", json={"email": "conn_op@test.com", "password": "OperatorPass1!"})
+    resp = client.post("/api/v1/auth/login", json={"email": "conn_op@test.com", "password": "OperatorPass12!"})
     return resp.json()["access_token"]
 
 
@@ -45,12 +53,16 @@ def test_create_connector_as_admin(client, admin_token):
             "base_url": "https://api.example.com",
             "auth_method": "bearer_token",
             "credentials": {"token": "supersecrettoken"},
+            "source_retry_limit": 5,
+            "qualys_retry_limit": 2,
         },
     )
     assert resp.status_code == 201
     data = resp.json()
     assert data["has_token"] is True
     assert data["name"] == "Test Bearer Connector"
+    assert data["source_retry_limit"] == 5
+    assert data["qualys_retry_limit"] == 2
     # Ensure no raw credential fields leak into the response
     assert "encrypted_token" not in data
     assert "token" not in data
@@ -161,6 +173,31 @@ def test_patch_connector_preserves_credentials(client, admin_token):
     assert data["name"] == "Updated Name Connector"
     # Token must still be present (not wiped by the partial update)
     assert data["has_token"] is True
+
+
+def test_patch_connector_updates_retry_limits(client, admin_token):
+    """PATCH can update retry limits and returns updated values."""
+    create_resp = client.post(
+        "/api/v1/connectors/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "name": "Retry Limits Connector",
+            "base_url": "https://retry.example.com",
+            "auth_method": "bearer_token",
+        },
+    )
+    assert create_resp.status_code == 201
+    connector_id = create_resp.json()["id"]
+
+    patch_resp = client.patch(
+        f"/api/v1/connectors/{connector_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"source_retry_limit": 4, "qualys_retry_limit": 1},
+    )
+    assert patch_resp.status_code == 200
+    data = patch_resp.json()
+    assert data["source_retry_limit"] == 4
+    assert data["qualys_retry_limit"] == 1
 
 
 def test_delete_connector_cascades_to_field_mappings(client, admin_token):

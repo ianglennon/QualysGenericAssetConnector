@@ -30,6 +30,8 @@ class ConnectorCreate(BaseModel):
     auth_method: Literal["bearer_token", "basic_auth", "api_key_header"]
     credentials: Optional[ConnectorCredentialsCreate] = None
     pagination_strategies: list[PaginationStrategy] = []
+    source_retry_limit: Optional[int] = None
+    qualys_retry_limit: Optional[int] = None
 
 
 class ConnectorUpdate(BaseModel):
@@ -40,6 +42,8 @@ class ConnectorUpdate(BaseModel):
     auth_method: Optional[Literal["bearer_token", "basic_auth", "api_key_header"]] = None
     credentials: Optional[ConnectorCredentialsUpdate] = None
     pagination_strategies: Optional[list[PaginationStrategy]] = None
+    source_retry_limit: Optional[int] = None
+    qualys_retry_limit: Optional[int] = None
 
 
 class ConnectorResponse(BaseModel):
@@ -57,6 +61,8 @@ class ConnectorResponse(BaseModel):
     has_api_key: bool
     api_key_name: Optional[str]  # plaintext header name, not a secret
     pagination_strategies: list[PaginationStrategy]
+    source_retry_limit: Optional[int]
+    qualys_retry_limit: Optional[int]
     created_at: datetime
     updated_at: datetime
 

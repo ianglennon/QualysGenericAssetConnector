@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import TypeAdapter
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.connector import Connector
@@ -14,8 +15,9 @@ router = APIRouter(prefix="/connectors", tags=["connectors"])
 
 def _to_response(connector: Connector) -> ConnectorResponse:
     """Map a Connector ORM row to a safe ConnectorResponse (no plaintext credentials)."""
+    pagination_adapter = TypeAdapter(PaginationStrategy)
     pagination_strategies = [
-        PaginationStrategy.model_validate(s)
+        pagination_adapter.validate_python(s)
         for s in (connector.pagination_config or [])
     ]
     return ConnectorResponse(
@@ -30,6 +32,8 @@ def _to_response(connector: Connector) -> ConnectorResponse:
         has_api_key=bool(connector.encrypted_api_key),
         api_key_name=connector.api_key_name,
         pagination_strategies=pagination_strategies,
+        source_retry_limit=connector.source_retry_limit,
+        qualys_retry_limit=connector.qualys_retry_limit,
         created_at=connector.created_at,
         updated_at=connector.updated_at,
     )
@@ -50,6 +54,8 @@ def create_connector(
         test_path=payload.test_path,
         auth_method=payload.auth_method,
         pagination_config=[s.model_dump() for s in payload.pagination_strategies],
+        source_retry_limit=payload.source_retry_limit,
+        qualys_retry_limit=payload.qualys_retry_limit,
     )
 
     if payload.credentials:
@@ -122,6 +128,10 @@ def update_connector(
         connector.auth_method = payload.auth_method
     if payload.pagination_strategies is not None:
         connector.pagination_config = [s.model_dump() for s in payload.pagination_strategies]
+    if payload.source_retry_limit is not None:
+        connector.source_retry_limit = payload.source_retry_limit
+    if payload.qualys_retry_limit is not None:
+        connector.qualys_retry_limit = payload.qualys_retry_limit
 
     if payload.credentials is not None:
         crypto = get_crypto()

@@ -16,6 +16,7 @@ class RunFailureSummary(BaseModel):
 class RunHistoryResponse(BaseModel):
     id: str
     connector_id: str
+    connector_name: Optional[str] = None
     status: str
     started_at: datetime
     finished_at: Optional[datetime]

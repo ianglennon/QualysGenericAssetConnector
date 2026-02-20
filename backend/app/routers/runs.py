@@ -1,5 +1,8 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import select, desc
+from fastapi_pagination import Page, Params
+from fastapi_pagination.ext.sqlalchemy import paginate
 
 from app.core.errors import make_error
 from app.core.security import require_role
@@ -55,14 +58,38 @@ def _fetch_failures_by_run(db: Session, run_ids: list[str]) -> dict[str, list[Ru
     return grouped
 
 
-@router.get("/runs", response_model=list[RunHistoryResponse])
+@router.get("/runs", response_model=Page[RunHistoryResponse])
 def list_runs(
     db: Session = Depends(get_db),
+    params: Params = Depends(),
     _user=Depends(require_role("admin", "operator")),
 ):
-    runs = db.query(RunHistory).order_by(RunHistory.started_at.desc()).all()
-    failures_map = _fetch_failures_by_run(db, [run.id for run in runs])
-    return [_to_response(run, failures_map.get(run.id, [])) for run in runs]
+    """List all runs across all connectors with cursor pagination."""
+    # Build query with connector name joined
+    query = (
+        select(RunHistory, Connector.name.label("connector_name"))
+        .join(Connector, RunHistory.connector_id == Connector.id)
+        .order_by(desc(RunHistory.started_at))
+    )
+    
+    # Paginate
+    page = paginate(db, query, params)
+    
+    # Transform results to include connector_name and failures
+    items = []
+    for run, connector_name in page.items:
+        # Load failures if status is failed or partial_success
+        failures = []
+        if run.status in ["failed", "partial_success"]:
+            failures_query = db.query(RunFailure).filter_by(run_id=run.id).limit(10).all()
+            failures = failures_query
+        
+        response = _to_response(run, failures)
+        response.connector_name = connector_name
+        items.append(response)
+    
+    page.items = items
+    return page
 
 
 @router.get("/runs/{run_id}", response_model=RunHistoryResponse)
@@ -71,41 +98,69 @@ def get_run(
     db: Session = Depends(get_db),
     _user=Depends(require_role("admin", "operator")),
 ):
+    """Get detailed run history including all failures."""
     run = db.query(RunHistory).filter(RunHistory.id == run_id).first()
     if not run:
         raise HTTPException(
             status_code=404,
             detail=make_error("RUN_NOT_FOUND", "Run not found", {"run_id": run_id}),
         )
+    
+    # Load connector name
+    connector = db.query(Connector).filter_by(id=run.connector_id).first()
+    connector_name = connector.name if connector else None
+    
+    # Load ALL failures for detail view (not limited)
     failures = (
         db.query(RunFailure)
         .filter(RunFailure.run_id == run_id)
         .order_by(RunFailure.created_at.asc())
         .all()
     )
-    return _to_response(run, failures)
+    
+    response = _to_response(run, failures)
+    response.connector_name = connector_name
+    return response
 
 
-@router.get("/connectors/{connector_id}/runs", response_model=list[RunHistoryResponse])
+@router.get("/connectors/{connector_id}/runs", response_model=Page[RunHistoryResponse])
 def list_connector_runs(
     connector_id: str,
     db: Session = Depends(get_db),
+    params: Params = Depends(),
     _user=Depends(require_role("admin", "operator")),
 ):
+    """List runs for a specific connector with pagination."""
     connector = db.query(Connector).filter(Connector.id == connector_id).first()
     if not connector:
         raise HTTPException(
             status_code=404,
             detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
         )
-    runs = (
-        db.query(RunHistory)
+    
+    query = (
+        select(RunHistory, Connector.name.label("connector_name"))
+        .join(Connector, RunHistory.connector_id == Connector.id)
         .filter(RunHistory.connector_id == connector_id)
-        .order_by(RunHistory.started_at.desc())
-        .all()
+        .order_by(desc(RunHistory.started_at))
     )
-    failures_map = _fetch_failures_by_run(db, [run.id for run in runs])
-    return [_to_response(run, failures_map.get(run.id, [])) for run in runs]
+    
+    page = paginate(db, query, params)
+    
+    # Transform with failures
+    items = []
+    for run, connector_name in page.items:
+        failures = []
+        if run.status in ["failed", "partial_success"]:
+            failures_query = db.query(RunFailure).filter_by(run_id=run.id).limit(10).all()
+            failures = failures_query
+        
+        response = _to_response(run, failures)
+        response.connector_name = connector_name
+        items.append(response)
+    
+    page.items = items
+    return page
 
 
 @router.post("/connectors/{connector_id}/runs", status_code=202)

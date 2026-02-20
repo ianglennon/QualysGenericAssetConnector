@@ -177,6 +177,17 @@ def trigger_connector_run(
             detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
         )
 
+    # Check connector has valid field mappings
+    if not connector.is_valid_mappings:
+        raise HTTPException(
+            status_code=400,
+            detail=make_error(
+                "INVALID_MAPPINGS",
+                "Connector has invalid field mappings. At least one identity attribute must be mapped.",
+                {"connector_id": connector_id}
+            ),
+        )
+
     existing_run = (
         db.query(RunHistory)
         .filter(RunHistory.connector_id == connector_id, RunHistory.status == RunStatus.running)

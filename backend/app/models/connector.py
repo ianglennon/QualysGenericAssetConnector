@@ -40,5 +40,9 @@ class Connector(Base):
     pagination_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     source_retry_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     qualys_retry_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Scheduling fields — to be migrated in 04-02
+    cron_schedule: Mapped[str | None] = mapped_column(String, nullable=True)
+    schedule_enabled: Mapped[bool] = mapped_column(Integer, nullable=False, default=False)
+    execution_timeout: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

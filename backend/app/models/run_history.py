@@ -13,6 +13,7 @@ class RunStatus(str, enum.Enum):
     success = "success"
     partial_success = "partial_success"
     failed = "failed"
+    skipped = "skipped"
 
 
 class RunHistory(Base):
@@ -32,6 +33,7 @@ class RunHistory(Base):
         index=True,
     )
     status: Mapped[RunStatus] = mapped_column(Enum(RunStatus), nullable=False, default=RunStatus.running)
+    triggered_by: Mapped[str] = mapped_column(String, nullable=False, default='manual')
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     records_fetched: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

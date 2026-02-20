@@ -126,12 +126,22 @@ def test_list_runs_as_admin(client, admin_token, seeded_runs):
     resp = client.get("/api/v1/runs", headers={"Authorization": f"Bearer {admin_token}"})
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) >= 3
-    run_ids = {run["id"] for run in data}
+    
+    # Verify paginated response structure
+    assert "items" in data
+    assert "total" in data
+    assert len(data["items"]) >= 3
+    
+    run_ids = {run["id"] for run in data["items"]}
     assert seeded_runs["run1_id"] in run_ids
     assert seeded_runs["run2_id"] in run_ids
 
-    run2 = next(run for run in data if run["id"] == seeded_runs["run2_id"])
+    # Verify connector_name is included
+    for run in data["items"]:
+        assert "connector_name" in run
+        assert run["connector_name"] in ["Runs Connector A", "Runs Connector B"]
+
+    run2 = next(run for run in data["items"] if run["id"] == seeded_runs["run2_id"])
     assert run2["status"] == "failed"
     assert run2["records_failed"] == 5
     assert run2["error_type"] == "source_error"
@@ -154,6 +164,10 @@ def test_get_run_by_id(client, operator_token, seeded_runs):
     assert data["status"] == "failed"
     assert data["error_type"] == "source_error"
     assert len(data["failures"]) == 2
+    
+    # Verify connector_name is included in detail view
+    assert "connector_name" in data
+    assert data["connector_name"] == "Runs Connector A"
 
 
 def test_get_run_not_found(client, admin_token):
@@ -170,9 +184,17 @@ def test_list_connector_runs(client, admin_token, seeded_runs):
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 2
-    for run in data:
+    
+    # Verify paginated response structure
+    assert "items" in data
+    assert "total" in data
+    assert len(data["items"]) == 2
+    
+    for run in data["items"]:
         assert run["connector_id"] == connector_id
+        # Verify connector_name is included
+        assert "connector_name" in run
+        assert run["connector_name"] == "Runs Connector A"
 
 
 def test_list_connector_runs_not_found(client, admin_token):
@@ -279,3 +301,30 @@ def test_trigger_run_updates_status_on_completion(client, admin_token):
         assert run.finished_at is not None
     finally:
         db.close()
+
+
+def test_list_runs_pagination_params(client, admin_token, seeded_runs):
+    """Test that pagination parameters work correctly."""
+    resp = client.get(
+        "/api/v1/runs?page=1&size=2",
+        headers={"Authorization": f"Bearer {admin_token}"}
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "items" in data
+    assert "total" in data
+    assert len(data["items"]) <= 2
+
+
+def test_partial_success_run_includes_failures(client, admin_token, seeded_runs):
+    """Test that partial_success runs include failure samples."""
+    run_id = seeded_runs["run3_id"]
+    resp = client.get(
+        f"/api/v1/runs/{run_id}",
+        headers={"Authorization": f"Bearer {admin_token}"}
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "partial_success"
+    assert len(data["failures"]) >= 1
+    assert data["failures"][0]["record_identifier"] == "host-9"

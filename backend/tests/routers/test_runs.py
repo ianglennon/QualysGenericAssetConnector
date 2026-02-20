@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 import os
 import sys
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -181,3 +182,100 @@ def test_list_connector_runs_not_found(client, admin_token):
     )
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "CONNECTOR_NOT_FOUND"
+
+
+def _create_connector(name="Runs Trigger Connector"):
+    db = SessionLocal()
+    try:
+        connector = Connector(
+            name=name,
+            base_url="https://runs-trigger.example.com",
+            auth_method="bearer_token",
+        )
+        db.add(connector)
+        db.commit()
+        db.refresh(connector)
+        return connector.id
+    finally:
+        db.close()
+
+
+def test_trigger_run_as_admin_returns_202(client, admin_token):
+    connector_id = _create_connector(name="Runs Trigger Admin")
+    with patch("app.routers.runs.run_ingestion", new_callable=AsyncMock) as mock_run:
+        resp = client.post(
+            f"/api/v1/connectors/{connector_id}/runs",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["status"] == "running"
+    assert "run_id" in data
+    mock_run.assert_awaited_once_with(data["run_id"])
+
+
+def test_trigger_run_as_operator_returns_202(client, operator_token):
+    connector_id = _create_connector(name="Runs Trigger Operator")
+    with patch("app.routers.runs.run_ingestion", new_callable=AsyncMock) as mock_run:
+        resp = client.post(
+            f"/api/v1/connectors/{connector_id}/runs",
+            headers={"Authorization": f"Bearer {operator_token}"},
+        )
+
+    assert resp.status_code == 202
+    data = resp.json()
+    mock_run.assert_awaited_once_with(data["run_id"])
+
+
+def test_trigger_run_conflict_when_running_exists(client, admin_token):
+    connector_id = _create_connector(name="Runs Trigger Conflict")
+    db = SessionLocal()
+    try:
+        run = RunHistory(
+            connector_id=connector_id,
+            status=RunStatus.running,
+            started_at=datetime.utcnow(),
+        )
+        db.add(run)
+        db.commit()
+    finally:
+        db.close()
+
+    resp = client.post(
+        f"/api/v1/connectors/{connector_id}/runs",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"]["code"] == "CONNECTOR_RUN_IN_PROGRESS"
+
+
+def test_trigger_run_updates_status_on_completion(client, admin_token):
+    connector_id = _create_connector(name="Runs Trigger Status")
+
+    async def _complete_run(run_id: str):
+        db = SessionLocal()
+        try:
+            run = db.query(RunHistory).filter(RunHistory.id == run_id).first()
+            run.status = RunStatus.success
+            run.finished_at = datetime.utcnow()
+            db.commit()
+        finally:
+            db.close()
+
+    with patch("app.routers.runs.run_ingestion", new=_complete_run):
+        resp = client.post(
+            f"/api/v1/connectors/{connector_id}/runs",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    assert resp.status_code == 202
+    run_id = resp.json()["run_id"]
+
+    db = SessionLocal()
+    try:
+        run = db.query(RunHistory).filter(RunHistory.id == run_id).first()
+        assert run.status == RunStatus.success
+        assert run.finished_at is not None
+    finally:
+        db.close()

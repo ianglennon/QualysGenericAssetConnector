@@ -1,12 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.errors import make_error
 from app.core.security import require_role
 from app.db.session import get_db
 from app.models.connector import Connector
-from app.models.run_history import RunHistory, RunFailure
+from app.models.run_history import RunHistory, RunFailure, RunStatus
 from app.schemas.run_history import RunHistoryResponse, RunFailureSummary
+from app.services.ingestion_service import create_run, run_ingestion
 
 router = APIRouter(tags=["runs"])
 
@@ -105,3 +106,37 @@ def list_connector_runs(
     )
     failures_map = _fetch_failures_by_run(db, [run.id for run in runs])
     return [_to_response(run, failures_map.get(run.id, [])) for run in runs]
+
+
+@router.post("/connectors/{connector_id}/runs", status_code=202)
+def trigger_connector_run(
+    connector_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _user=Depends(require_role("admin", "operator")),
+):
+    connector = db.query(Connector).filter(Connector.id == connector_id).first()
+    if not connector:
+        raise HTTPException(
+            status_code=404,
+            detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
+        )
+
+    existing_run = (
+        db.query(RunHistory)
+        .filter(RunHistory.connector_id == connector_id, RunHistory.status == RunStatus.running)
+        .first()
+    )
+    if existing_run:
+        raise HTTPException(
+            status_code=409,
+            detail=make_error(
+                "CONNECTOR_RUN_IN_PROGRESS",
+                "Connector run already in progress",
+                {"connector_id": connector_id},
+            ),
+        )
+
+    run = create_run(connector_id)
+    background_tasks.add_task(run_ingestion, run.id)
+    return {"run_id": run.id, "status": RunStatus.running.value}

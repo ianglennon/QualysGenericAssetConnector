@@ -56,3 +56,51 @@ FieldMappingRule = Annotated[
     Union[FieldMappingDirectCopy, FieldMappingStaticDefault, FieldMappingConditional],
     Field(discriminator="mapping_type"),
 ]
+
+
+class FieldMappingCreate(BaseModel):
+    """Schema for creating a field mapping."""
+    mapping_type: Literal["direct_copy", "static_default", "conditional"]
+    target_field: str
+    source_field: str | None = None  # Required for direct_copy
+    static_value: str | None = None  # Required for static_default
+    conditions: list[ConditionRule] | None = None  # Required for conditional
+    fallback: str | None = None  # Optional for conditional
+    order: int = 0
+    
+    @field_validator("source_field")
+    @classmethod
+    def validate_direct_copy(cls, v: str | None, info) -> str | None:
+        if info.data.get("mapping_type") == "direct_copy" and not v:
+            raise ValueError("source_field required for direct_copy mapping")
+        return v
+    
+    @field_validator("static_value")
+    @classmethod
+    def validate_static_default(cls, v: str | None, info) -> str | None:
+        if info.data.get("mapping_type") == "static_default" and not v:
+            raise ValueError("static_value required for static_default mapping")
+        return v
+    
+    @field_validator("conditions")
+    @classmethod
+    def validate_conditional(cls, v: list | None, info) -> list | None:
+        if info.data.get("mapping_type") == "conditional" and not v:
+            raise ValueError("conditions required for conditional mapping")
+        return v
+
+
+class FieldMappingResponse(BaseModel):
+    """Schema for field mapping API responses."""
+    id: str
+    connector_id: str
+    mapping_type: str
+    target_field: str
+    source_field: str | None = None
+    static_value: str | None = None
+    conditions: list[dict] | None = None  # JSON from DB
+    fallback: str | None = None
+    order: int
+    created_at: str  # ISO datetime string
+    
+    model_config = {"from_attributes": True}

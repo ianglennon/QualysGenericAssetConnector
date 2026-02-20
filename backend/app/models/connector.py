@@ -44,5 +44,7 @@ class Connector(Base):
     cron_schedule: Mapped[str | None] = mapped_column(String, nullable=True)
     schedule_enabled: Mapped[bool] = mapped_column(Integer, nullable=False, default=False)
     execution_timeout: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Field mapping validation tracking
+    is_valid_mappings: Mapped[bool] = mapped_column(Integer, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

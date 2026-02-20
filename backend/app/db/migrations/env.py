@@ -4,7 +4,8 @@ from alembic import context
 import sys
 import os
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../..")))
+# When running inside container, cwd is /app, so go up 3 levels from migrations/
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../..")))
 
 from app.core.settings import get_settings
 from app.db.base import Base

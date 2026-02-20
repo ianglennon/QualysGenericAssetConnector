@@ -30,7 +30,15 @@ async def lifespan(app: FastAPI):
         seed_admin_if_empty(db)
     finally:
         db.close()
+    
+    # Initialize scheduler after migrations
+    from app.scheduler.scheduler_service import init_scheduler, shutdown_scheduler
+    init_scheduler(settings.database_url)
+    
     yield
+    
+    # Shutdown scheduler on application shutdown
+    shutdown_scheduler()
 
 
 def create_app() -> FastAPI:

@@ -11,7 +11,7 @@ from app.services.connector_service import HTTPX_TIMEOUT
 
 DEFAULT_RETRY_LIMIT = 3
 DEFAULT_BACKOFF_SECONDS = 0.1
-IMPORT_PATH = "/qps/rest/2.0/import/thirdpartyasset"
+IMPORT_PATH = "/rest/2.0/am/connector/asset/data/sync"
 
 
 @dataclass
@@ -121,14 +121,15 @@ def _parse_failure_items(payload: Any) -> list[QualysFailure]:
 async def _post_with_retries(
     client: httpx.AsyncClient,
     url: str,
-    auth: httpx.BasicAuth,
+    auth: httpx.BasicAuth | None,
     payload: dict,
     retry_limit: int,
+    headers: dict[str, str] | None = None,
 ) -> httpx.Response:
     attempts = 0
     while True:
         try:
-            response = await client.post(url, json=payload, auth=auth)
+            response = await client.post(url, json=payload, auth=auth, headers=headers)
         except httpx.TimeoutException as exc:
             attempts += 1
             if attempts > retry_limit:
@@ -183,8 +184,23 @@ async def submit_batch(
     if not records:
         return QualysSubmitResult(submitted_count=0, failed_count=0, failures=[])
 
-    secret = _decrypt_secret(config)
-    auth = httpx.BasicAuth(config.username, secret)
+    crypto = get_crypto()
+    auth = None
+    headers = None
+    
+    # Prefer token-based auth if available, fall back to password-based
+    if config.encrypted_token:
+        token = crypto.decrypt(config.encrypted_token)
+        headers = {"Authorization": f"Bearer {token}"}
+    elif config.encrypted_password:
+        password = crypto.decrypt(config.encrypted_password)
+        auth = httpx.BasicAuth(config.username, password)
+    else:
+        raise QualysClientError(
+            "Qualys credentials are not configured",
+            error_type="qualys_missing_credentials",
+        )
+    
     effective_retry_limit = _effective_retry_limit(connector, retry_limit)
     url = _qualys_url(config.api_url)
 
@@ -200,6 +216,7 @@ async def submit_batch(
             auth,
             {"data": records},
             effective_retry_limit,
+            headers,
         )
         if response.status_code == 207:
             payload = response.json() if response.content else {}

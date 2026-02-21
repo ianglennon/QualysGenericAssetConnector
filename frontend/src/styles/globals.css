@@ -94,11 +94,83 @@
     --ring: 221.2 100% 40%;
   }
 
+  /* Color-blind safe modes - no red-green distinction */
+  .deuteranopia,
+  .protanopia {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --primary: 210 100% 50%; /* Blue */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 45 100% 50%; /* Yellow */
+    --secondary-foreground: 0 0% 0%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 45 100% 50%; /* Yellow */
+    --accent-foreground: 0 0% 0%;
+    --destructive: 0 0% 40%; /* Gray instead of red */
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 14.9%;
+    --input: 0 0% 14.9%;
+    --ring: 210 100% 50%;
+    --success: 210 100% 50%; /* Blue for success */
+    --warning: 45 100% 50%; /* Yellow for warning */
+    --error: 0 0% 40%; /* Gray for error */
+  }
+
+  /* Color-blind safe mode - no blue-yellow distinction */
+  .tritanopia {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --primary: 0 100% 50%; /* Red */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 120 100% 35%; /* Green */
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 120 100% 35%; /* Green */
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 100% 40%; /* Red */
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 14.9%;
+    --input: 0 0% 14.9%;
+    --ring: 0 100% 50%;
+    --success: 120 100% 35%; /* Green for success */
+    --warning: 0 100% 50%; /* Red for warning */
+    --error: 0 100% 40%; /* Dark red for error */
+  }
+
   * {
     @apply border-border;
   }
 
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@layer components {
+  /* Status badges with icons for accessibility */
+  .status-badge {
+    @apply inline-flex items-center gap-1 px-2 py-1 rounded-md text-sm font-medium;
+  }
+
+  .status-success::before {
+    content: '✓';
+    @apply font-bold;
+  }
+
+  .status-error::before {
+    content: '✗';
+    @apply font-bold;
+  }
+
+  .status-warning::before {
+    content: '⚠';
+    @apply font-bold;
+  }
+
+  .status-info::before {
+    content: 'ℹ';
+    @apply font-bold;
   }
 }

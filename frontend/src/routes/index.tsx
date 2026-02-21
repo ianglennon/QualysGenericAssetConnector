@@ -6,6 +6,7 @@ import { ConnectorDetailPage } from '@/pages/Connectors/ConnectorDetailPage'
 import Mappings from '@/pages/Settings/Mappings'
 import { QualysConfig } from '@/pages/Settings/QualysConfig'
 import { TransformRules } from '@/pages/Settings/TransformRules'
+import { UserProfile } from '@/pages/Settings/UserProfile'
 import RunHistoryPage from '@/pages/RunHistory/RunHistoryPage'
 import RunDetailPage from '@/pages/RunHistory/RunDetailPage'
 import ProtectedRoute from './ProtectedRoute'
@@ -60,6 +61,10 @@ export const router = createBrowserRouter([
           {
             path: 'runs/:id',
             element: <RunDetailPage />,
+          },
+          {
+            path: 'profile',
+            element: <UserProfile />,
           },
           {
             path: 'settings',

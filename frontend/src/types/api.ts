@@ -147,3 +147,49 @@ export interface RunHistoryList {
   total: number
   cursor?: string
 }
+
+// Qualys Configuration Types
+export interface QualysConfig {
+  id: string
+  api_url: string
+  username: string
+  connector_uuid: string
+  has_password: boolean
+  has_token: boolean
+}
+
+export interface QualysConfigUpdate {
+  api_url: string
+  username: string
+  connector_uuid: string
+  password?: string
+  token?: string
+}
+
+// Theme and User Profile Types
+export type ThemeMode = 'light' | 'dark' | 'black' | 'high-contrast' | 'deuteranopia' | 'protanopia' | 'tritanopia' | 'custom'
+
+export interface CustomTheme {
+  name: string
+  colors: Record<string, string>
+}
+
+export interface UserPreferences {
+  theme: ThemeMode
+  custom_theme?: CustomTheme
+  font_size?: 'normal' | 'large' | 'x-large'
+  reduced_motion?: boolean
+}
+
+export interface PasswordChangeRequest {
+  current_password: string
+  new_password: string
+}
+
+export interface Session {
+  id: string
+  ip_address: string
+  user_agent: string
+  created_at: string
+  last_active: string
+}

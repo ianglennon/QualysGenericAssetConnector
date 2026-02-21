@@ -4,6 +4,8 @@ import Dashboard from '@/pages/Dashboard'
 import { ConnectorListPage } from '@/pages/Connectors/ConnectorListPage'
 import { ConnectorDetailPage } from '@/pages/Connectors/ConnectorDetailPage'
 import Mappings from '@/pages/Settings/Mappings'
+import { QualysConfig } from '@/pages/Settings/QualysConfig'
+import { TransformRules } from '@/pages/Settings/TransformRules'
 import RunHistoryPage from '@/pages/RunHistory/RunHistoryPage'
 import RunDetailPage from '@/pages/RunHistory/RunDetailPage'
 import ProtectedRoute from './ProtectedRoute'
@@ -74,6 +76,14 @@ export const router = createBrowserRouter([
               {
                 path: 'mappings',
                 element: <Mappings />,
+              },
+              {
+                path: 'qualys',
+                element: <QualysConfig />,
+              },
+              {
+                path: 'transform-rules',
+                element: <TransformRules />,
               },
             ],
           },

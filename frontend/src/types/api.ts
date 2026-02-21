@@ -49,13 +49,76 @@ export interface PreviewResponse {
 }
 
 // Connector Types
+export type AuthMethod = 'bearer_token' | 'basic_auth' | 'api_key_header'
+
+export interface CursorPagination {
+  strategy_type: 'cursor'
+  cursor_param: string
+  next_cursor_path: string
+  page_size_param?: string
+}
+
+export interface OffsetPagination {
+  strategy_type: 'offset'
+  limit_param: string
+  offset_param: string
+}
+
+export interface PageNumberPagination {
+  strategy_type: 'page_number'
+  page_param: string
+  page_size_param?: string
+}
+
+export interface LinkHeaderPagination {
+  strategy_type: 'link_header'
+  page_size_param?: string
+}
+
+export type PaginationStrategy = CursorPagination | OffsetPagination | PageNumberPagination | LinkHeaderPagination
+
 export interface Connector {
   id: string
   name: string
   base_url: string
-  auth_method: string
-  is_valid_mappings: boolean
+  test_path?: string
+  auth_method: AuthMethod
+  has_token: boolean
+  has_username: boolean
+  has_password: boolean
+  has_api_key: boolean
+  api_key_name?: string
+  pagination_strategies: PaginationStrategy[]
+  source_retry_limit?: number
+  qualys_retry_limit?: number
   created_at: string
+  updated_at: string
+}
+
+export interface ConnectorCredentials {
+  token?: string
+  username?: string
+  password?: string
+  api_key_name?: string
+  api_key?: string
+}
+
+export interface ConnectorCreate {
+  name: string
+  base_url: string
+  test_path?: string
+  auth_method: AuthMethod
+  credentials?: ConnectorCredentials
+  pagination_strategies: PaginationStrategy[]
+  source_retry_limit?: number
+  qualys_retry_limit?: number
+}
+
+export interface TestConnectionResponse {
+  success: boolean
+  status_code?: number
+  error?: string
+  sample_data?: any
 }
 
 // Run History Types

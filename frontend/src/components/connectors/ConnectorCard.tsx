@@ -1,0 +1,84 @@
+import { MoreVertical, Play, Pencil, Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Badge } from '@/components/ui/badge'
+import { useAuth } from '@/hooks/useAuth'
+import type { Connector } from '@/types/api'
+
+interface ConnectorCardProps {
+  connector: Connector
+  onEdit?: (connector: Connector) => void
+  onDelete?: (connector: Connector) => void
+  onTriggerSync?: (connector: Connector) => void
+}
+
+export function ConnectorCard({ connector, onEdit, onDelete, onTriggerSync }: ConnectorCardProps) {
+  const { user } = useAuth()
+
+  const isAdmin = user?.role === 'admin'
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
+        <CardTitle className="text-lg font-medium">{connector.name}</CardTitle>
+        <div className="flex items-center gap-2">
+          {onTriggerSync && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onTriggerSync(connector)}
+              title="Trigger Sync"
+            >
+              <Play className="h-4 w-4" />
+            </Button>
+          )}
+          {isAdmin && (onEdit || onDelete) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm">
+                  <MoreVertical className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {onEdit && (
+                  <DropdownMenuItem onClick={() => onEdit(connector)}>
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Edit
+                  </DropdownMenuItem>
+                )}
+                {onDelete && (
+                  <DropdownMenuItem
+                    onClick={() => onDelete(connector)}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Delete
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          <div className="text-sm text-muted-foreground">{connector.base_url}</div>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="capitalize">
+              {connector.auth_method.replace('_', ' ')}
+            </Badge>
+            <Badge variant={connector.has_token || connector.has_username || connector.has_api_key ? 'default' : 'secondary'}>
+              {connector.has_token || connector.has_username || connector.has_api_key ? 'Configured' : 'No Auth'}
+            </Badge>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}

@@ -1,10 +1,15 @@
+import { RouterProvider } from 'react-router-dom'
+import { QueryProvider } from './providers/QueryProvider'
+import { ThemeProvider } from './providers/ThemeProvider'
+import { router } from './routes'
+
 function App() {
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <h1 className="text-4xl font-bold text-primary">
-        Qualys Connector
-      </h1>
-    </div>
+    <QueryProvider>
+      <ThemeProvider>
+        <RouterProvider router={router} />
+      </ThemeProvider>
+    </QueryProvider>
   )
 }
 

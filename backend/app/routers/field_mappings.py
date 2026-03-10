@@ -6,7 +6,13 @@ from app.db.session import get_db
 from app.core.security import require_role
 from app.models.field_mapping import FieldMapping
 from app.models.connector import Connector
-from app.schemas.field_mapping import FieldMappingCreate, FieldMappingResponse
+from app.core.errors import make_error
+from app.schemas.field_mapping import (
+    BatchReplaceRequest,
+    BatchReplaceResponse,
+    FieldMappingCreate,
+    FieldMappingResponse,
+)
 from app.services.validation import validate_connector_mappings
 from app.services.preview import preview_mappings
 import uuid
@@ -55,6 +61,57 @@ def list_mappings(
 ):
     """List all mappings for a connector."""
     return db.query(FieldMapping).filter_by(connector_id=connector_id).order_by(FieldMapping.order).all()
+
+
+@router.put("/connectors/{connector_id}/mappings", response_model=BatchReplaceResponse)
+def batch_replace_mappings(
+    connector_id: str,
+    payload: BatchReplaceRequest,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_role("admin")),
+):
+    """Atomically replace all field mappings for a connector.
+
+    Deletes all existing mappings and inserts the provided set in a single
+    transaction. Validates the new mapping set and updates is_valid_mappings
+    on the connector before committing.
+    """
+    connector = db.query(Connector).filter(Connector.id == connector_id).first()
+    if not connector:
+        raise HTTPException(
+            status_code=404,
+            detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
+        )
+
+    # Transactional replace: delete all then insert all
+    db.query(FieldMapping).filter_by(connector_id=connector_id).delete()
+    for m in payload.mappings:
+        db.add(FieldMapping(
+            id=str(uuid.uuid4()),
+            connector_id=connector_id,
+            mapping_type=m.mapping_type,
+            target_field=m.target_field,
+            source_field=m.source_field,
+            static_value=m.static_value,
+            conditions=m.conditions,
+            fallback=m.fallback,
+            order=m.order,
+        ))
+
+    # Flush pending changes so the new rows are visible to the validation query
+    # (session has autoflush=False so explicit flush is required before SELECT)
+    db.flush()
+    is_valid, errors = validate_connector_mappings(connector_id, db)
+    connector.is_valid_mappings = is_valid
+
+    # Single commit — if any prior step raised, nothing is persisted
+    db.commit()
+
+    return BatchReplaceResponse(
+        replaced=len(payload.mappings),
+        is_valid_mappings=is_valid,
+        validation_errors=errors,
+    )
 
 
 @router.patch("/connectors/{connector_id}/mappings/{mapping_id}", response_model=FieldMappingResponse)

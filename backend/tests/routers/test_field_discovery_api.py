@@ -1,13 +1,10 @@
 """
-Integration tests for the field discovery and mapping API endpoints (RED state).
+Integration tests for the field discovery and mapping API endpoints.
 
 Endpoints under test:
   GET  /api/v1/connectors/{id}/fields/discover
   GET  /api/v1/qualys/schema
   PUT  /api/v1/connectors/{id}/mappings
-
-These tests will fail with 404 (endpoints not yet registered) or ImportError until
-the Wave 1 implementations land. That failure IS the expected RED state.
 """
 import os
 import sys
@@ -19,7 +16,8 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///./test_field_discovery_api.db")
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from app.main import create_app
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
+from app.db.base import Base
 from app.services.auth_service import create_user
 from app.models.user import UserRole
 
@@ -30,14 +28,11 @@ from app.models.user import UserRole
 
 @pytest.fixture(scope="module")
 def client():
-    db_path = os.path.abspath("test_field_discovery_api.db")
-    if os.path.exists(db_path):
-        os.remove(db_path)
+    # Ensure all tables exist (idempotent, bypasses Alembic version check)
+    Base.metadata.create_all(bind=engine)
     app = create_app()
     with TestClient(app) as c:
         yield c
-    if os.path.exists(db_path):
-        os.remove(db_path)
 
 
 def _ensure_user(email: str, password: str, role: UserRole) -> None:
@@ -131,9 +126,9 @@ def test_discover_502(client, admin_token, connector_id):
 
     assert resp.status_code == 502
     body = resp.json()
-    # Actual error format from make_error: {"error": {"code": ..., "message": ..., "details": {}}}
-    # The http_exception_handler returns the structured dict directly as the response body.
-    error_code = body.get("error", {}).get("code")
+    # Matches error format: {"detail": {"error_code": ..., "error_message": ..., "context": {}}}
+    detail = body.get("detail", body)
+    error_code = detail.get("error_code") or detail.get("code")
     assert error_code == "SOURCE_UNREACHABLE"
 
 

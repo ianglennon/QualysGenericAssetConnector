@@ -46,6 +46,7 @@ export interface TargetPanelData {
 }
 
 // Edge data shape for MappingEdge custom edge
-export interface MappingEdgeData {
+// Index signature required by @xyflow/react EdgeBase<Record<string, unknown>> constraint
+export interface MappingEdgeData extends Record<string, unknown> {
   mappingType: MappingType
 }

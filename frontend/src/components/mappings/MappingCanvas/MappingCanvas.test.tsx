@@ -1,5 +1,8 @@
-import { describe, it, vi } from 'vitest'
+import { describe, it, vi, expect } from 'vitest'
 import React from 'react'
+import { render, screen } from '@testing-library/react'
+import { SourcePanelNode } from './SourcePanelNode'
+import { TargetPanelNode } from './TargetPanelNode'
 
 // These stubs are RED until Plans 02 and 03 implement the components.
 // They define the behavioral contracts upfront.
@@ -43,7 +46,7 @@ vi.mock('@xyflow/react', () => ({
   useReactFlow: () => ({ deleteElements: vi.fn() }),
   useUpdateNodeInternals: () => vi.fn(),
   useNodeId: () => 'source-panel',
-  Handle: () => <div data-testid="handle" />,
+  Handle: ({ id }: { id?: string }) => <div data-testid="handle" data-id={id} />,
   Position: { Left: 'left', Right: 'right' },
   BaseEdge: () => <path />,
   EdgeLabelRenderer: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
@@ -53,13 +56,147 @@ vi.mock('@xyflow/react', () => ({
   addEdge: vi.fn((edge, edges) => [...edges, edge]),
 }))
 
+const mockSourceFields = [
+  { path: 'address.city', type: 'string', sample_value: 'Austin' },
+  { path: 'hostname', type: 'string', sample_value: 'server-01' },
+]
+
+const mockTargetFields = [
+  { field: 'instanceUuidSource', is_identity: true },
+  { field: 'name', is_identity: false },
+  { field: 'address', is_identity: false },
+]
+
+const minimalNodeProps = {
+  id: 'source-panel',
+  type: 'sourcePanel',
+  xPos: 0,
+  yPos: 0,
+  zIndex: 0,
+  isConnectable: true,
+  dragging: false,
+  selected: false,
+  draggable: false,
+  selectable: false,
+  deletable: false,
+  positionAbsoluteX: 0,
+  positionAbsoluteY: 0,
+}
+
+describe('SourcePanelNode', () => {
+  it('displays "Source Fields" header', () => {
+    render(
+      <SourcePanelNode
+        {...minimalNodeProps as any}
+        data={{ fields: mockSourceFields, linkedSourceFields: new Set() }}
+      />
+    )
+    expect(screen.getByText('Source Fields')).toBeInTheDocument()
+  })
+
+  it('shows unlinked field paths', () => {
+    render(
+      <SourcePanelNode
+        {...minimalNodeProps as any}
+        data={{ fields: mockSourceFields, linkedSourceFields: new Set() }}
+      />
+    )
+    expect(screen.getByText('hostname')).toBeInTheDocument()
+    expect(screen.getByText('address.city')).toBeInTheDocument()
+  })
+
+  it('shows "Linked (0)" separator when no connections', () => {
+    render(
+      <SourcePanelNode
+        {...minimalNodeProps as any}
+        data={{ fields: mockSourceFields, linkedSourceFields: new Set() }}
+      />
+    )
+    expect(screen.getByText(/Linked \(0\)/)).toBeInTheDocument()
+  })
+
+  it('shows "(no connections yet)" placeholder in empty linked zone', () => {
+    render(
+      <SourcePanelNode
+        {...minimalNodeProps as any}
+        data={{ fields: mockSourceFields, linkedSourceFields: new Set() }}
+      />
+    )
+    expect(screen.getByText('(no connections yet)')).toBeInTheDocument()
+  })
+
+  it('moves field to linked zone when in linkedSourceFields', () => {
+    render(
+      <SourcePanelNode
+        {...minimalNodeProps as any}
+        data={{ fields: mockSourceFields, linkedSourceFields: new Set(['hostname']) }}
+      />
+    )
+    expect(screen.getByText(/Linked \(1\)/)).toBeInTheDocument()
+    expect(screen.getByText(/Unlinked \(1\)/)).toBeInTheDocument()
+  })
+})
+
+describe('TargetPanelNode', () => {
+  it('displays "Qualys Target Fields" header', () => {
+    render(
+      <TargetPanelNode
+        {...minimalNodeProps as any}
+        data={{ fields: mockTargetFields, linkedTargetFields: new Set() }}
+      />
+    )
+    expect(screen.getByText('Qualys Target Fields')).toBeInTheDocument()
+  })
+
+  it('identity fields (is_identity: true) sort to top of target panel', () => {
+    render(
+      <TargetPanelNode
+        {...minimalNodeProps as any}
+        data={{ fields: mockTargetFields, linkedTargetFields: new Set() }}
+      />
+    )
+    const items = screen.getAllByText(/instanceUuidSource|name|address/)
+    // instanceUuidSource (identity) should appear before name and address
+    const idxIdentity = items.findIndex(el => el.textContent?.includes('instanceUuidSource'))
+    const idxName = items.findIndex(el => el.textContent === 'name')
+    const idxAddress = items.findIndex(el => el.textContent === 'address')
+    expect(idxIdentity).toBeLessThan(idxName)
+    expect(idxIdentity).toBeLessThan(idxAddress)
+  })
+
+  it('identity fields display star prefix', () => {
+    render(
+      <TargetPanelNode
+        {...minimalNodeProps as any}
+        data={{ fields: mockTargetFields, linkedTargetFields: new Set() }}
+      />
+    )
+    expect(screen.getByText('★ instanceUuidSource')).toBeInTheDocument()
+  })
+
+  it('identity fields display [IDENTITY] badge', () => {
+    render(
+      <TargetPanelNode
+        {...minimalNodeProps as any}
+        data={{ fields: mockTargetFields, linkedTargetFields: new Set() }}
+      />
+    )
+    expect(screen.getByText('[IDENTITY]')).toBeInTheDocument()
+  })
+
+  it('shows "Linked (0)" separator on empty canvas', () => {
+    render(
+      <TargetPanelNode
+        {...minimalNodeProps as any}
+        data={{ fields: mockTargetFields, linkedTargetFields: new Set() }}
+      />
+    )
+    expect(screen.getByText(/Linked \(0\)/)).toBeInTheDocument()
+  })
+})
+
 describe('MappingCanvas', () => {
   it.todo('renders canvas shell without crashing')
-  it.todo('SourcePanelNode displays "Source Fields" header')
-  it.todo('TargetPanelNode displays "Qualys Target Fields" header')
-  it.todo('identity fields (is_identity: true) sort to top of target panel')
-  it.todo('identity fields display star prefix and [IDENTITY] badge')
-  it.todo('linked/unlinked separator shows "Linked (0)" on empty canvas')
   it.todo('linked/unlinked separator shows correct count after connection is added')
   it.todo('breaking a connection returns fields to unlinked zone')
 })

@@ -1,5 +1,5 @@
 import enum
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -102,5 +102,41 @@ class FieldMappingResponse(BaseModel):
     fallback: str | None = None
     order: int
     created_at: str  # ISO datetime string
-    
+
     model_config = {"from_attributes": True}
+
+
+class FieldDiscoveryItem(BaseModel):
+    """A single discovered field from a source API response."""
+    path: str
+    type: str
+    sample_value: Any
+
+
+class DiscoverResponse(BaseModel):
+    """Response body for GET /connectors/{id}/fields/discover."""
+    fields: list[FieldDiscoveryItem]
+    record_count: int
+
+
+class QualysSchemaField(BaseModel):
+    """A single Qualys CSAM target field with identity flag."""
+    field: str
+    is_identity: bool
+
+
+class QualysSchemaResponse(BaseModel):
+    """Response for GET /qualys/schema — full list of Qualys target fields."""
+    fields: list[QualysSchemaField]
+
+
+class BatchReplaceRequest(BaseModel):
+    """Request body for PUT /connectors/{id}/mappings — replaces all mappings atomically."""
+    mappings: list[FieldMappingCreate]
+
+
+class BatchReplaceResponse(BaseModel):
+    """Response for PUT /connectors/{id}/mappings."""
+    replaced: int
+    is_valid_mappings: bool
+    validation_errors: list[str]

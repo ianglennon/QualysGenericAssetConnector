@@ -4,10 +4,33 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.qualys_config import QualysConfig
 from app.schemas.qualys import QualysConfigCreate, QualysConfigResponse
+from app.schemas.field_mapping import QualysSchemaField, QualysSchemaResponse
 from app.services.credential_crypto import get_crypto
 from app.core.security import require_role
 
 router = APIRouter(prefix="/qualys", tags=["qualys"])
+
+# ---------------------------------------------------------------------------
+# Qualys CSAM target field constants
+# Derived from qualys_formatter.identity_mappings (lines 87-99)
+# ---------------------------------------------------------------------------
+_IDENTITY_FIELDS = frozenset({
+    "qualysAssetId", "sourceNativeKey", "instanceUuid", "instanceUuidSource",
+    "hostName", "netBiosName", "fqdn", "macAddress", "ipAddress",
+    "serialNumber", "hardwareUuid", "networkUuid",
+})
+# NOTE: instanceUuidSource appears in qualys_formatter.identity_mappings but NOT in
+# validation.py IDENTITY_ATTRIBUTES (which has 11 fields). This is a pre-existing
+# discrepancy. The schema endpoint uses the formatter as the authoritative source. A
+# mapping targeting instanceUuidSource will show is_identity=true here but will NOT
+# make is_valid_mappings=true. Track in Phase 9 or a follow-up.
+
+# Core-only fields: keys from qualys_formatter.core_mappings minus those already
+# in _IDENTITY_FIELDS (hostName, netBiosName, fqdn overlap — identity wins).
+_CORE_ONLY_FIELDS = frozenset({
+    "lastLoggedOnUser", "operatingSystem", "address", "dnsName",
+    "isContainer", "domain", "osVersion", "osArchitecture", "domainRole",
+})
 
 
 def _to_response(config: QualysConfig) -> QualysConfigResponse:
@@ -78,3 +101,18 @@ def get_qualys_config(
             },
         )
     return _to_response(config)
+
+
+@router.get("/schema", response_model=QualysSchemaResponse)
+def get_qualys_schema(_user=Depends(require_role("admin", "operator"))):
+    """Return all Qualys CSAM target fields with is_identity flags.
+
+    Identity fields are surfaced at the top of the visual canvas field panel
+    and must be present for is_valid_mappings=true. Core-only fields follow.
+    Total: 21 fields (12 identity + 9 core-only).
+    """
+    fields = (
+        [QualysSchemaField(field=f, is_identity=True) for f in sorted(_IDENTITY_FIELDS)]
+        + [QualysSchemaField(field=f, is_identity=False) for f in sorted(_CORE_ONLY_FIELDS)]
+    )
+    return QualysSchemaResponse(fields=fields)

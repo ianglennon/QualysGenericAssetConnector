@@ -40,20 +40,27 @@ def client():
         os.remove(db_path)
 
 
+def _ensure_user(email: str, password: str, role: UserRole) -> None:
+    """Create the test user if it doesn't already exist (idempotent)."""
+    from app.models.user import User
+    db = SessionLocal()
+    try:
+        if not db.query(User).filter(User.email == email).first():
+            create_user(db, email, password, role)
+    finally:
+        db.close()
+
+
 @pytest.fixture(scope="module")
 def admin_token(client):
-    db = SessionLocal()
-    create_user(db, "fd_admin@test.com", "AdminPass12!", UserRole.admin)
-    db.close()
+    _ensure_user("fd_admin@test.com", "AdminPass12!", UserRole.admin)
     resp = client.post("/api/v1/auth/login", json={"email": "fd_admin@test.com", "password": "AdminPass12!"})
     return resp.json()["access_token"]
 
 
 @pytest.fixture(scope="module")
 def operator_token(client):
-    db = SessionLocal()
-    create_user(db, "fd_op@test.com", "OperatorPass12!", UserRole.operator)
-    db.close()
+    _ensure_user("fd_op@test.com", "OperatorPass12!", UserRole.operator)
     resp = client.post("/api/v1/auth/login", json={"email": "fd_op@test.com", "password": "OperatorPass12!"})
     return resp.json()["access_token"]
 

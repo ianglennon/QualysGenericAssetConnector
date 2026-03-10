@@ -3,6 +3,8 @@ import React from 'react'
 import { render, screen } from '@testing-library/react'
 import { SourcePanelNode } from './SourcePanelNode'
 import { TargetPanelNode } from './TargetPanelNode'
+import { applyConnect, isValidConnection } from './MappingCanvas'
+import type { Edge, Connection } from '@xyflow/react'
 
 // These stubs are RED until Plans 02 and 03 implement the components.
 // They define the behavioral contracts upfront.
@@ -53,7 +55,7 @@ vi.mock('@xyflow/react', () => ({
   getSmoothStepPath: () => ['M0,0', 50, 50],
   Background: () => null,
   BackgroundVariant: { Dots: 'dots' },
-  addEdge: vi.fn((edge, edges) => [...edges, edge]),
+  addEdge: vi.fn((edge: Connection, edges: Edge[]) => [...edges, edge as Edge]),
 }))
 
 const mockSourceFields = [
@@ -199,4 +201,79 @@ describe('MappingCanvas', () => {
   it.todo('renders canvas shell without crashing')
   it.todo('linked/unlinked separator shows correct count after connection is added')
   it.todo('breaking a connection returns fields to unlinked zone')
+})
+
+describe('connection logic', () => {
+  it('applyConnect adds edge with mappingType=direct', () => {
+    const connection: Connection = {
+      source: 'source-panel',
+      target: 'target-panel',
+      sourceHandle: 'address.city',
+      targetHandle: 'address',
+    }
+    const result = applyConnect(connection, [])
+    expect(result).toHaveLength(1)
+    expect((result[0] as any).data?.mappingType).toBe('direct')
+  })
+
+  it('applyConnect replaces existing edge from same source handle', () => {
+    const existing: Edge = {
+      id: '1',
+      source: 'source-panel',
+      target: 'target-panel',
+      sourceHandle: 'hostname',
+      targetHandle: 'name',
+      data: { mappingType: 'direct' },
+    }
+    const connection: Connection = {
+      source: 'source-panel',
+      target: 'target-panel',
+      sourceHandle: 'hostname',
+      targetHandle: 'address',
+    }
+    const result = applyConnect(connection, [existing])
+    expect(result).toHaveLength(1)
+    expect((result[0] as any).data?.mappingType).toBe('direct')
+    expect(result[0].targetHandle).toBe('address')
+  })
+
+  it('applyConnect replaces existing edge to same target handle', () => {
+    const existing: Edge = {
+      id: '2',
+      source: 'source-panel',
+      target: 'target-panel',
+      sourceHandle: 'hostname',
+      targetHandle: 'address',
+      data: { mappingType: 'direct' },
+    }
+    const connection: Connection = {
+      source: 'source-panel',
+      target: 'target-panel',
+      sourceHandle: 'address.city',
+      targetHandle: 'address',
+    }
+    const result = applyConnect(connection, [existing])
+    expect(result).toHaveLength(1)
+    expect(result[0].sourceHandle).toBe('address.city')
+  })
+
+  it('isValidConnection returns false for self-loop (source === target)', () => {
+    const connection: Connection = {
+      source: 'source-panel',
+      target: 'source-panel',
+      sourceHandle: 'hostname',
+      targetHandle: 'hostname',
+    }
+    expect(isValidConnection(connection)).toBe(false)
+  })
+
+  it('isValidConnection returns true for valid source→target connection', () => {
+    const connection: Connection = {
+      source: 'source-panel',
+      target: 'target-panel',
+      sourceHandle: 'hostname',
+      targetHandle: 'name',
+    }
+    expect(isValidConnection(connection)).toBe(true)
+  })
 })

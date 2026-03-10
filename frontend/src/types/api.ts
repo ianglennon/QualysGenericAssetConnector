@@ -5,14 +5,14 @@ export interface ApiError {
 }
 
 // Field Mapping Types
-export type MappingType = 'direct' | 'static' | 'conditional'
+export type MappingType = 'direct' | 'static' | 'conditional'         // canvas-side short names
+export type MappingTypeAPI = 'direct_copy' | 'static_default' | 'conditional'  // API-side type strings
 
 export interface ConditionRule {
-  field: string
-  operator: string
-  value: any
-  then_value: any
-  else_value?: any
+  operator: 'equals' | 'not_equals' | 'contains' | 'starts_with' | 'ends_with' | 'regex' | 'in_list'
+  source_field: string   // the locked source field path
+  target_value: string   // the match value the operator compares against
+  value: string          // output value when condition matches
 }
 
 export interface FieldMapping {
@@ -20,9 +20,10 @@ export interface FieldMapping {
   connector_id: string
   source_field: string
   target_field: string
-  mapping_type: MappingType
+  mapping_type: MappingTypeAPI
   static_value?: string
   conditions?: ConditionRule[]
+  fallback?: string
   order: number
   created_at: string
 }
@@ -31,9 +32,10 @@ export interface FieldMappingCreate {
   connector_id: string
   source_field?: string
   target_field: string
-  mapping_type: MappingType
+  mapping_type: MappingTypeAPI   // use API type strings when calling the API
   static_value?: string
   conditions?: ConditionRule[]
+  fallback?: string              // optional fallback for conditional
   order?: number
 }
 

@@ -9,8 +9,10 @@ class ConditionalOperator(str, enum.Enum):
     equals = "equals"
     not_equals = "not_equals"
     contains = "contains"
-    regex = "regex"
-    in_list = "in_list"
+    starts_with = "starts_with"   # string prefix match
+    ends_with = "ends_with"       # string suffix match
+    regex = "regex"               # keep — existing data may use it
+    in_list = "in_list"           # keep — existing data may use it
 
 
 class ConditionRule(BaseModel):

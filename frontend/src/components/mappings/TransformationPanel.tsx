@@ -18,7 +18,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Plus, Trash2, GripVertical } from 'lucide-react'
-import type { FieldMapping, FieldMappingCreate, MappingType } from '@/types/api'
+import type { FieldMapping, FieldMappingCreate, MappingType, MappingTypeAPI } from '@/types/api'
+import { canvasTypeToAPI } from '@/types/canvas'
 
 interface TransformationPanelProps {
   mappings: FieldMapping[]
@@ -51,20 +52,20 @@ export const TransformationPanel = ({
       connector_id: '', // Will be set by parent
       source_field: mappingType === 'direct' ? sourceField : undefined,
       target_field: targetField,
-      mapping_type: mappingType,
+      mapping_type: canvasTypeToAPI(mappingType),
       static_value: mappingType === 'static' ? staticValue : undefined,
       conditions:
         mappingType === 'conditional'
           ? [
               {
-                field: conditionField,
-                operator: conditionOperator,
-                value: conditionValue,
-                then_value: conditionThenValue,
-                else_value: conditionElseValue || undefined,
+                operator: conditionOperator as 'equals' | 'not_equals' | 'contains' | 'starts_with' | 'ends_with' | 'regex' | 'in_list',
+                source_field: conditionField,
+                target_value: conditionValue,
+                value: conditionThenValue,
               },
             ]
           : undefined,
+      fallback: mappingType === 'conditional' && conditionElseValue ? conditionElseValue : undefined,
       order: mappings.length,
     }
 
@@ -85,11 +86,11 @@ export const TransformationPanel = ({
     setConditionElseValue('')
   }
 
-  const getMappingTypeLabel = (type: MappingType): string => {
+  const getMappingTypeLabel = (type: MappingTypeAPI): string => {
     switch (type) {
-      case 'direct':
+      case 'direct_copy':
         return 'Direct Copy'
-      case 'static':
+      case 'static_default':
         return 'Static Value'
       case 'conditional':
         return 'Conditional'
@@ -281,8 +282,8 @@ export const TransformationPanel = ({
                 </div>
                 {mapping.conditions && mapping.conditions.length > 0 && (
                   <div className="text-xs text-muted-foreground">
-                    {mapping.conditions[0].field} {mapping.conditions[0].operator}{' '}
-                    {mapping.conditions[0].value}
+                    {mapping.conditions[0].source_field} {mapping.conditions[0].operator}{' '}
+                    {mapping.conditions[0].target_value}
                   </div>
                 )}
               </div>

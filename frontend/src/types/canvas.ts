@@ -1,7 +1,31 @@
-import type { MappingType } from './api'
+// Canvas-side type (short names for display)
+export type MappingTypeUI = 'direct' | 'static' | 'conditional'
+// API-side type (matches backend schema exactly)
+export type MappingTypeAPI = 'direct_copy' | 'static_default' | 'conditional'
+// StaticValue type selector
+export type StaticValueType = 'string' | 'number' | 'boolean'
 
-// Re-export for convenience — canvas code imports from canvas.ts not api.ts
-export type { MappingType }
+// Type translation functions
+export function canvasTypeToAPI(t: MappingTypeUI): MappingTypeAPI {
+  if (t === 'direct') return 'direct_copy'
+  if (t === 'static') return 'static_default'
+  return 'conditional'
+}
+
+export function apiTypeToCanvas(t: MappingTypeAPI | string): MappingTypeUI {
+  if (t === 'direct_copy') return 'direct'
+  if (t === 'static_default') return 'static'
+  if (t === 'conditional') return 'conditional'
+  return 'direct'  // safe fallback for unknown values
+}
+
+// Condition rule shape matching backend ConditionRule exactly
+export interface CanvasConditionRule {
+  operator: 'equals' | 'not_equals' | 'contains' | 'starts_with' | 'ends_with' | 'regex' | 'in_list'
+  source_field: string  // locked — same as edge.sourceHandle
+  target_value: string  // match value
+  value: string         // output when condition matches
+}
 
 // GET /connectors/{id}/fields/discover response
 export interface FieldDiscoveryItem {
@@ -31,7 +55,7 @@ export interface QualysSchemaResponse {
 export interface DraftMapping {
   sourceField: string   // FieldDiscoveryItem.path
   targetField: string   // QualysSchemaField.field
-  mappingType: MappingType  // defaults to 'direct'
+  mappingType: MappingTypeUI  // defaults to 'direct'
 }
 
 // Node data shapes for React Flow custom nodes
@@ -48,5 +72,9 @@ export interface TargetPanelData {
 // Edge data shape for MappingEdge custom edge
 // Index signature required by @xyflow/react EdgeBase<Record<string, unknown>> constraint
 export interface MappingEdgeData extends Record<string, unknown> {
-  mappingType: MappingType
+  mappingType: MappingTypeUI
+  staticValue?: string | number | boolean
+  valueType?: StaticValueType
+  conditions?: CanvasConditionRule[]
+  fallback?: string
 }

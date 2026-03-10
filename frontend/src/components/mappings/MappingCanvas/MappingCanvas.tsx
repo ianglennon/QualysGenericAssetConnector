@@ -1,18 +1,23 @@
 import '@xyflow/react/dist/style.css'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
   BackgroundVariant,
   useNodesState,
   useEdgesState,
+  addEdge,
+  type Connection,
+  type Edge,
+  type Node,
 } from '@xyflow/react'
-import type { Node, Edge } from '@xyflow/react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDiscoverFields } from '@/hooks/queries/useDiscoverFields'
 import { useQualysSchema } from '@/hooks/queries/useQualysSchema'
 import { SourcePanelNode } from './SourcePanelNode'
 import { TargetPanelNode } from './TargetPanelNode'
+import { MappingEdge } from './MappingEdge'
+import { DashedConnectionLine } from './DashedConnectionLine'
 import type { SourcePanelData, TargetPanelData } from '@/types/canvas'
 
 // nodeTypes and edgeTypes MUST be defined at module level — not inside component
@@ -22,7 +27,28 @@ const nodeTypes = {
   targetPanel: TargetPanelNode,
 }
 
-const edgeTypes = {} // MappingEdge added in Plan 03
+const edgeTypes = {
+  mapping: MappingEdge,
+}
+
+// Pure helper for onConnect — exported for unit testing
+export function applyConnect(connection: Connection, currentEdges: Edge[]): Edge[] {
+  // Replace any existing edge from this source OR to this target (one-to-one enforcement)
+  const filtered = currentEdges.filter(
+    e => e.source !== connection.source && e.target !== connection.target
+  )
+  return addEdge(
+    { ...connection, type: 'mapping', data: { mappingType: 'direct' } },
+    filtered
+  )
+}
+
+// Pure helper for isValidConnection — exported for unit testing
+// Accepts Connection | Edge per IsValidConnection<Edge> constraint
+export function isValidConnection(connection: Connection | Edge): boolean {
+  // Only block self-loops; onConnect handles replacement for duplicate source/target
+  return connection.source !== connection.target
+}
 
 interface MappingCanvasProps {
   connectorId: string
@@ -70,7 +96,14 @@ export function MappingCanvas({ connectorId }: MappingCanvasProps) {
   ]
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
-  const [edges, , onEdgesChange] = useEdgesState<Edge>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      setEdges(eds => applyConnect(connection, eds))
+    },
+    [setEdges]
+  )
 
   // Update node widths when container resizes
   useEffect(() => {
@@ -136,6 +169,10 @@ export function MappingCanvas({ connectorId }: MappingCanvasProps) {
         edgeTypes={edgeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onConnect={onConnect}
+        isValidConnection={isValidConnection}
+        connectionLineComponent={DashedConnectionLine}
+        defaultEdgeOptions={{ type: 'mapping' }}
         panOnDrag={false}
         panOnScroll={false}
         zoomOnScroll={false}

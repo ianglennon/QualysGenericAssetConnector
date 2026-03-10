@@ -131,9 +131,9 @@ def test_discover_502(client, admin_token, connector_id):
 
     assert resp.status_code == 502
     body = resp.json()
-    # Matches error format: {"detail": {"error_code": ..., "error_message": ..., "context": {}}}
-    detail = body.get("detail", body)
-    error_code = detail.get("error_code") or detail.get("code")
+    # Actual error format from make_error: {"error": {"code": ..., "message": ..., "details": {}}}
+    # The http_exception_handler returns the structured dict directly as the response body.
+    error_code = body.get("error", {}).get("code")
     assert error_code == "SOURCE_UNREACHABLE"
 
 

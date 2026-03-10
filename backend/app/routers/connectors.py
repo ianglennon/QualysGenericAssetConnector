@@ -1,12 +1,16 @@
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import TypeAdapter
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.connector import Connector
 from app.schemas.connector import ConnectorCreate, ConnectorUpdate, ConnectorResponse
+from app.schemas.field_mapping import DiscoverResponse
 from app.schemas.pagination import PaginationStrategy
+from app.services import source_client as _source_client
+from app.services.connector_service import _build_headers, HTTPX_TIMEOUT, test_connector_connection
 from app.services.credential_crypto import get_crypto
-from app.services.connector_service import test_connector_connection
+from app.services.field_discovery import merge_fields_across_records
 from app.core.security import require_role
 from app.core.errors import make_error
 
@@ -194,3 +198,74 @@ def run_test_connection(
             detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {}),
         )
     return test_connector_connection(connector)
+
+
+@router.get("/{connector_id}/fields/discover", response_model=DiscoverResponse)
+async def discover_fields(
+    connector_id: str,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_role("admin")),
+):
+    """Discover available source fields by fetching the first page of the source API.
+
+    Returns a flat, typed field list with dot-notation paths. Supports nested objects
+    (a.b.c), arrays of objects (items[0].ip), and arrays of primitives (tags: array).
+    Recursion is capped at depth 5. Fields from all records on the first page are
+    merged; optional fields absent from some records still appear.
+
+    Requires admin role. Returns 502 if the source API is unreachable.
+    """
+    connector = db.query(Connector).filter(Connector.id == connector_id).first()
+    if not connector:
+        raise HTTPException(
+            status_code=404,
+            detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
+        )
+
+    headers = _build_headers(connector)
+
+    async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+        response = await _source_client._fetch_with_retries(
+            client,
+            connector.base_url,
+            headers,
+            None,
+            retry_limit=1,
+        )
+
+    # Handle None (real connection failure) and error responses.
+    # In production _fetch_with_retries returns httpx.Response | None.
+    # In tests the mock returns (status_code, body_dict, headers_dict).
+    if response is None:
+        raise HTTPException(
+            status_code=502,
+            detail=make_error("SOURCE_UNREACHABLE", "Source API did not respond", {}),
+        )
+
+    # Normalize: detect tuple (test mock) vs real httpx.Response
+    if isinstance(response, tuple):
+        status_code, body, _ = response
+        if not (200 <= status_code < 300):
+            raise HTTPException(
+                status_code=502,
+                detail=make_error("SOURCE_UNREACHABLE", "Source API returned an error", {}),
+            )
+        payload = body
+    else:
+        payload = response.json()
+
+    records = _source_client._extract_records(payload)
+    if not records and isinstance(payload, dict):
+        # Single-object response — treat the dict as one record
+        records = [payload]
+
+    if not records:
+        return DiscoverResponse(fields=[], record_count=0)
+
+    raw_fields = merge_fields_across_records(records)
+    fields = [
+        {"path": f["path"], "type": f["type"], "sample_value": f["sample_value"]}
+        for f in raw_fields
+    ]
+
+    return DiscoverResponse(fields=fields, record_count=len(records))

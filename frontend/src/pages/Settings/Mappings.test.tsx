@@ -41,17 +41,6 @@ const staticEdgeUnconfigured: Edge<MappingEdgeData>[] = [
   },
 ]
 
-const staticEdgeConfigured: Edge<MappingEdgeData>[] = [
-  {
-    id: 'e1',
-    source: 'source-panel',
-    sourceHandle: 'hostname',
-    target: 'target-panel',
-    targetHandle: 'instanceUuidSource',
-    data: { mappingType: 'static', staticValue: 'hello' },
-  },
-]
-
 const conditionalEdgeUnconfigured: Edge<MappingEdgeData>[] = [
   {
     id: 'e1',

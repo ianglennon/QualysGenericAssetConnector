@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/select'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { MappingEditor } from '@/components/mappings/MappingEditor'
+import { MappingCanvas } from '@/components/mappings/MappingCanvas'
 import { useConnectors } from '@/hooks/queries/useConnectors'
 
 export default function Mappings() {
@@ -54,13 +54,13 @@ export default function Mappings() {
       {selectedConnectorId && (
         <Card>
           <CardHeader>
-            <CardTitle>Field Mapping Editor</CardTitle>
+            <CardTitle>Field Mapping Canvas</CardTitle>
             <CardDescription>
-              Map source fields to Qualys CSAM target fields using transformations
+              Drag from source fields on the left to Qualys target fields on the right to create mappings
             </CardDescription>
           </CardHeader>
           <CardContent className="h-[600px]">
-            <MappingEditor connectorId={selectedConnectorId} />
+            <MappingCanvas connectorId={selectedConnectorId} />
           </CardContent>
         </Card>
       )}

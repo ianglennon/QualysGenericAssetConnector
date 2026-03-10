@@ -1,7 +1,6 @@
 import { describe, it, vi, expect, beforeEach } from 'vitest'
 import React from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import type { Edge, EdgeProps } from '@xyflow/react'
 import type { MappingEdgeData } from '@/types/canvas'
 import type { MappingEdgeType } from './MappingEdge'

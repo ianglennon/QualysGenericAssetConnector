@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import {
   BaseEdge,
   EdgeLabelRenderer,
@@ -7,9 +7,13 @@ import {
   type Edge,
   type EdgeProps,
 } from '@xyflow/react'
-import type { MappingEdgeData } from '@/types/canvas'
+import type { MappingEdgeData, MappingTypeUI, StaticValueType, CanvasConditionRule } from '@/types/canvas'
+import { StaticValueEditor } from './StaticValueEditor'
+import { ConditionalEditor } from './ConditionalEditor'
 
 export type MappingEdgeType = Edge<MappingEdgeData, 'mapping'>
+
+const CYCLE: MappingTypeUI[] = ['direct', 'static', 'conditional']
 
 export function MappingEdge({
   id,
@@ -21,8 +25,11 @@ export function MappingEdge({
   targetPosition,
   data,
 }: EdgeProps<MappingEdgeType>) {
-  const { deleteElements } = useReactFlow()
+  const { deleteElements, setEdges, getEdge } = useReactFlow()
   const [hovered, setHovered] = useState(false)
+  const [editorOpen, setEditorOpen] = useState<'static' | 'conditional' | null>(null)
+  const badgeRef = useRef<HTMLSpanElement>(null)
+
   const [edgePath, labelX, labelY] = getSmoothStepPath({
     sourceX,
     sourceY,
@@ -31,6 +38,70 @@ export function MappingEdge({
     targetY,
     targetPosition,
   })
+
+  const mappingType = (data?.mappingType ?? 'direct') as MappingTypeUI
+
+  const isConfigured =
+    mappingType === 'direct' ||
+    (mappingType === 'static' && data?.staticValue !== undefined && data?.staticValue !== '') ||
+    (mappingType === 'conditional' && Array.isArray(data?.conditions) && (data.conditions as CanvasConditionRule[]).length > 0)
+
+  const cycleType = useCallback(() => {
+    const current = (data?.mappingType ?? 'direct') as MappingTypeUI
+    const next = CYCLE[(CYCLE.indexOf(current) + 1) % CYCLE.length]
+    setEdges((eds) =>
+      eds.map((e) =>
+        e.id === id
+          ? { ...e, data: { ...e.data, mappingType: next, staticValue: undefined, conditions: [], fallback: undefined } }
+          : e
+      )
+    )
+  }, [id, data?.mappingType, setEdges])
+
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      if (mappingType !== 'direct') {
+        setEditorOpen(mappingType)
+      }
+    },
+    [mappingType]
+  )
+
+  // Get sourceHandle for locking in editors
+  const sourceField = getEdge(id)?.sourceHandle ?? ''
+
+  const badgeClassName =
+    `px-2 py-0.5 text-xs rounded-full border font-medium cursor-pointer select-none ` +
+    (isConfigured && mappingType !== 'direct'
+      ? 'bg-primary/10 text-primary border-primary/30 font-semibold'
+      : 'bg-muted text-muted-foreground border-border')
+
+  const badgeLabel = `${mappingType}${isConfigured && mappingType !== 'direct' ? ' ✓' : ''}`
+
+  // StaticValueEditor save handler (called from MappingEdge — inside ReactFlow tree)
+  function handleStaticSave(value: string | number | boolean, valueType: StaticValueType) {
+    setEdges((eds) =>
+      eds.map((e) =>
+        e.id === id
+          ? { ...e, data: { ...e.data, staticValue: value, valueType } }
+          : e
+      )
+    )
+    setEditorOpen(null)
+  }
+
+  // ConditionalEditor save handler
+  function handleConditionalSave(conditions: CanvasConditionRule[], fallback: string | undefined) {
+    setEdges((eds) =>
+      eds.map((e) =>
+        e.id === id
+          ? { ...e, data: { ...e.data, conditions, fallback } }
+          : e
+      )
+    )
+    setEditorOpen(null)
+  }
 
   return (
     <>
@@ -50,10 +121,16 @@ export function MappingEdge({
           onMouseEnter={() => setHovered(true)}
           onMouseLeave={() => setHovered(false)}
         >
-          {/* Type badge — display only in Phase 8, clickable in Phase 9 */}
-          <span className="px-2 py-0.5 text-xs rounded-full bg-muted border border-border font-medium text-muted-foreground">
-            {data?.mappingType ?? 'direct'}
+          {/* Type badge — left-click cycles, right-click opens editor */}
+          <span
+            ref={badgeRef}
+            className={badgeClassName}
+            onClick={cycleType}
+            onContextMenu={handleContextMenu}
+          >
+            {badgeLabel}
           </span>
+
           {/* × button — only visible on hover */}
           {hovered && (
             <button
@@ -66,6 +143,32 @@ export function MappingEdge({
           )}
         </div>
       </EdgeLabelRenderer>
+
+      {/* StaticValueEditor — anchored to badge */}
+      {editorOpen === 'static' && (
+        <StaticValueEditor
+          open={editorOpen === 'static'}
+          onClose={() => setEditorOpen(null)}
+          anchorRef={badgeRef}
+          sourceField={sourceField}
+          initialValue={data?.staticValue as string | number | boolean | undefined}
+          initialType={data?.valueType as StaticValueType | undefined}
+          onSave={handleStaticSave}
+          onCancel={() => setEditorOpen(null)}
+        />
+      )}
+
+      {/* ConditionalEditor */}
+      {editorOpen === 'conditional' && (
+        <ConditionalEditor
+          open={editorOpen === 'conditional'}
+          sourceField={sourceField}
+          initialConditions={(data?.conditions as CanvasConditionRule[]) ?? []}
+          initialFallback={data?.fallback as string | undefined}
+          onSave={handleConditionalSave}
+          onCancel={() => setEditorOpen(null)}
+        />
+      )}
     </>
   )
 }

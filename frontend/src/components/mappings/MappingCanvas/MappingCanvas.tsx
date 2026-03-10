@@ -55,7 +55,7 @@ interface MappingCanvasProps {
 }
 
 export function MappingCanvas({ connectorId }: MappingCanvasProps) {
-  const { data: discoverData, isLoading: loadingFields } = useDiscoverFields(connectorId)
+  const { data: discoverData, isLoading: loadingFields, isError: fieldsError } = useDiscoverFields(connectorId)
   const { data: schemaData, isLoading: loadingSchema } = useQualysSchema()
 
   const containerRef = useRef<HTMLDivElement>(null)
@@ -156,6 +156,19 @@ export function MappingCanvas({ connectorId }: MappingCanvasProps) {
         <Skeleton className="flex-1 h-full rounded-lg" />
         <Skeleton className="w-32 h-full rounded-lg" />
         <Skeleton className="flex-1 h-full rounded-lg" />
+      </div>
+    )
+  }
+
+  if (fieldsError) {
+    return (
+      <div className="w-full h-full flex items-center justify-center text-center text-muted-foreground p-8">
+        <div>
+          <p className="font-medium">Could not discover source fields</p>
+          <p className="text-sm mt-1">
+            The connector's source API is unreachable. Verify the connector's base URL and credentials are correct, then try again.
+          </p>
+        </div>
       </div>
     )
   }

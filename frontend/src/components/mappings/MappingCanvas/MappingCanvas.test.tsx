@@ -3,7 +3,7 @@ import React from 'react'
 import { render, screen } from '@testing-library/react'
 import { SourcePanelNode } from './SourcePanelNode'
 import { TargetPanelNode } from './TargetPanelNode'
-import { applyConnect, isValidConnection } from './MappingCanvas'
+import { applyConnect, isValidConnection, MappingCanvas } from './MappingCanvas'
 import type { Edge, Connection } from '@xyflow/react'
 
 // These stubs are RED until Plans 02 and 03 implement the components.
@@ -20,6 +20,32 @@ vi.mock('@/hooks/queries/useDiscoverFields', () => ({
     },
     isLoading: false,
     isError: false,
+  })),
+}))
+
+const mockSavedMappings = [
+  {
+    id: 'mapping-1',
+    connector_id: 'conn-1',
+    source_field: 'hostname',
+    target_field: 'instanceUuidSource',
+    mapping_type: 'direct_copy',
+    static_value: null,
+    conditions: null,
+    fallback: null,
+    order: 0,
+    created_at: '2026-01-01T00:00:00Z',
+  },
+]
+
+vi.mock('@/hooks/queries/useMappings', () => ({
+  useMappings: vi.fn(() => ({
+    data: mockSavedMappings,
+    isLoading: false,
+  })),
+  useBatchReplaceMappings: vi.fn(() => ({
+    mutateAsync: vi.fn(),
+    isPending: false,
   })),
 }))
 
@@ -201,6 +227,15 @@ describe('MappingCanvas', () => {
   it.todo('renders canvas shell without crashing')
   it.todo('linked/unlinked separator shows correct count after connection is added')
   it.todo('breaking a connection returns fields to unlinked zone')
+
+  it('canvas-prepopulate: onEdgesSnapshot prop is called on render', () => {
+    const onEdgesSnapshot = vi.fn()
+    render(
+      <MappingCanvas connectorId="conn-1" onEdgesSnapshot={onEdgesSnapshot} />
+    )
+    // onEdgesSnapshot should be called (via useEffect on edges changes)
+    expect(onEdgesSnapshot).toHaveBeenCalled()
+  })
 })
 
 describe('connection logic', () => {

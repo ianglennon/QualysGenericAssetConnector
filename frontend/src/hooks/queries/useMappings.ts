@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
-import type { FieldMapping, FieldMappingCreate, PreviewResponse } from '@/types/api'
+import type { FieldMapping, FieldMappingCreate, PreviewResponse, BatchReplaceResponse } from '@/types/api'
 
 export const useMappings = (connectorId: string | undefined) => {
   return useQuery({
@@ -65,6 +65,24 @@ export const useDeleteMapping = () => {
       await apiClient.delete(
         `/connectors/${params.connectorId}/mappings/${params.mappingId}`
       )
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['mappings', variables.connectorId] })
+      queryClient.invalidateQueries({ queryKey: ['connectors'] })
+    },
+  })
+}
+
+export const useBatchReplaceMappings = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (params: { connectorId: string; mappings: FieldMappingCreate[] }) => {
+      const { data } = await apiClient.put<BatchReplaceResponse>(
+        `/connectors/${params.connectorId}/mappings`,
+        { mappings: params.mappings }
+      )
+      return data
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['mappings', variables.connectorId] })

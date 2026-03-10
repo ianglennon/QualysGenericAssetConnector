@@ -14,11 +14,20 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { useDiscoverFields } from '@/hooks/queries/useDiscoverFields'
 import { useQualysSchema } from '@/hooks/queries/useQualysSchema'
+import { useMappings } from '@/hooks/queries/useMappings'
 import { SourcePanelNode } from './SourcePanelNode'
 import { TargetPanelNode } from './TargetPanelNode'
 import { MappingEdge } from './MappingEdge'
 import { DashedConnectionLine } from './DashedConnectionLine'
-import type { SourcePanelData, TargetPanelData } from '@/types/canvas'
+import type { SourcePanelData, TargetPanelData, MappingEdgeData, CanvasConditionRule, StaticValueType } from '@/types/canvas'
+import { apiTypeToCanvas } from '@/types/canvas'
+
+// Helper: infer StaticValueType from a string value
+function inferValueType(v: string | null | undefined): StaticValueType {
+  if (v === 'true' || v === 'false') return 'boolean'
+  if (v !== null && v !== undefined && v !== '' && !isNaN(Number(v))) return 'number'
+  return 'string'
+}
 
 // nodeTypes and edgeTypes MUST be defined at module level — not inside component
 // (React Flow re-renders without flickering when these are stable references)
@@ -52,11 +61,13 @@ export function isValidConnection(connection: Connection | Edge): boolean {
 
 interface MappingCanvasProps {
   connectorId: string
+  onEdgesSnapshot?: (edges: Edge<MappingEdgeData>[]) => void
 }
 
-export function MappingCanvas({ connectorId }: MappingCanvasProps) {
+export function MappingCanvas({ connectorId, onEdgesSnapshot }: MappingCanvasProps) {
   const { data: discoverData, isLoading: loadingFields, isError: fieldsError } = useDiscoverFields(connectorId)
   const { data: schemaData, isLoading: loadingSchema } = useQualysSchema()
+  const { data: savedMappings } = useMappings(connectorId)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(800)
@@ -97,6 +108,41 @@ export function MappingCanvas({ connectorId }: MappingCanvasProps) {
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+
+  const seededConnectorRef = useRef<string | null>(null)
+
+  // Reset seededConnectorRef when connectorId changes (re-seed from new connector's saved mappings)
+  useEffect(() => {
+    seededConnectorRef.current = null
+    setEdges([])
+  }, [connectorId, setEdges])
+
+  // Seed edges from saved mappings — only once per connectorId (seededConnectorRef guard)
+  useEffect(() => {
+    if (!savedMappings || seededConnectorRef.current === connectorId) return
+    seededConnectorRef.current = connectorId
+    const seededEdges: Edge<MappingEdgeData>[] = savedMappings.map((m, i) => ({
+      id: `seeded-${m.id ?? i}`,
+      source: 'source-panel',
+      sourceHandle: m.source_field ?? '',
+      target: 'target-panel',
+      targetHandle: m.target_field,
+      type: 'mapping',
+      data: {
+        mappingType: apiTypeToCanvas(m.mapping_type),
+        staticValue: m.static_value ?? undefined,
+        valueType: inferValueType(m.static_value),
+        conditions: (m.conditions ?? []) as CanvasConditionRule[],
+        fallback: m.fallback ?? undefined,
+      } satisfies MappingEdgeData,
+    }))
+    setEdges(seededEdges)
+  }, [savedMappings, connectorId, setEdges])
+
+  // Notify parent of edge changes
+  useEffect(() => {
+    onEdgesSnapshot?.(edges as Edge<MappingEdgeData>[])
+  }, [edges, onEdgesSnapshot])
 
   const onConnect = useCallback(
     (connection: Connection) => {

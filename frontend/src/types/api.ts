@@ -39,6 +39,12 @@ export interface FieldMappingCreate {
   order?: number
 }
 
+export interface BatchReplaceResponse {
+  replaced: number
+  is_valid_mappings: boolean
+  validation_errors: string[]
+}
+
 export interface PreviewRequest {
   connector_id: string
   sample_data: any

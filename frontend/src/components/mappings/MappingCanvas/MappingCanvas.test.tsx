@@ -71,25 +71,33 @@ vi.mock('@/hooks/queries/useQualysSchema', () => ({
 }))
 
 // Stub ReactFlow to avoid canvas complexity in unit tests
-vi.mock('@xyflow/react', () => ({
-  ReactFlow: ({ children }: { children?: React.ReactNode }) => (
-    <div data-testid="react-flow">{children}</div>
-  ),
-  ReactFlowProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-  useNodesState: () => [[], vi.fn(), vi.fn()],
-  useEdgesState: () => [[], vi.fn(), vi.fn()],
-  useReactFlow: () => ({ deleteElements: vi.fn() }),
-  useUpdateNodeInternals: () => vi.fn(),
-  useNodeId: () => 'source-panel',
-  Handle: ({ id }: { id?: string }) => <div data-testid="handle" data-id={id} />,
-  Position: { Left: 'left', Right: 'right' },
-  BaseEdge: () => <path />,
-  EdgeLabelRenderer: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-  getSmoothStepPath: () => ['M0,0', 50, 50],
-  Background: () => null,
-  BackgroundVariant: { Dots: 'dots' },
-  addEdge: vi.fn((edge: Connection, edges: Edge[]) => [...edges, edge as Edge]),
-}))
+// useEdgesState uses actual React.useState so setEdges calls update state and
+// trigger the onEdgesSnapshot useEffect inside MappingCanvas.
+vi.mock('@xyflow/react', async () => {
+  const { useState } = await import('react')
+  return {
+    ReactFlow: ({ children }: { children?: React.ReactNode }) => (
+      <div data-testid="react-flow">{children}</div>
+    ),
+    ReactFlowProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+    useNodesState: () => [[], vi.fn(), vi.fn()],
+    useEdgesState: (init: any) => {
+      const [edges, setEdges] = useState(init ?? [])
+      return [edges, setEdges, vi.fn()]
+    },
+    useReactFlow: () => ({ deleteElements: vi.fn() }),
+    useUpdateNodeInternals: () => vi.fn(),
+    useNodeId: () => 'source-panel',
+    Handle: ({ id }: { id?: string }) => <div data-testid="handle" data-id={id} />,
+    Position: { Left: 'left', Right: 'right' },
+    BaseEdge: () => <path />,
+    EdgeLabelRenderer: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+    getSmoothStepPath: () => ['M0,0', 50, 50],
+    Background: () => null,
+    BackgroundVariant: { Dots: 'dots' },
+    addEdge: vi.fn((edge: Connection, edges: Edge[]) => [...edges, edge as Edge]),
+  }
+})
 
 const mockSourceFields = [
   { path: 'address.city', type: 'string', sample_value: 'Austin' },
@@ -231,9 +239,41 @@ describe('TargetPanelNode', () => {
 })
 
 describe('MappingCanvas', () => {
-  it.todo('renders canvas shell without crashing')
-  it.todo('linked/unlinked separator shows correct count after connection is added')
-  it.todo('breaking a connection returns fields to unlinked zone')
+  it('renders canvas shell without crashing', () => {
+    render(<MappingCanvas connectorId="conn-1" endpointId="ep-1" />, { wrapper: makeWrapper() })
+    expect(screen.getByTestId('react-flow')).toBeInTheDocument()
+  })
+
+  it('linked/unlinked separator shows correct count after connection is added', async () => {
+    const onEdgesSnapshot = vi.fn()
+    render(
+      <MappingCanvas connectorId="conn-1" endpointId="ep-1" onEdgesSnapshot={onEdgesSnapshot} />,
+      { wrapper: makeWrapper() }
+    )
+    await waitFor(() => {
+      const lastCall = onEdgesSnapshot.mock.calls[onEdgesSnapshot.mock.calls.length - 1]
+      expect(lastCall[0]).toHaveLength(1)
+    })
+    // Verify the seeded edge maps hostname -> instanceUuidSource
+    const lastEdges = onEdgesSnapshot.mock.calls[onEdgesSnapshot.mock.calls.length - 1][0]
+    expect(lastEdges[0].sourceHandle).toBe('hostname')
+    expect(lastEdges[0].targetHandle).toBe('instanceUuidSource')
+  })
+
+  it('breaking a connection returns fields to unlinked zone', async () => {
+    // Override to return no saved mappings (simulates all connections removed)
+    const { useEndpointMappings } = await import('@/hooks/queries/useEndpointMappings')
+    vi.mocked(useEndpointMappings).mockReturnValue({ data: [], isLoading: false } as any)
+
+    const onEdgesSnapshot = vi.fn()
+    render(
+      <MappingCanvas connectorId="conn-1" endpointId="ep-1" onEdgesSnapshot={onEdgesSnapshot} />,
+      { wrapper: makeWrapper() }
+    )
+    await waitFor(() => expect(onEdgesSnapshot).toHaveBeenCalled())
+    const lastEdges = onEdgesSnapshot.mock.calls[onEdgesSnapshot.mock.calls.length - 1][0]
+    expect(lastEdges).toHaveLength(0)
+  })
 
   it('canvas-prepopulate: onEdgesSnapshot prop is called on render', () => {
     const onEdgesSnapshot = vi.fn()

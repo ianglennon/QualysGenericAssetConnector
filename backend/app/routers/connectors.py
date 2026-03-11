@@ -30,6 +30,7 @@ def _to_response(connector: Connector) -> ConnectorResponse:
         api_key_name=connector.api_key_name,
         source_retry_limit=connector.source_retry_limit,
         qualys_retry_limit=connector.qualys_retry_limit,
+        has_valid_endpoints=bool(connector.is_valid_mappings),
         created_at=connector.created_at,
         updated_at=connector.updated_at,
     )

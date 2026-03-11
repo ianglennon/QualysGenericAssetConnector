@@ -13,6 +13,22 @@ class RunFailureSummary(BaseModel):
         from_attributes = True
 
 
+class EndpointRunLogResponse(BaseModel):
+    id: str
+    run_id: str
+    endpoint_id: str
+    execution_order: int
+    records_fetched: int
+    records_submitted: int
+    records_failed: int
+    status: str
+    error_message: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 class RunHistoryResponse(BaseModel):
     id: str
     connector_id: str
@@ -27,6 +43,7 @@ class RunHistoryResponse(BaseModel):
     error_message: Optional[str]
     error_context: Optional[dict]
     failures: list[RunFailureSummary] = []
+    endpoint_logs: list[EndpointRunLogResponse] = []
 
     class Config:
         from_attributes = True

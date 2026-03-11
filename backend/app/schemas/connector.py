@@ -58,6 +58,7 @@ class ConnectorResponse(BaseModel):
     api_key_name: Optional[str]  # plaintext header name, not a secret
     source_retry_limit: Optional[int]
     qualys_retry_limit: Optional[int]
+    has_valid_endpoints: bool
     created_at: datetime
     updated_at: datetime
 

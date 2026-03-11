@@ -13,7 +13,6 @@ from app.schemas.field_mapping import (
     FieldMappingCreate,
     FieldMappingResponse,
 )
-from app.services.validation import validate_connector_mappings
 from app.services.preview import preview_mappings
 import uuid
 
@@ -27,7 +26,7 @@ def create_mapping(
     db: Session = Depends(get_db),
     _: str = Depends(require_role("admin"))
 ):
-    """Create a field mapping and validate connector."""
+    """Create a field mapping."""
     # Create mapping
     new_mapping = FieldMapping(
         id=str(uuid.uuid4()),
@@ -41,13 +40,6 @@ def create_mapping(
         order=mapping.order,
     )
     db.add(new_mapping)
-    
-    # Validate and update connector
-    is_valid, errors = validate_connector_mappings(connector_id, db)
-    connector = db.query(Connector).filter_by(id=connector_id).first()
-    if connector:
-        connector.is_valid_mappings = is_valid
-    
     db.commit()
     db.refresh(new_mapping)
     return new_mapping
@@ -73,8 +65,7 @@ def batch_replace_mappings(
     """Atomically replace all field mappings for a connector.
 
     Deletes all existing mappings and inserts the provided set in a single
-    transaction. Validates the new mapping set and updates is_valid_mappings
-    on the connector before committing.
+    transaction. Validity is checked on demand at run trigger time (not here).
     """
     connector = db.query(Connector).filter(Connector.id == connector_id).first()
     if not connector:
@@ -98,19 +89,13 @@ def batch_replace_mappings(
             order=m.order,
         ))
 
-    # Flush pending changes so the new rows are visible to the validation query
-    # (session has autoflush=False so explicit flush is required before SELECT)
-    db.flush()
-    is_valid, errors = validate_connector_mappings(connector_id, db)
-    connector.is_valid_mappings = is_valid
-
     # Single commit — if any prior step raised, nothing is persisted
     db.commit()
 
     return BatchReplaceResponse(
         replaced=len(payload.mappings),
-        is_valid_mappings=is_valid,
-        validation_errors=errors,
+        is_valid_mappings=False,
+        validation_errors=[],
     )
 
 
@@ -126,7 +111,7 @@ def update_mapping(
     db_mapping = db.query(FieldMapping).filter_by(id=mapping_id, connector_id=connector_id).first()
     if not db_mapping:
         raise HTTPException(status_code=404, detail="Mapping not found")
-    
+
     # Update fields
     db_mapping.mapping_type = mapping.mapping_type
     db_mapping.target_field = mapping.target_field
@@ -135,13 +120,7 @@ def update_mapping(
     db_mapping.conditions = mapping.conditions
     db_mapping.fallback = mapping.fallback
     db_mapping.order = mapping.order
-    
-    # Revalidate connector
-    is_valid, _ = validate_connector_mappings(connector_id, db)
-    connector = db.query(Connector).filter_by(id=connector_id).first()
-    if connector:
-        connector.is_valid_mappings = is_valid
-    
+
     db.commit()
     db.refresh(db_mapping)
     return db_mapping
@@ -154,19 +133,12 @@ def delete_mapping(
     db: Session = Depends(get_db),
     _: str = Depends(require_role("admin"))
 ):
-    """Delete a mapping and revalidate connector."""
+    """Delete a mapping."""
     mapping = db.query(FieldMapping).filter_by(id=mapping_id, connector_id=connector_id).first()
     if not mapping:
         raise HTTPException(status_code=404, detail="Mapping not found")
-    
+
     db.delete(mapping)
-    
-    # Revalidate
-    is_valid, _ = validate_connector_mappings(connector_id, db)
-    connector = db.query(Connector).filter_by(id=connector_id).first()
-    if connector:
-        connector.is_valid_mappings = is_valid
-    
     db.commit()
     return {"status": "deleted"}
 

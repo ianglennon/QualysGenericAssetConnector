@@ -58,3 +58,29 @@ class RunFailure(Base):
     record_identifier: Mapped[str] = mapped_column(String, nullable=False)
     error_message: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class EndpointRunLog(Base):
+    __tablename__ = "endpoint_run_logs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    run_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("run_history.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    endpoint_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("connector_endpoints.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    execution_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    records_fetched: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    records_submitted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    records_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # String (not Enum) — consistent with project convention for new models
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

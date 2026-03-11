@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { useConnector } from '@/hooks/queries/useConnectors'
+import { EndpointList } from '@/components/connectors/EndpointList'
 
 export function ConnectorDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -85,6 +86,8 @@ export function ConnectorDetailPage() {
             </div>
           </div>
         </div>
+
+        <EndpointList connectorId={connector.id} />
       </div>
     </PageContainer>
   )

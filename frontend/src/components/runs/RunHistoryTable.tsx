@@ -59,10 +59,10 @@ export const RunHistoryTable = ({ onRowClick }: RunHistoryTableProps) => {
     }
   }
 
-  const formatDuration = (startedAt: string, endedAt?: string) => {
-    if (!endedAt) return '-'
+  const formatDuration = (startedAt: string, finishedAt?: string) => {
+    if (!finishedAt) return '-'
     const start = new Date(startedAt)
-    const end = new Date(endedAt)
+    const end = new Date(finishedAt)
     const durationMs = end.getTime() - start.getTime()
     const seconds = Math.floor(durationMs / 1000)
     const minutes = Math.floor(seconds / 60)
@@ -180,7 +180,7 @@ export const RunHistoryTable = ({ onRowClick }: RunHistoryTableProps) => {
                     {format(new Date(run.started_at), 'MMM d, yyyy HH:mm')}
                   </TableCell>
                   <TableCell>
-                    {formatDuration(run.started_at, run.ended_at)}
+                    {formatDuration(run.started_at, run.finished_at)}
                   </TableCell>
                   <TableCell className="text-right">{run.records_fetched}</TableCell>
                   <TableCell className="text-right">{run.records_submitted}</TableCell>

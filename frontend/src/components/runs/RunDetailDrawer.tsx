@@ -38,9 +38,9 @@ export const RunDetailDrawer = ({ run, isOpen, onClose }: RunDetailDrawerProps) 
   }
 
   const formatDuration = () => {
-    if (!run.ended_at) return 'In progress'
+    if (!run.finished_at) return 'In progress'
     const start = new Date(run.started_at)
-    const end = new Date(run.ended_at)
+    const end = new Date(run.finished_at)
     const durationMs = end.getTime() - start.getTime()
     const seconds = Math.floor(durationMs / 1000)
     const minutes = Math.floor(seconds / 60)

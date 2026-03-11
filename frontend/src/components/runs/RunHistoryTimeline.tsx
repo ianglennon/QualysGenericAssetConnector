@@ -106,10 +106,10 @@ export const RunHistoryTimeline = ({ onRunClick }: RunHistoryTimelineProps) => {
                       </div>
                       <div className="text-sm text-muted-foreground">
                         {format(parseISO(run.started_at), 'h:mm a')}
-                        {run.ended_at && (
+                        {run.finished_at && (
                           <span className="ml-2">
                             • Duration: {Math.round(
-                              (new Date(run.ended_at).getTime() -
+                              (new Date(run.finished_at).getTime() -
                                 new Date(run.started_at).getTime()) /
                                 1000
                             )}s

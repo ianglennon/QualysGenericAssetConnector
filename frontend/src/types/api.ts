@@ -132,7 +132,7 @@ export interface Connector {
   has_password: boolean
   has_api_key: boolean
   api_key_name?: string
-  pagination_strategies: PaginationStrategy[]
+  has_valid_endpoints: boolean
   source_retry_limit?: number
   qualys_retry_limit?: number
   created_at: string
@@ -153,7 +153,6 @@ export interface ConnectorCreate {
   test_path?: string
   auth_method: AuthMethod
   credentials?: ConnectorCredentials
-  pagination_strategies: PaginationStrategy[]
   source_retry_limit?: number
   qualys_retry_limit?: number
 }
@@ -174,7 +173,7 @@ export interface RunHistory {
   connector_name: string
   status: RunStatus
   started_at: string
-  ended_at?: string
+  finished_at?: string
   records_fetched: number
   records_submitted: number
   records_failed: number

@@ -3,7 +3,7 @@ import Login from '@/pages/Login'
 import Dashboard from '@/pages/Dashboard'
 import { ConnectorListPage } from '@/pages/Connectors/ConnectorListPage'
 import { ConnectorDetailPage } from '@/pages/Connectors/ConnectorDetailPage'
-import Mappings from '@/pages/Settings/Mappings'
+import { EndpointMappingsPage } from '@/pages/Connectors/EndpointMappingsPage'
 import { QualysConfig } from '@/pages/Settings/QualysConfig'
 import { TransformRules } from '@/pages/Settings/TransformRules'
 import { UserProfile } from '@/pages/Settings/UserProfile'
@@ -55,6 +55,10 @@ export const router = createBrowserRouter([
             element: <ConnectorDetailPage />,
           },
           {
+            path: 'connectors/:connectorId/endpoints/:endpointId/mappings',
+            element: <EndpointMappingsPage />,
+          },
+          {
             path: 'runs',
             element: <RunHistoryPage />,
           },
@@ -76,11 +80,7 @@ export const router = createBrowserRouter([
             children: [
               {
                 index: true,
-                element: <Navigate to="/settings/mappings" replace />,
-              },
-              {
-                path: 'mappings',
-                element: <Mappings />,
+                element: <Navigate to="/settings/qualys" replace />,
               },
               {
                 path: 'qualys',

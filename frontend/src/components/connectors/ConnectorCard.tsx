@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { MoreVertical, Play, Pencil, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -20,14 +21,15 @@ interface ConnectorCardProps {
 
 export function ConnectorCard({ connector, onEdit, onDelete, onTriggerSync }: ConnectorCardProps) {
   const { user } = useAuth()
+  const navigate = useNavigate()
 
   const isAdmin = user?.role === 'admin'
 
   return (
-    <Card>
+    <Card className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => navigate(`/connectors/${connector.id}`)}>
       <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-2">
         <CardTitle className="text-lg font-medium">{connector.name}</CardTitle>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           {onTriggerSync && (
             <Button
               variant="ghost"

@@ -66,15 +66,6 @@ export function ConnectorDetailPage() {
             </div>
           </div>
 
-          <div>
-            <h3 className="text-sm font-medium text-muted-foreground">Pagination Strategies</h3>
-            <p className="text-sm">
-              {connector.pagination_strategies.length === 0
-                ? 'No pagination (single page)'
-                : `${connector.pagination_strategies.length} strateg${connector.pagination_strategies.length === 1 ? 'y' : 'ies'} configured`}
-            </p>
-          </div>
-
           <div className="grid grid-cols-2 gap-4 pt-4 border-t">
             <div>
               <h3 className="text-sm font-medium text-muted-foreground">Created</h3>

@@ -89,12 +89,12 @@ def _resolve_pagination_strategies(
 ) -> list[PaginationStrategy]:
     if pagination_strategies is not None:
         return pagination_strategies
-    # TODO Phase 11: read pagination_config from ConnectorEndpoint
     return []
 
 
 async def fetch_all_pages(
     connector: Connector,
+    url: str,
     pagination_strategies: list[PaginationStrategy] | None = None,
     retry_limit: int | None = None,
     client: httpx.AsyncClient | None = None,
@@ -117,7 +117,7 @@ async def fetch_all_pages(
         if strategy is None:
             response = await _fetch_with_retries(
                 client,
-                connector.base_url,
+                url,
                 headers,
                 None,
                 effective_retry_limit,
@@ -131,7 +131,7 @@ async def fetch_all_pages(
         if isinstance(strategy, CursorPagination):
             return await _fetch_cursor_pages(
                 client,
-                connector.base_url,
+                url,
                 headers,
                 strategy,
                 effective_retry_limit,
@@ -139,7 +139,7 @@ async def fetch_all_pages(
         if isinstance(strategy, OffsetLimitPagination):
             return await _fetch_offset_limit_pages(
                 client,
-                connector.base_url,
+                url,
                 headers,
                 strategy,
                 effective_retry_limit,
@@ -147,14 +147,14 @@ async def fetch_all_pages(
         if isinstance(strategy, LinkHeaderPagination):
             return await _fetch_link_header_pages(
                 client,
-                connector.base_url,
+                url,
                 headers,
                 effective_retry_limit,
             )
         if isinstance(strategy, PageNumberPagination):
             return await _fetch_page_number_pages(
                 client,
-                connector.base_url,
+                url,
                 headers,
                 strategy,
                 effective_retry_limit,

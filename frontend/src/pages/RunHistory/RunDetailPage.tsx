@@ -8,13 +8,13 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ArrowLeft, AlertCircle } from 'lucide-react'
 import { useRun } from '@/hooks/queries/useRuns'
 import { format } from 'date-fns'
-import type { RunStatus } from '@/types/api'
+import type { EndpointRunLog } from '@/types/api'
 
 export default function RunDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: run, isLoading } = useRun(id)
 
-  const getStatusBadge = (status: RunStatus) => {
+  const getStatusBadge = (status: string) => {
     switch (status) {
       case 'success':
         return <Badge className="bg-green-600">Success</Badge>
@@ -158,6 +158,53 @@ export default function RunDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          {run.endpoint_logs && run.endpoint_logs.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="text-lg font-semibold">Endpoint Breakdown</h3>
+              {[...run.endpoint_logs]
+                .sort((a: EndpointRunLog, b: EndpointRunLog) => a.execution_order - b.execution_order)
+                .map((log: EndpointRunLog) => (
+                  <Card key={log.id}>
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-base">
+                          {log.endpoint_name || log.endpoint_id}
+                        </CardTitle>
+                        {getStatusBadge(log.status)}
+                      </div>
+                      <CardDescription>
+                        {log.endpoint_path || 'Unknown path'}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="grid grid-cols-3 gap-4 p-3 border rounded-lg bg-muted/50">
+                        <div className="text-center">
+                          <div className="text-xl font-bold">{log.records_fetched}</div>
+                          <div className="text-xs text-muted-foreground">Records Fetched</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-xl font-bold text-green-600">{log.records_submitted}</div>
+                          <div className="text-xs text-muted-foreground">Records Submitted</div>
+                        </div>
+                        <div className="text-center">
+                          <div className={`text-xl font-bold ${log.records_failed > 0 ? 'text-destructive' : ''}`}>
+                            {log.records_failed}
+                          </div>
+                          <div className="text-xs text-muted-foreground">Records Failed</div>
+                        </div>
+                      </div>
+                      {log.error_message && (
+                        <Alert variant="destructive">
+                          <AlertCircle className="h-4 w-4" />
+                          <AlertDescription>{log.error_message}</AlertDescription>
+                        </Alert>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="request" className="space-y-4">

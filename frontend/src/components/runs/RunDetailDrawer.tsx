@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/drawer'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ExternalLink, AlertCircle } from 'lucide-react'
-import type { RunHistory, RunStatus } from '@/types/api'
+import type { RunHistory } from '@/types/api'
 import { format } from 'date-fns'
 import { Link } from 'react-router-dom'
 
@@ -24,7 +24,7 @@ interface RunDetailDrawerProps {
 export const RunDetailDrawer = ({ run, isOpen, onClose }: RunDetailDrawerProps) => {
   if (!run) return null
 
-  const getStatusBadge = (status: RunStatus) => {
+  const getStatusBadge = (status: string) => {
     switch (status) {
       case 'success':
         return <Badge className="bg-green-600">Success</Badge>
@@ -113,6 +113,19 @@ export const RunDetailDrawer = ({ run, isOpen, onClose }: RunDetailDrawerProps) 
                   {run.error_message}
                 </AlertDescription>
               </Alert>
+            )}
+
+            {/* Endpoint Results */}
+            {run.endpoint_logs && run.endpoint_logs.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-sm font-medium text-muted-foreground">Endpoint Results</div>
+                {run.endpoint_logs.map((log) => (
+                  <div key={log.id} className="flex items-center justify-between text-sm">
+                    <span className="truncate mr-2">{log.endpoint_name || log.endpoint_id}</span>
+                    {getStatusBadge(log.status)}
+                  </div>
+                ))}
+              </div>
             )}
 
             {/* View Full Details Link */}

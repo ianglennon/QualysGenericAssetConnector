@@ -35,7 +35,8 @@ export function ConnectorCard({ connector, onEdit, onDelete, onTriggerSync }: Co
               variant="ghost"
               size="sm"
               onClick={() => onTriggerSync(connector)}
-              title="Trigger Sync"
+              disabled={!connector.has_valid_endpoints}
+              title={connector.has_valid_endpoints ? 'Trigger Sync' : 'Connector has invalid endpoint mappings'}
             >
               <Play className="h-4 w-4" />
             </Button>
@@ -78,6 +79,11 @@ export function ConnectorCard({ connector, onEdit, onDelete, onTriggerSync }: Co
             <Badge variant={connector.has_token || connector.has_username || connector.has_api_key ? 'default' : 'secondary'}>
               {connector.has_token || connector.has_username || connector.has_api_key ? 'Configured' : 'No Auth'}
             </Badge>
+            {connector.has_valid_endpoints ? (
+              <Badge variant="outline" className="border-green-600 text-green-600">Ready</Badge>
+            ) : (
+              <Badge variant="outline" className="border-amber-500 text-amber-600">Invalid</Badge>
+            )}
           </div>
         </div>
       </CardContent>

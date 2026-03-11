@@ -36,7 +36,12 @@ export function ConnectorDetailPage() {
         <div className="flex gap-2">
           <Button variant="outline">Edit</Button>
           <Button variant="outline">Test</Button>
-          <Button>Trigger Sync</Button>
+          <Button
+            disabled={!connector?.has_valid_endpoints}
+            title={connector?.has_valid_endpoints ? 'Trigger Sync' : 'Connector has invalid endpoint mappings'}
+          >
+            Trigger Sync
+          </Button>
         </div>
       }
     >

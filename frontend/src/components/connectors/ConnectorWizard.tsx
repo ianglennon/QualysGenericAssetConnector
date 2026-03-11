@@ -13,10 +13,9 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Badge } from '@/components/ui/badge'
 import { Loader2, CheckCircle2, XCircle } from 'lucide-react'
 import { useTestConnection } from '@/hooks/queries/useConnectors'
-import type { ConnectorCreate, Connector, AuthMethod, PaginationStrategy } from '@/types/api'
+import type { ConnectorCreate, Connector, AuthMethod } from '@/types/api'
 
 const connectorSchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -30,7 +29,6 @@ const connectorSchema = z.object({
     api_key_name: z.string().optional(),
     api_key: z.string().optional(),
   }).optional(),
-  pagination_strategies: z.array(z.any()).default([]),
 })
 
 type ConnectorFormData = z.infer<typeof connectorSchema>
@@ -41,7 +39,7 @@ interface ConnectorWizardProps {
   isSubmitting?: boolean
 }
 
-const steps = ['basic', 'auth', 'pagination', 'review'] as const
+const steps = ['basic', 'auth', 'review'] as const
 type Step = typeof steps[number]
 
 export function ConnectorWizard({ connector, onSubmit, isSubmitting = false }: ConnectorWizardProps) {
@@ -59,14 +57,12 @@ export function ConnectorWizard({ connector, onSubmit, isSubmitting = false }: C
       test_path: connector.test_path || '',
       auth_method: connector.auth_method,
       credentials: {},
-      pagination_strategies: connector.pagination_strategies || [],
     } : {
       name: '',
       base_url: '',
       test_path: '',
       auth_method: 'bearer_token',
       credentials: {},
-      pagination_strategies: [],
     },
     mode: 'onChange',
   })
@@ -108,7 +104,7 @@ export function ConnectorWizard({ connector, onSubmit, isSubmitting = false }: C
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <Tabs value={currentStep} onValueChange={(value) => setCurrentStep(value as Step)}>
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid w-full grid-cols-3">
           {steps.map((step, index) => (
             <TabsTrigger
               key={step}
@@ -271,43 +267,13 @@ export function ConnectorWizard({ connector, onSubmit, isSubmitting = false }: C
             <Button type="button" variant="outline" onClick={() => setCurrentStep('basic')}>
               Previous
             </Button>
-            <Button type="button" onClick={() => setCurrentStep('pagination')}>
-              Next
-            </Button>
-          </div>
-        </TabsContent>
-
-        {/* Step 3: Pagination */}
-        <TabsContent value="pagination" className="space-y-4">
-          <div className="rounded-lg border p-4">
-            <h3 className="text-sm font-medium mb-2">Pagination Strategies</h3>
-            <p className="text-xs text-muted-foreground mb-4">
-              Configure how the connector handles paginated API responses. Multiple strategies can be configured.
-            </p>
-            {(form.watch('pagination_strategies') || []).length === 0 ? (
-              <p className="text-sm text-muted-foreground">No pagination strategies configured (single-page response)</p>
-            ) : (
-              <div className="space-y-2">
-                {(form.watch('pagination_strategies') as PaginationStrategy[] || []).map((strategy, index) => (
-                  <div key={index} className="flex items-center justify-between rounded border p-2">
-                    <Badge variant="outline">{strategy.strategy_type}</Badge>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="flex justify-between">
-            <Button type="button" variant="outline" onClick={() => setCurrentStep('auth')}>
-              Previous
-            </Button>
             <Button type="button" onClick={() => setCurrentStep('review')}>
               Next
             </Button>
           </div>
         </TabsContent>
 
-        {/* Step 4: Review */}
+        {/* Step 3: Review */}
         <TabsContent value="review" className="space-y-4">
           <div className="rounded-lg border p-4 space-y-4">
             <h3 className="text-lg font-medium">Review Connector Configuration</h3>
@@ -333,17 +299,10 @@ export function ConnectorWizard({ connector, onSubmit, isSubmitting = false }: C
               <p className="text-sm font-medium text-muted-foreground">Authentication</p>
               <p className="text-sm capitalize">{form.watch('auth_method').replace('_', ' ')}</p>
             </div>
-
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">Pagination</p>
-              <p className="text-sm">
-                {(form.watch('pagination_strategies') || []).length} strateg{(form.watch('pagination_strategies') || []).length === 1 ? 'y' : 'ies'} configured
-              </p>
-            </div>
           </div>
 
           <div className="flex justify-between">
-            <Button type="button" variant="outline" onClick={() => setCurrentStep('pagination')}>
+            <Button type="button" variant="outline" onClick={() => setCurrentStep('auth')}>
               Previous
             </Button>
             <Button type="submit" disabled={isSubmitting}>

@@ -1,143 +1,189 @@
-"""Tests for field mapping routes: deprecated 410 responses and is_valid_mappings correctness."""
+"""Tests for field mapping routes: deprecated 410 responses and is_valid_mappings correctness.
+
+Uses in-memory SQLite with function-scoped setup/teardown.
+Auth is bypassed by overriding get_current_user with a mock admin user.
+"""
 
 import os
 import sys
 import uuid
+
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_field_mappings.db")
+os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from app.main import create_app
-from app.db.session import SessionLocal
-from app.services.auth_service import create_user
-from app.models.user import UserRole
+from app.main import app as fastapi_app
+from app.db.session import get_db
+from app.core.security import get_current_user
+from app.db.base import Base
+
+# Import all models so Base.metadata is fully populated before create_all
+from app.models.connector import Connector
+from app.models.connector_endpoint import ConnectorEndpoint
+from app.models.user import User, UserRole
+from app.models.run_history import RunHistory, RunFailure
+from app.models.field_mapping import FieldMapping
+from app.models.qualys_config import QualysConfig
+
+SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
 
-@pytest.fixture(scope="module")
-def client():
-    db_path = os.path.abspath("test_field_mappings.db")
-    if os.path.exists(db_path):
-        os.remove(db_path)
-    app = create_app()
-    with TestClient(app) as c:
-        yield c
-    if os.path.exists(db_path):
-        os.remove(db_path)
+class _MockAdminUser:
+    """Minimal user object that satisfies require_role role check."""
+    role = UserRole.admin
+    id = "mock-admin-id"
+    email = "admin@test.local"
+    is_active = True
 
 
-@pytest.fixture(scope="module")
-def admin_token(client):
-    db = SessionLocal()
-    create_user(db, "fm_admin@test.com", "AdminPass12!", UserRole.admin)
-    db.close()
-    resp = client.post("/api/v1/auth/login", json={"email": "fm_admin@test.com", "password": "AdminPass12!"})
-    return resp.json()["access_token"]
-
-
-@pytest.fixture(scope="module")
-def connector_id(client, admin_token):
-    """Create a test connector and return its ID."""
-    resp = client.post(
-        "/api/v1/connectors/",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={
-            "name": "Field Mapping Test Connector",
-            "base_url": "https://fm-test.example.com",
-            "auth_method": "bearer_token",
-        },
+@pytest.fixture(autouse=True)
+def setup_db():
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
-    assert resp.status_code == 201
-    return resp.json()["id"]
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    Base.metadata.create_all(bind=engine)
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    def override_get_current_user():
+        return _MockAdminUser()
+
+    fastapi_app.dependency_overrides[get_db] = override_get_db
+    fastapi_app.dependency_overrides[get_current_user] = override_get_current_user
+
+    yield TestingSessionLocal
+
+    Base.metadata.drop_all(bind=engine)
+    fastapi_app.dependency_overrides.clear()
 
 
-@pytest.fixture(scope="module")
-def endpoint_id(client, admin_token, connector_id):
-    """Create a test endpoint and return its ID."""
-    resp = client.post(
-        f"/api/v1/connectors/{connector_id}/endpoints",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={"name": "Test Endpoint", "path": "/devices", "is_enabled": True},
-    )
-    assert resp.status_code == 201
-    return resp.json()["id"]
+def _seed_connector(session_factory) -> str:
+    """Insert a Connector row directly and return its ID."""
+    conn_id = str(uuid.uuid4())
+    db = session_factory()
+    try:
+        connector = Connector(
+            id=conn_id,
+            name="Field Mapping Test Connector",
+            base_url="https://fm-test.example.com",
+            auth_method="bearer_token",
+        )
+        db.add(connector)
+        db.commit()
+    finally:
+        db.close()
+    return conn_id
+
+
+def _seed_endpoint(session_factory, connector_id: str) -> str:
+    """Insert a ConnectorEndpoint row and return its ID."""
+    ep_id = str(uuid.uuid4())
+    db = session_factory()
+    try:
+        endpoint = ConnectorEndpoint(
+            id=ep_id,
+            connector_id=connector_id,
+            name="Test Endpoint",
+            path="/devices",
+            is_enabled=True,
+            display_order=0,
+        )
+        db.add(endpoint)
+        db.commit()
+    finally:
+        db.close()
+    return ep_id
 
 
 # ---------------------------------------------------------------------------
-# Deprecated route tests (RED phase — these FAIL before Task 2 implementation)
+# Deprecated route tests
 # ---------------------------------------------------------------------------
 
-def test_deprecated_create_mapping_returns_410(client, admin_token, connector_id):
+def test_deprecated_create_mapping_returns_410(setup_db):
     """POST /connectors/{id}/mappings should return 410 Gone with ROUTE_DEPRECATED error code."""
-    resp = client.post(
-        f"/api/v1/connectors/{connector_id}/mappings",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={
-            "mapping_type": "direct_copy",
-            "target_field": "hostName",
-            "source_field": "name",
-        },
-    )
+    conn_id = _seed_connector(setup_db)
+    with TestClient(fastapi_app) as client:
+        resp = client.post(
+            f"/api/v1/connectors/{conn_id}/mappings",
+            json={
+                "mapping_type": "direct_copy",
+                "target_field": "hostName",
+                "source_field": "name",
+            },
+        )
     assert resp.status_code == 410
     assert resp.json()["error"]["code"] == "ROUTE_DEPRECATED"
 
 
-def test_deprecated_list_mappings_returns_410(client, admin_token, connector_id):
+def test_deprecated_list_mappings_returns_410(setup_db):
     """GET /connectors/{id}/mappings should return 410 Gone with ROUTE_DEPRECATED error code."""
-    resp = client.get(
-        f"/api/v1/connectors/{connector_id}/mappings",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
+    conn_id = _seed_connector(setup_db)
+    with TestClient(fastapi_app) as client:
+        resp = client.get(f"/api/v1/connectors/{conn_id}/mappings")
     assert resp.status_code == 410
     assert resp.json()["error"]["code"] == "ROUTE_DEPRECATED"
 
 
-def test_deprecated_batch_replace_mappings_returns_410(client, admin_token, connector_id):
+def test_deprecated_batch_replace_mappings_returns_410(setup_db):
     """PUT /connectors/{id}/mappings should return 410 Gone with ROUTE_DEPRECATED error code."""
-    resp = client.put(
-        f"/api/v1/connectors/{connector_id}/mappings",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={"mappings": []},
-    )
+    conn_id = _seed_connector(setup_db)
+    with TestClient(fastapi_app) as client:
+        resp = client.put(
+            f"/api/v1/connectors/{conn_id}/mappings",
+            json={"mappings": []},
+        )
     assert resp.status_code == 410
     assert resp.json()["error"]["code"] == "ROUTE_DEPRECATED"
 
 
-def test_deprecated_update_mapping_returns_410(client, admin_token, connector_id):
+def test_deprecated_update_mapping_returns_410(setup_db):
     """PATCH /connectors/{id}/mappings/{mid} should return 410 Gone with ROUTE_DEPRECATED error code."""
+    conn_id = _seed_connector(setup_db)
     fake_id = str(uuid.uuid4())
-    resp = client.patch(
-        f"/api/v1/connectors/{connector_id}/mappings/{fake_id}",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={
-            "mapping_type": "direct_copy",
-            "target_field": "hostName",
-            "source_field": "name",
-        },
-    )
+    with TestClient(fastapi_app) as client:
+        resp = client.patch(
+            f"/api/v1/connectors/{conn_id}/mappings/{fake_id}",
+            json={
+                "mapping_type": "direct_copy",
+                "target_field": "hostName",
+                "source_field": "name",
+            },
+        )
     assert resp.status_code == 410
     assert resp.json()["error"]["code"] == "ROUTE_DEPRECATED"
 
 
-def test_deprecated_delete_mapping_returns_410(client, admin_token, connector_id):
+def test_deprecated_delete_mapping_returns_410(setup_db):
     """DELETE /connectors/{id}/mappings/{mid} should return 410 Gone with ROUTE_DEPRECATED error code."""
+    conn_id = _seed_connector(setup_db)
     fake_id = str(uuid.uuid4())
-    resp = client.delete(
-        f"/api/v1/connectors/{connector_id}/mappings/{fake_id}",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
+    with TestClient(fastapi_app) as client:
+        resp = client.delete(f"/api/v1/connectors/{conn_id}/mappings/{fake_id}")
     assert resp.status_code == 410
     assert resp.json()["error"]["code"] == "ROUTE_DEPRECATED"
 
 
-def test_deprecated_preview_mapping_returns_410(client, admin_token, connector_id):
+def test_deprecated_preview_mapping_returns_410(setup_db):
     """POST /connectors/{id}/mappings/preview should return 410 Gone with ROUTE_DEPRECATED error code."""
-    resp = client.post(
-        f"/api/v1/connectors/{connector_id}/mappings/preview",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={},
-    )
+    conn_id = _seed_connector(setup_db)
+    with TestClient(fastapi_app) as client:
+        resp = client.post(
+            f"/api/v1/connectors/{conn_id}/mappings/preview",
+            json={},
+        )
     assert resp.status_code == 410
     assert resp.json()["error"]["code"] == "ROUTE_DEPRECATED"
 
@@ -146,42 +192,57 @@ def test_deprecated_preview_mapping_returns_410(client, admin_token, connector_i
 # is_valid_mappings correctness test
 # ---------------------------------------------------------------------------
 
-def test_batch_replace_endpoint_mappings_returns_actual_is_valid(client, admin_token, connector_id, endpoint_id):
+def test_batch_replace_endpoint_mappings_returns_actual_is_valid(setup_db):
     """PUT /connectors/{id}/endpoints/{eid}/mappings returns is_valid_mappings reflecting
     actual validation state — not a hardcoded False.
 
     Step 1: Save empty mappings → no identity attribute → is_valid_mappings must be False.
     Step 2: Save a mapping with target_field=hostName (an identity attribute) → is_valid_mappings must be True.
     """
-    # Step 1: Empty mappings → endpoint has no identity attribute → invalid
-    resp_empty = client.put(
-        f"/api/v1/connectors/{connector_id}/endpoints/{endpoint_id}/mappings",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={"mappings": []},
-    )
-    assert resp_empty.status_code == 200
-    data_empty = resp_empty.json()
-    assert data_empty["is_valid_mappings"] is False, (
-        f"Expected False for empty mappings but got {data_empty['is_valid_mappings']}"
-    )
+    conn_id = _seed_connector(setup_db)
+    ep_id = _seed_endpoint(setup_db, conn_id)
 
-    # Step 2: Save mapping with identity target_field → valid
-    resp_valid = client.put(
-        f"/api/v1/connectors/{connector_id}/endpoints/{endpoint_id}/mappings",
-        headers={"Authorization": f"Bearer {admin_token}"},
-        json={
-            "mappings": [
-                {
-                    "mapping_type": "direct_copy",
-                    "target_field": "hostName",
-                    "source_field": "name",
-                    "order": 0,
-                }
-            ]
-        },
-    )
-    assert resp_valid.status_code == 200
-    data_valid = resp_valid.json()
-    assert data_valid["is_valid_mappings"] is True, (
-        f"Expected True for identity mapping but got {data_valid['is_valid_mappings']}"
-    )
+    with TestClient(fastapi_app) as client:
+        # Step 1: Empty mappings → endpoint has no identity attribute → invalid
+        resp_empty = client.put(
+            f"/api/v1/connectors/{conn_id}/endpoints/{ep_id}/mappings",
+            json={"mappings": []},
+        )
+        assert resp_empty.status_code == 200
+        data_empty = resp_empty.json()
+        assert data_empty["is_valid_mappings"] is False, (
+            f"Expected False for empty mappings but got {data_empty['is_valid_mappings']}"
+        )
+
+        # Step 2: Save mapping with identity target_field → valid
+        resp_valid = client.put(
+            f"/api/v1/connectors/{conn_id}/endpoints/{ep_id}/mappings",
+            json={
+                "mappings": [
+                    {
+                        "mapping_type": "direct_copy",
+                        "target_field": "hostName",
+                        "source_field": "name",
+                        "order": 0,
+                    }
+                ]
+            },
+        )
+        assert resp_valid.status_code == 200
+        data_valid = resp_valid.json()
+        assert data_valid["is_valid_mappings"] is True, (
+            f"Expected True for identity mapping but got {data_valid['is_valid_mappings']}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Deprecated connector-scoped discover route test
+# ---------------------------------------------------------------------------
+
+def test_deprecated_discover_fields_returns_410(setup_db):
+    """GET /connectors/{id}/fields/discover should return 410 Gone with ROUTE_DEPRECATED error code."""
+    conn_id = _seed_connector(setup_db)
+    with TestClient(fastapi_app) as client:
+        resp = client.get(f"/api/v1/connectors/{conn_id}/fields/discover")
+    assert resp.status_code == 410
+    assert resp.json()["error"]["code"] == "ROUTE_DEPRECATED"

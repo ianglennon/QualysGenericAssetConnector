@@ -15,6 +15,7 @@ from app.schemas.field_mapping import (
     FieldMappingResponse,
 )
 from app.services.preview import preview_mappings
+from app.services.validation import validate_endpoint_mappings
 import uuid
 
 router = APIRouter()
@@ -93,10 +94,13 @@ def batch_replace_endpoint_mappings(
     # Single commit — if any prior step raised, nothing is persisted
     db.commit()
 
+    is_valid, invalid_endpoints = validate_endpoint_mappings(connector_id, db)
+    validation_errors = [ep["name"] for ep in invalid_endpoints]
+
     return BatchReplaceResponse(
         replaced=len(payload.mappings),
-        is_valid_mappings=False,
-        validation_errors=[],
+        is_valid_mappings=is_valid,
+        validation_errors=validation_errors,
     )
 
 
@@ -114,21 +118,10 @@ def create_mapping(
     _: str = Depends(require_role("admin"))
 ):
     """Create a field mapping. DEPRECATED: use endpoint-scoped routes."""
-    # Create mapping
-    new_mapping = FieldMapping(
-        id=str(uuid.uuid4()),
-        mapping_type=mapping.mapping_type,
-        target_field=mapping.target_field,
-        source_field=mapping.source_field,
-        static_value=mapping.static_value,
-        conditions=mapping.conditions,
-        fallback=mapping.fallback,
-        order=mapping.order,
+    raise HTTPException(
+        status_code=410,
+        detail=make_error("ROUTE_DEPRECATED", "This route has been removed. Use endpoint-scoped routes: /connectors/{connector_id}/endpoints/{endpoint_id}/mappings"),
     )
-    db.add(new_mapping)
-    db.commit()
-    db.refresh(new_mapping)
-    return new_mapping
 
 
 # DEPRECATED: v1.1 connector-scoped route — remove after v1.2 migration
@@ -139,7 +132,10 @@ def list_mappings(
     _: str = Depends(require_role("admin", "operator"))
 ):
     """List all mappings for a connector. DEPRECATED: use endpoint-scoped routes."""
-    return []
+    raise HTTPException(
+        status_code=410,
+        detail=make_error("ROUTE_DEPRECATED", "This route has been removed. Use endpoint-scoped routes: /connectors/{connector_id}/endpoints/{endpoint_id}/mappings"),
+    )
 
 
 # DEPRECATED: v1.1 connector-scoped route — remove after v1.2 migration
@@ -151,17 +147,9 @@ def batch_replace_mappings(
     _admin=Depends(require_role("admin")),
 ):
     """Atomically replace all field mappings for a connector. DEPRECATED: use endpoint-scoped routes."""
-    connector = db.query(Connector).filter(Connector.id == connector_id).first()
-    if not connector:
-        raise HTTPException(
-            status_code=404,
-            detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
-        )
-
-    return BatchReplaceResponse(
-        replaced=0,
-        is_valid_mappings=False,
-        validation_errors=["DEPRECATED: use endpoint-scoped PUT route"],
+    raise HTTPException(
+        status_code=410,
+        detail=make_error("ROUTE_DEPRECATED", "This route has been removed. Use endpoint-scoped routes: /connectors/{connector_id}/endpoints/{endpoint_id}/mappings"),
     )
 
 
@@ -174,22 +162,10 @@ def update_mapping(
     _: str = Depends(require_role("admin"))
 ):
     """Update a field mapping. DEPRECATED: use endpoint-scoped routes."""
-    db_mapping = db.query(FieldMapping).filter_by(id=mapping_id).first()
-    if not db_mapping:
-        raise HTTPException(status_code=404, detail="Mapping not found")
-
-    # Update fields
-    db_mapping.mapping_type = mapping.mapping_type
-    db_mapping.target_field = mapping.target_field
-    db_mapping.source_field = mapping.source_field
-    db_mapping.static_value = mapping.static_value
-    db_mapping.conditions = mapping.conditions
-    db_mapping.fallback = mapping.fallback
-    db_mapping.order = mapping.order
-
-    db.commit()
-    db.refresh(db_mapping)
-    return db_mapping
+    raise HTTPException(
+        status_code=410,
+        detail=make_error("ROUTE_DEPRECATED", "This route has been removed. Use endpoint-scoped routes: /connectors/{connector_id}/endpoints/{endpoint_id}/mappings"),
+    )
 
 
 @router.delete("/connectors/{connector_id}/mappings/{mapping_id}")
@@ -200,13 +176,10 @@ def delete_mapping(
     _: str = Depends(require_role("admin"))
 ):
     """Delete a mapping. DEPRECATED: use endpoint-scoped routes."""
-    mapping = db.query(FieldMapping).filter_by(id=mapping_id).first()
-    if not mapping:
-        raise HTTPException(status_code=404, detail="Mapping not found")
-
-    db.delete(mapping)
-    db.commit()
-    return {"status": "deleted"}
+    raise HTTPException(
+        status_code=410,
+        detail=make_error("ROUTE_DEPRECATED", "This route has been removed. Use endpoint-scoped routes: /connectors/{connector_id}/endpoints/{endpoint_id}/mappings"),
+    )
 
 
 @router.post("/connectors/{connector_id}/mappings/preview")
@@ -215,5 +188,8 @@ async def preview_mapping_transform(
     db: Session = Depends(get_db),
     _: str = Depends(require_role("admin"))
 ):
-    """Preview mapping transformation on live sample."""
-    return await preview_mappings(connector_id, db)
+    """Preview mapping transformation on live sample. DEPRECATED: use endpoint-scoped routes."""
+    raise HTTPException(
+        status_code=410,
+        detail=make_error("ROUTE_DEPRECATED", "This route has been removed. Use endpoint-scoped routes: /connectors/{connector_id}/endpoints/{endpoint_id}/mappings"),
+    )

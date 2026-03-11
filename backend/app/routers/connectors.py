@@ -289,22 +289,8 @@ async def discover_fields(
     db: Session = Depends(get_db),
     _admin=Depends(require_role("admin")),
 ):
-    """Discover available source fields by fetching the first page of the source API.
-
-    DEPRECATED: use endpoint-scoped GET /connectors/{id}/endpoints/{endpoint_id}/fields/discover.
-
-    Returns a flat, typed field list with dot-notation paths. Supports nested objects
-    (a.b.c), arrays of objects (items[0].ip), and arrays of primitives (tags: array).
-    Recursion is capped at depth 5. Fields from all records on the first page are
-    merged; optional fields absent from some records still appear.
-
-    Requires admin role. Returns 502 if the source API is unreachable.
-    """
-    connector = db.query(Connector).filter(Connector.id == connector_id).first()
-    if not connector:
-        raise HTTPException(
-            status_code=404,
-            detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
-        )
-
-    return await _discover_fields_from_url(connector, connector.base_url)
+    """DEPRECATED: use endpoint-scoped GET /connectors/{id}/endpoints/{endpoint_id}/fields/discover."""
+    raise HTTPException(
+        status_code=410,
+        detail=make_error("ROUTE_DEPRECATED", "This route has been removed. Use GET /connectors/{connector_id}/endpoints/{endpoint_id}/fields/discover"),
+    )

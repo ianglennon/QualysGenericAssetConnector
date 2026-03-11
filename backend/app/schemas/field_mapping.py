@@ -95,7 +95,7 @@ class FieldMappingCreate(BaseModel):
 class FieldMappingResponse(BaseModel):
     """Schema for field mapping API responses."""
     id: str
-    connector_id: str
+    endpoint_id: str
     mapping_type: str
     target_field: str
     source_field: str | None = None

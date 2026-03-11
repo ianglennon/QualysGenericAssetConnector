@@ -17,6 +17,8 @@ class EndpointRunLogResponse(BaseModel):
     id: str
     run_id: str
     endpoint_id: str
+    endpoint_name: Optional[str] = None
+    endpoint_path: Optional[str] = None
     execution_order: int
     records_fetched: int
     records_submitted: int

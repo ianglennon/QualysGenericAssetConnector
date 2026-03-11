@@ -32,7 +32,27 @@ def _to_response(
     run: RunHistory,
     failures: list[RunFailure],
     endpoint_logs: list[EndpointRunLog] | None = None,
+    endpoint_lookup: dict[str, ConnectorEndpoint] | None = None,
 ) -> RunHistoryResponse:
+    ep_lookup = endpoint_lookup or {}
+
+    def _map_endpoint_log(log: EndpointRunLog) -> EndpointRunLogResponse:
+        ep = ep_lookup.get(log.endpoint_id)
+        return EndpointRunLogResponse(
+            id=log.id,
+            run_id=log.run_id,
+            endpoint_id=log.endpoint_id,
+            endpoint_name=ep.name if ep else None,
+            endpoint_path=ep.path if ep else None,
+            execution_order=log.execution_order,
+            records_fetched=log.records_fetched,
+            records_submitted=log.records_submitted,
+            records_failed=log.records_failed,
+            status=log.status,
+            error_message=log.error_message,
+            created_at=log.created_at,
+        )
+
     return RunHistoryResponse(
         id=run.id,
         connector_id=run.connector_id,
@@ -46,7 +66,7 @@ def _to_response(
         error_message=run.error_message,
         error_context=run.error_context,
         failures=_map_failures(failures),
-        endpoint_logs=[EndpointRunLogResponse.model_validate(log) for log in (endpoint_logs or [])],
+        endpoint_logs=[_map_endpoint_log(log) for log in (endpoint_logs or [])],
     )
 
 
@@ -133,7 +153,16 @@ def get_run(
         .all()
     )
 
-    response = _to_response(run, failures, endpoint_logs)
+    # Build endpoint lookup dict for name/path enrichment
+    endpoint_ids = [log.endpoint_id for log in endpoint_logs]
+    endpoints = (
+        db.query(ConnectorEndpoint)
+        .filter(ConnectorEndpoint.id.in_(endpoint_ids))
+        .all()
+    ) if endpoint_ids else []
+    endpoint_lookup = {ep.id: ep for ep in endpoints}
+
+    response = _to_response(run, failures, endpoint_logs, endpoint_lookup)
     response.connector_name = connector_name
     return response
 

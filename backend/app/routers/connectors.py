@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.connector import Connector
+from app.models.connector_endpoint import ConnectorEndpoint
 from app.schemas.connector import ConnectorCreate, ConnectorUpdate, ConnectorResponse
 from app.schemas.field_mapping import DiscoverResponse
 from app.services import source_client as _source_client
@@ -190,34 +191,14 @@ def run_test_connection(
     return test_connector_connection(connector)
 
 
-@router.get("/{connector_id}/fields/discover", response_model=DiscoverResponse)
-async def discover_fields(
-    connector_id: str,
-    db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
-):
-    """Discover available source fields by fetching the first page of the source API.
-
-    Returns a flat, typed field list with dot-notation paths. Supports nested objects
-    (a.b.c), arrays of objects (items[0].ip), and arrays of primitives (tags: array).
-    Recursion is capped at depth 5. Fields from all records on the first page are
-    merged; optional fields absent from some records still appear.
-
-    Requires admin role. Returns 502 if the source API is unreachable.
-    """
-    connector = db.query(Connector).filter(Connector.id == connector_id).first()
-    if not connector:
-        raise HTTPException(
-            status_code=404,
-            detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
-        )
-
+async def _discover_fields_from_url(connector: Connector, url: str) -> DiscoverResponse:
+    """Shared helper: fetch first page from url and return discovered fields."""
     headers = _build_headers(connector)
 
     async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
         response = await _source_client._fetch_with_retries(
             client,
-            connector.base_url,
+            url,
             headers,
             None,
             retry_limit=1,
@@ -259,3 +240,71 @@ async def discover_fields(
     ]
 
     return DiscoverResponse(fields=fields, record_count=len(records))
+
+
+@router.get("/{connector_id}/endpoints/{endpoint_id}/fields/discover", response_model=DiscoverResponse)
+async def discover_endpoint_fields(
+    connector_id: str,
+    endpoint_id: str,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_role("admin")),
+):
+    """Discover available source fields for a specific endpoint.
+
+    Fetches the first page of base_url + endpoint.path and returns a flat,
+    typed field list with dot-notation paths. Supports nested objects (a.b.c),
+    arrays of objects (items[0].ip), and arrays of primitives (tags: array).
+    Recursion is capped at depth 5.
+
+    Requires admin role. Returns 502 if the source API is unreachable.
+    """
+    connector = db.query(Connector).filter(Connector.id == connector_id).first()
+    if not connector:
+        raise HTTPException(
+            status_code=404,
+            detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
+        )
+
+    endpoint = (
+        db.query(ConnectorEndpoint)
+        .filter_by(id=endpoint_id, connector_id=connector_id)
+        .first()
+    )
+    if not endpoint:
+        raise HTTPException(
+            status_code=404,
+            detail=make_error("ENDPOINT_NOT_FOUND", "Endpoint not found", {"endpoint_id": endpoint_id}),
+        )
+
+    # Compose full URL: base_url + endpoint.path
+    url = connector.base_url.rstrip("/") + "/" + endpoint.path.lstrip("/")
+    return await _discover_fields_from_url(connector, url)
+
+
+# DEPRECATED: v1.1 connector-level discover route — remove after v1.2 migration
+# Use GET /connectors/{id}/endpoints/{endpoint_id}/fields/discover instead
+@router.get("/{connector_id}/fields/discover", response_model=DiscoverResponse)
+async def discover_fields(
+    connector_id: str,
+    db: Session = Depends(get_db),
+    _admin=Depends(require_role("admin")),
+):
+    """Discover available source fields by fetching the first page of the source API.
+
+    DEPRECATED: use endpoint-scoped GET /connectors/{id}/endpoints/{endpoint_id}/fields/discover.
+
+    Returns a flat, typed field list with dot-notation paths. Supports nested objects
+    (a.b.c), arrays of objects (items[0].ip), and arrays of primitives (tags: array).
+    Recursion is capped at depth 5. Fields from all records on the first page are
+    merged; optional fields absent from some records still appear.
+
+    Requires admin role. Returns 502 if the source API is unreachable.
+    """
+    connector = db.query(Connector).filter(Connector.id == connector_id).first()
+    if not connector:
+        raise HTTPException(
+            status_code=404,
+            detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
+        )
+
+    return await _discover_fields_from_url(connector, connector.base_url)

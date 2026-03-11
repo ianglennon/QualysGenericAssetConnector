@@ -7,9 +7,10 @@ from pydantic import TypeAdapter
 
 from app.db.session import SessionLocal
 from app.models.connector import Connector
+from app.models.connector_endpoint import ConnectorEndpoint
 from app.models.field_mapping import FieldMapping
 from app.models.qualys_config import QualysConfig
-from app.models.run_history import RunFailure, RunHistory, RunStatus
+from app.models.run_history import EndpointRunLog, RunFailure, RunHistory, RunStatus
 from app.schemas.field_mapping import FieldMappingRule
 from app.services.source_client import SourceFetchResult, fetch_all_pages
 from app.services.transform_engine import apply_mappings
@@ -72,18 +73,86 @@ def _mark_failed(
     db.commit()
 
 
-def _apply_partial_failure_context(run: RunHistory, source_result: SourceFetchResult, failure_count: int) -> None:
-    if source_result.partial:
-        run.error_type = "source_partial"
-        run.error_message = "Source fetch exhausted retries"
-        run.error_context = {
-            "pages_fetched": source_result.pages_fetched,
-            "records_fetched": source_result.records_fetched,
-        }
-    elif failure_count > 0:
-        run.error_type = "qualys_partial"
-        run.error_message = "Qualys returned per-record failures"
-        run.error_context = {"failed_records": failure_count}
+def _rollup_status(logs: list[EndpointRunLog]) -> RunStatus:
+    if not logs:
+        return RunStatus.failed
+    statuses = {log.status for log in logs}
+    if statuses == {"success"}:
+        return RunStatus.success
+    if statuses == {"failed"}:
+        return RunStatus.failed
+    return RunStatus.partial_success
+
+
+async def _run_endpoint(
+    db,
+    run: RunHistory,
+    connector: Connector,
+    endpoint: ConnectorEndpoint,
+    qualys_config,
+    client: httpx.AsyncClient,
+    idx: int,
+) -> EndpointRunLog:
+    records_fetched = 0
+    records_submitted = 0
+    records_failed = 0
+
+    try:
+        resolved_url = connector.base_url.rstrip("/") + "/" + endpoint.path.lstrip("/")
+        source_result = await fetch_all_pages(connector, url=resolved_url, client=client)
+        records_fetched = source_result.records_fetched
+
+        mappings = (
+            db.query(FieldMapping)
+            .filter(FieldMapping.endpoint_id == endpoint.id)
+            .order_by(FieldMapping.created_at.asc())
+            .all()
+        )
+        mapping_rules = _build_mapping_rules(mappings)
+        transformed_records = [apply_mappings(record, mapping_rules) for record in source_result.records]
+
+        failures: list[QualysFailure] = []
+        for batch in _chunk_records(transformed_records, QUALYS_BATCH_SIZE):
+            if not batch:
+                continue
+            result = await submit_batch(batch, connector, qualys_config, client=client)
+            records_submitted += result.submitted_count
+            failures.extend(result.failures)
+
+        records_failed = len(failures)
+
+        log = EndpointRunLog(
+            run_id=run.id,
+            endpoint_id=endpoint.id,
+            execution_order=idx,
+            records_fetched=records_fetched,
+            records_submitted=records_submitted,
+            records_failed=records_failed,
+            status="success",
+            error_message=None,
+        )
+        db.add(log)
+        db.commit()
+        return log
+
+    except QualysClientError:
+        # QualysClientError must NOT be caught here — propagate to outer handler
+        raise
+
+    except Exception as exc:
+        log = EndpointRunLog(
+            run_id=run.id,
+            endpoint_id=endpoint.id,
+            execution_order=idx,
+            records_fetched=records_fetched,
+            records_submitted=records_submitted,
+            records_failed=records_failed,
+            status="failed",
+            error_message=str(exc),
+        )
+        db.add(log)
+        db.commit()
+        return log
 
 
 async def run_ingestion(run_id: str) -> None:
@@ -105,17 +174,6 @@ async def run_ingestion(run_id: str) -> None:
             )
             return
 
-        mappings = (
-            db.query(FieldMapping)
-            .filter(FieldMapping.connector_id == connector.id)
-            .order_by(FieldMapping.created_at.asc())
-            .all()
-        )
-        mapping_rules = _build_mapping_rules(mappings)
-
-        source_result = await fetch_all_pages(connector)
-        transformed_records = [apply_mappings(record, mapping_rules) for record in source_result.records]
-
         qualys_config = db.query(QualysConfig).first()
         if not qualys_config:
             raise QualysClientError(
@@ -123,41 +181,46 @@ async def run_ingestion(run_id: str) -> None:
                 error_type="qualys_not_configured",
             )
 
-        failures: list[QualysFailure] = []
-        submitted_count = 0
+        enabled_endpoints = (
+            db.query(ConnectorEndpoint)
+            .filter(
+                ConnectorEndpoint.connector_id == connector.id,
+                ConnectorEndpoint.is_enabled == True,
+            )
+            .order_by(ConnectorEndpoint.display_order.asc())
+            .all()
+        )
+
+        if not enabled_endpoints:
+            _mark_failed(
+                db,
+                run,
+                "no_enabled_endpoints",
+                "No enabled endpoints configured for this connector",
+                {},
+            )
+            return
+
+        logs: list[EndpointRunLog] = []
+        total_fetched = 0
+        total_submitted = 0
+        total_failed = 0
 
         async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
-            for batch in _chunk_records(transformed_records, QUALYS_BATCH_SIZE):
-                if not batch:
-                    continue
-                result = await submit_batch(batch, connector, qualys_config, client=client)
-                submitted_count += result.submitted_count
-                failures.extend(result.failures)
+            for idx, endpoint in enumerate(enabled_endpoints):
+                log = await _run_endpoint(db, run, connector, endpoint, qualys_config, client, idx)
+                logs.append(log)
+                total_fetched += log.records_fetched
+                total_submitted += log.records_submitted
+                total_failed += log.records_failed
 
-        for failure in failures:
-            db.add(
-                RunFailure(
-                    run_id=run.id,
-                    record_identifier=failure.record_identifier,
-                    error_message=failure.error_message,
-                )
-            )
-
-        run.records_fetched = source_result.records_fetched
-        run.records_submitted = submitted_count
-        run.records_failed = len(failures)
+        run.records_fetched = total_fetched
+        run.records_submitted = total_submitted
+        run.records_failed = total_failed
         run.finished_at = datetime.utcnow()
-
-        if source_result.partial or failures:
-            run.status = RunStatus.partial_success
-            _apply_partial_failure_context(run, source_result, len(failures))
-        else:
-            run.status = RunStatus.success
-            run.error_type = None
-            run.error_message = None
-            run.error_context = None
-
+        run.status = _rollup_status(logs)
         db.commit()
+
     except QualysClientError as exc:
         _mark_failed(
             db,

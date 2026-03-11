@@ -274,3 +274,26 @@ def test_operator_cannot_access_connectors(client, operator_token):
     )
     assert resp.status_code == 403
     assert resp.json()["error"]["code"] == "AUTH_FORBIDDEN"
+
+
+def test_deprecated_discover_fields_returns_410(client, admin_token):
+    """GET /connectors/{id}/fields/discover should return 410 Gone with ROUTE_DEPRECATED error code."""
+    # Create a connector for the route path
+    create_resp = client.post(
+        "/api/v1/connectors/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "name": "Discover Deprecated Test Connector",
+            "base_url": "https://discover-deprecated.example.com",
+            "auth_method": "bearer_token",
+        },
+    )
+    assert create_resp.status_code == 201
+    connector_id = create_resp.json()["id"]
+
+    resp = client.get(
+        f"/api/v1/connectors/{connector_id}/fields/discover",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 410
+    assert resp.json()["error"]["code"] == "ROUTE_DEPRECATED"

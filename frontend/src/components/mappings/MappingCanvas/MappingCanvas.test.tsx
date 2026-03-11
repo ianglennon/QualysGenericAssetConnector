@@ -1,6 +1,7 @@
-import { describe, it, vi, expect } from 'vitest'
+import { describe, it, vi, expect, beforeAll } from 'vitest'
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { SourcePanelNode } from './SourcePanelNode'
 import { TargetPanelNode } from './TargetPanelNode'
 import { applyConnect, isValidConnection, MappingCanvas } from './MappingCanvas'
@@ -9,17 +10,27 @@ import type { Edge, Connection } from '@xyflow/react'
 // These stubs are RED until Plans 02 and 03 implement the components.
 // They define the behavioral contracts upfront.
 
-vi.mock('@/hooks/queries/useDiscoverFields', () => ({
-  useDiscoverFields: vi.fn(() => ({
-    data: {
-      fields: [
-        { path: 'address.city', type: 'string', sample_value: 'Austin' },
-        { path: 'hostname', type: 'string', sample_value: 'server-01' },
-      ],
-      record_count: 1,
-    },
-    isLoading: false,
-    isError: false,
+beforeAll(() => {
+  class MockResizeObserver {
+    observe = vi.fn()
+    unobserve = vi.fn()
+    disconnect = vi.fn()
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  global.ResizeObserver = MockResizeObserver as any
+})
+
+function makeWrapper() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+  )
+}
+
+vi.mock('@/hooks/queries/useEndpointDiscover', () => ({
+  useEndpointDiscoverFields: vi.fn(() => ({
+    mutate: vi.fn(),
+    isPending: false,
   })),
 }))
 
@@ -38,14 +49,10 @@ const mockSavedMappings = [
   },
 ]
 
-vi.mock('@/hooks/queries/useMappings', () => ({
-  useMappings: vi.fn(() => ({
+vi.mock('@/hooks/queries/useEndpointMappings', () => ({
+  useEndpointMappings: vi.fn(() => ({
     data: mockSavedMappings,
     isLoading: false,
-  })),
-  useBatchReplaceMappings: vi.fn(() => ({
-    mutateAsync: vi.fn(),
-    isPending: false,
   })),
 }))
 
@@ -231,7 +238,8 @@ describe('MappingCanvas', () => {
   it('canvas-prepopulate: onEdgesSnapshot prop is called on render', () => {
     const onEdgesSnapshot = vi.fn()
     render(
-      <MappingCanvas connectorId="conn-1" endpointId="ep-1" onEdgesSnapshot={onEdgesSnapshot} />
+      <MappingCanvas connectorId="conn-1" endpointId="ep-1" onEdgesSnapshot={onEdgesSnapshot} />,
+      { wrapper: makeWrapper() }
     )
     // onEdgesSnapshot should be called (via useEffect on edges changes)
     expect(onEdgesSnapshot).toHaveBeenCalled()

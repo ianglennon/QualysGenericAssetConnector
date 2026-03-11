@@ -12,14 +12,15 @@ import {
   type Node,
 } from '@xyflow/react'
 import { Skeleton } from '@/components/ui/skeleton'
-import { useDiscoverFields } from '@/hooks/queries/useDiscoverFields'
+import { Button } from '@/components/ui/button'
 import { useQualysSchema } from '@/hooks/queries/useQualysSchema'
-import { useMappings } from '@/hooks/queries/useMappings'
+import { useEndpointMappings } from '@/hooks/queries/useEndpointMappings'
+import { useEndpointDiscoverFields } from '@/hooks/queries/useEndpointDiscover'
 import { SourcePanelNode } from './SourcePanelNode'
 import { TargetPanelNode } from './TargetPanelNode'
 import { MappingEdge } from './MappingEdge'
 import { DashedConnectionLine } from './DashedConnectionLine'
-import type { SourcePanelData, TargetPanelData, MappingEdgeData, CanvasConditionRule, StaticValueType } from '@/types/canvas'
+import type { SourcePanelData, TargetPanelData, MappingEdgeData, CanvasConditionRule, StaticValueType, DiscoverResponse } from '@/types/canvas'
 import { apiTypeToCanvas } from '@/types/canvas'
 
 // Helper: infer StaticValueType from a string value
@@ -60,14 +61,16 @@ export function isValidConnection(connection: Connection | Edge): boolean {
 }
 
 interface MappingCanvasProps {
-  connectorId: string
+  connectorId: string   // for page header + back navigation context
+  endpointId: string    // used for all API calls
   onEdgesSnapshot?: (edges: Edge<MappingEdgeData>[]) => void
 }
 
-export function MappingCanvas({ connectorId, onEdgesSnapshot }: MappingCanvasProps) {
-  const { data: discoverData, isLoading: loadingFields, isError: fieldsError } = useDiscoverFields(connectorId)
+export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: MappingCanvasProps) {
   const { data: schemaData, isLoading: loadingSchema } = useQualysSchema()
-  const { data: savedMappings } = useMappings(connectorId)
+  const { data: savedMappings } = useEndpointMappings(connectorId, endpointId)
+  const discoverFields = useEndpointDiscoverFields()
+  const [discoveredFields, setDiscoveredFields] = useState<DiscoverResponse | null>(null)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(800)
@@ -109,18 +112,19 @@ export function MappingCanvas({ connectorId, onEdgesSnapshot }: MappingCanvasPro
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
 
-  const seededConnectorRef = useRef<string | null>(null)
+  const seededEndpointRef = useRef<string | null>(null)
 
-  // Reset seededConnectorRef when connectorId changes (re-seed from new connector's saved mappings)
+  // Reset seededEndpointRef and clear edges when endpointId changes
   useEffect(() => {
-    seededConnectorRef.current = null
+    seededEndpointRef.current = null
     setEdges([])
-  }, [connectorId, setEdges])
+    setDiscoveredFields(null)
+  }, [endpointId, setEdges])
 
-  // Seed edges from saved mappings — only once per connectorId (seededConnectorRef guard)
+  // Seed edges from saved mappings — only once per endpointId (seededEndpointRef guard)
   useEffect(() => {
-    if (!savedMappings || seededConnectorRef.current === connectorId) return
-    seededConnectorRef.current = connectorId
+    if (!savedMappings || seededEndpointRef.current === endpointId) return
+    seededEndpointRef.current = endpointId
     const seededEdges: Edge<MappingEdgeData>[] = savedMappings.map((m, i) => ({
       id: `seeded-${m.id ?? i}`,
       source: 'source-panel',
@@ -137,7 +141,7 @@ export function MappingCanvas({ connectorId, onEdgesSnapshot }: MappingCanvasPro
       } satisfies MappingEdgeData,
     }))
     setEdges(seededEdges)
-  }, [savedMappings, connectorId, setEdges])
+  }, [savedMappings, endpointId, setEdges])
 
   // Notify parent of edge changes
   useEffect(() => {
@@ -166,20 +170,32 @@ export function MappingCanvas({ connectorId, onEdgesSnapshot }: MappingCanvasPro
     )
   }, [SOURCE_WIDTH, TARGET_WIDTH, TARGET_X, setNodes])
 
-  // Update source panel data when fields arrive
+  // Compute source fields: discovered > saved mappings fallback > empty
+  const sourceFields = (() => {
+    if (discoveredFields) return discoveredFields.fields
+    if (savedMappings && savedMappings.length > 0) {
+      // Extract unique source field names from saved mappings
+      const seen = new Set<string>()
+      return savedMappings
+        .filter(m => m.source_field && !seen.has(m.source_field) && seen.add(m.source_field))
+        .map(m => ({ path: m.source_field!, type: 'string', sample_value: null }))
+    }
+    return []
+  })()
+
+  // Update source panel data when fields change
   useEffect(() => {
-    const fields = discoverData?.fields ?? []
     const linkedSourceFields = new Set(
       edges.filter(e => e.sourceHandle).map(e => e.sourceHandle as string)
     )
     setNodes(nds =>
       nds.map(n =>
         n.id === 'source-panel'
-          ? { ...n, data: { fields, linkedSourceFields } satisfies SourcePanelData }
+          ? { ...n, data: { fields: sourceFields, linkedSourceFields } satisfies SourcePanelData }
           : n
       )
     )
-  }, [discoverData, edges, setNodes])
+  }, [discoveredFields, savedMappings, edges, setNodes]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Update target panel data when schema arrives
   useEffect(() => {
@@ -196,7 +212,14 @@ export function MappingCanvas({ connectorId, onEdgesSnapshot }: MappingCanvasPro
     )
   }, [schemaData, edges, setNodes])
 
-  if (loadingFields || loadingSchema) {
+  function handleDiscoverClick() {
+    discoverFields.mutate(
+      { connectorId, endpointId },
+      { onSuccess: (data) => setDiscoveredFields(data) }
+    )
+  }
+
+  if (loadingSchema) {
     return (
       <div className="w-full h-full flex gap-4 p-4">
         <Skeleton className="flex-1 h-full rounded-lg" />
@@ -206,46 +229,65 @@ export function MappingCanvas({ connectorId, onEdgesSnapshot }: MappingCanvasPro
     )
   }
 
-  if (fieldsError) {
-    return (
-      <div className="w-full h-full flex items-center justify-center text-center text-muted-foreground p-8">
-        <div>
-          <p className="font-medium">Could not discover source fields</p>
-          <p className="text-sm mt-1">
-            The connector's source API is unreachable. Verify the connector's base URL and credentials are correct, then try again.
-          </p>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div ref={containerRef} className="w-full h-full">
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        isValidConnection={isValidConnection}
-        connectionLineComponent={DashedConnectionLine}
-        defaultEdgeOptions={{ type: 'mapping' }}
-        panOnDrag={false}
-        panOnScroll={false}
-        zoomOnScroll={false}
-        zoomOnPinch={false}
-        zoomOnDoubleClick={false}
-        nodesDraggable={false}
-        nodesConnectable={true}
-        elementsSelectable={false}
-        preventScrolling={false}
-        fitView={false}
-        style={{ width: '100%', height: '100%' }}
-      >
-        <Background variant={BackgroundVariant.Dots} />
-      </ReactFlow>
+    <div className="w-full h-full flex flex-col">
+      {/* Source panel header with Discover Fields button */}
+      <div className="flex items-center justify-between px-4 py-2 border-b bg-muted/30">
+        <span className="text-sm font-medium text-muted-foreground">Source Fields</span>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={handleDiscoverClick}
+          disabled={discoverFields.isPending}
+        >
+          {discoverFields.isPending ? (
+            <span className="flex items-center gap-2">
+              <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              Discovering...
+            </span>
+          ) : (
+            'Discover Fields'
+          )}
+        </Button>
+      </div>
+
+      {/* Empty state overlay when no fields and no discovery data */}
+      {sourceFields.length === 0 && !discoverFields.isPending && (
+        <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none" style={{ top: '3rem' }}>
+          <div className="text-center text-muted-foreground p-8">
+            <p className="font-medium">No source fields loaded</p>
+            <p className="text-sm mt-1">Click Discover Fields to load source fields from this endpoint</p>
+          </div>
+        </div>
+      )}
+
+      <div ref={containerRef} className="flex-1 relative">
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          isValidConnection={isValidConnection}
+          connectionLineComponent={DashedConnectionLine}
+          defaultEdgeOptions={{ type: 'mapping' }}
+          panOnDrag={false}
+          panOnScroll={false}
+          zoomOnScroll={false}
+          zoomOnPinch={false}
+          zoomOnDoubleClick={false}
+          nodesDraggable={false}
+          nodesConnectable={true}
+          elementsSelectable={false}
+          preventScrolling={false}
+          fitView={false}
+          style={{ width: '100%', height: '100%' }}
+        >
+          <Background variant={BackgroundVariant.Dots} />
+        </ReactFlow>
+      </div>
     </div>
   )
 }

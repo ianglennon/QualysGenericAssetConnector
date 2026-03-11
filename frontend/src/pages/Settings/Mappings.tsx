@@ -159,6 +159,7 @@ export default function Mappings() {
             <MappingCanvas
               key={clearKey}
               connectorId={selectedConnectorId}
+              endpointId=""
               onEdgesSnapshot={setCanvasEdges}
             />
           </CardContent>

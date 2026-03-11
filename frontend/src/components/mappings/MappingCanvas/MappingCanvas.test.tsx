@@ -231,7 +231,7 @@ describe('MappingCanvas', () => {
   it('canvas-prepopulate: onEdgesSnapshot prop is called on render', () => {
     const onEdgesSnapshot = vi.fn()
     render(
-      <MappingCanvas connectorId="conn-1" onEdgesSnapshot={onEdgesSnapshot} />
+      <MappingCanvas connectorId="conn-1" endpointId="ep-1" onEdgesSnapshot={onEdgesSnapshot} />
     )
     // onEdgesSnapshot should be called (via useEffect on edges changes)
     expect(onEdgesSnapshot).toHaveBeenCalled()

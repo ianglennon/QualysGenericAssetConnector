@@ -14,6 +14,8 @@ from app.db.session import SessionLocal
 from app.services.auth_service import create_user
 from app.models.user import UserRole
 from app.models.connector import Connector
+from app.models.connector_endpoint import ConnectorEndpoint
+from app.models.field_mapping import FieldMapping
 from app.models.run_history import RunHistory, RunFailure, RunStatus
 
 
@@ -126,12 +128,12 @@ def test_list_runs_as_admin(client, admin_token, seeded_runs):
     resp = client.get("/api/v1/runs", headers={"Authorization": f"Bearer {admin_token}"})
     assert resp.status_code == 200
     data = resp.json()
-    
+
     # Verify paginated response structure
     assert "items" in data
     assert "total" in data
     assert len(data["items"]) >= 3
-    
+
     run_ids = {run["id"] for run in data["items"]}
     assert seeded_runs["run1_id"] in run_ids
     assert seeded_runs["run2_id"] in run_ids
@@ -164,7 +166,7 @@ def test_get_run_by_id(client, operator_token, seeded_runs):
     assert data["status"] == "failed"
     assert data["error_type"] == "source_error"
     assert len(data["failures"]) == 2
-    
+
     # Verify connector_name is included in detail view
     assert "connector_name" in data
     assert data["connector_name"] == "Runs Connector A"
@@ -184,12 +186,12 @@ def test_list_connector_runs(client, admin_token, seeded_runs):
     )
     assert resp.status_code == 200
     data = resp.json()
-    
+
     # Verify paginated response structure
     assert "items" in data
     assert "total" in data
     assert len(data["items"]) == 2
-    
+
     for run in data["items"]:
         assert run["connector_id"] == connector_id
         # Verify connector_name is included
@@ -206,7 +208,12 @@ def test_list_connector_runs_not_found(client, admin_token):
     assert resp.json()["error"]["code"] == "CONNECTOR_NOT_FOUND"
 
 
-def _create_connector(name="Runs Trigger Connector"):
+def _create_connector_with_valid_endpoint(name="Runs Trigger Connector"):
+    """Create a connector with one enabled endpoint that has an identity mapping.
+
+    Required by CONN-02 guards: NO_ENABLED_ENDPOINTS and INVALID_ENDPOINT_MAPPINGS
+    checks must pass before a run can be created.
+    """
     db = SessionLocal()
     try:
         connector = Connector(
@@ -217,13 +224,33 @@ def _create_connector(name="Runs Trigger Connector"):
         db.add(connector)
         db.commit()
         db.refresh(connector)
+
+        endpoint = ConnectorEndpoint(
+            connector_id=connector.id,
+            name="Default Endpoint",
+            path="/api/resources",
+            is_enabled=True,
+        )
+        db.add(endpoint)
+        db.commit()
+        db.refresh(endpoint)
+
+        mapping = FieldMapping(
+            endpoint_id=endpoint.id,
+            target_field="hostName",
+            mapping_type="direct_copy",
+            source_field="hostname",
+        )
+        db.add(mapping)
+        db.commit()
+
         return connector.id
     finally:
         db.close()
 
 
 def test_trigger_run_as_admin_returns_202(client, admin_token):
-    connector_id = _create_connector(name="Runs Trigger Admin")
+    connector_id = _create_connector_with_valid_endpoint(name="Runs Trigger Admin")
     with patch("app.routers.runs.run_ingestion", new_callable=AsyncMock) as mock_run:
         resp = client.post(
             f"/api/v1/connectors/{connector_id}/runs",
@@ -238,7 +265,7 @@ def test_trigger_run_as_admin_returns_202(client, admin_token):
 
 
 def test_trigger_run_as_operator_returns_202(client, operator_token):
-    connector_id = _create_connector(name="Runs Trigger Operator")
+    connector_id = _create_connector_with_valid_endpoint(name="Runs Trigger Operator")
     with patch("app.routers.runs.run_ingestion", new_callable=AsyncMock) as mock_run:
         resp = client.post(
             f"/api/v1/connectors/{connector_id}/runs",
@@ -251,7 +278,7 @@ def test_trigger_run_as_operator_returns_202(client, operator_token):
 
 
 def test_trigger_run_conflict_when_running_exists(client, admin_token):
-    connector_id = _create_connector(name="Runs Trigger Conflict")
+    connector_id = _create_connector_with_valid_endpoint(name="Runs Trigger Conflict")
     db = SessionLocal()
     try:
         run = RunHistory(
@@ -273,7 +300,7 @@ def test_trigger_run_conflict_when_running_exists(client, admin_token):
 
 
 def test_trigger_run_updates_status_on_completion(client, admin_token):
-    connector_id = _create_connector(name="Runs Trigger Status")
+    connector_id = _create_connector_with_valid_endpoint(name="Runs Trigger Status")
 
     async def _complete_run(run_id: str):
         db = SessionLocal()
@@ -328,3 +355,99 @@ def test_partial_success_run_includes_failures(client, admin_token, seeded_runs)
     assert data["status"] == "partial_success"
     assert len(data["failures"]) >= 1
     assert data["failures"][0]["record_identifier"] == "host-9"
+
+
+# New tests: CONN-02 trigger guards
+
+
+def test_trigger_returns_400_no_enabled_endpoints(client, admin_token):
+    """Trigger returns 400 with NO_ENABLED_ENDPOINTS when connector has no enabled endpoints."""
+    db = SessionLocal()
+    try:
+        connector = Connector(
+            name="No Endpoints Connector",
+            base_url="https://no-endpoints.example.com",
+            auth_method="bearer_token",
+        )
+        db.add(connector)
+        db.commit()
+        db.refresh(connector)
+        connector_id = connector.id
+    finally:
+        db.close()
+
+    resp = client.post(
+        f"/api/v1/connectors/{connector_id}/runs",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 400
+    error = resp.json()["error"]
+    assert error["code"] == "NO_ENABLED_ENDPOINTS"
+
+
+def test_trigger_returns_400_invalid_endpoint_mappings(client, admin_token):
+    """Trigger returns 400 with INVALID_ENDPOINT_MAPPINGS and invalid_endpoints list."""
+    db = SessionLocal()
+    try:
+        connector = Connector(
+            name="Invalid Mappings Connector",
+            base_url="https://invalid-mappings.example.com",
+            auth_method="bearer_token",
+        )
+        db.add(connector)
+        db.commit()
+        db.refresh(connector)
+
+        endpoint = ConnectorEndpoint(
+            connector_id=connector.id,
+            name="Unmapped Endpoint",
+            path="/api/things",
+            is_enabled=True,
+        )
+        db.add(endpoint)
+        db.commit()
+        db.refresh(endpoint)
+
+        # Only a non-identity mapping — will fail CONN-02 check
+        mapping = FieldMapping(
+            endpoint_id=endpoint.id,
+            target_field="operatingSystem",
+            mapping_type="direct_copy",
+            source_field="os",
+        )
+        db.add(mapping)
+        db.commit()
+
+        connector_id = connector.id
+        endpoint_id = endpoint.id
+        endpoint_name = endpoint.name
+    finally:
+        db.close()
+
+    resp = client.post(
+        f"/api/v1/connectors/{connector_id}/runs",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 400
+    error = resp.json()["error"]
+    assert error["code"] == "INVALID_ENDPOINT_MAPPINGS"
+    invalid_endpoints = error["details"]["invalid_endpoints"]
+    assert len(invalid_endpoints) == 1
+    assert invalid_endpoints[0]["id"] == endpoint_id
+    assert invalid_endpoints[0]["name"] == endpoint_name
+
+
+def test_trigger_returns_202_when_endpoints_valid(client, admin_token):
+    """Trigger returns 202 when all enabled endpoints have identity mappings."""
+    connector_id = _create_connector_with_valid_endpoint(name="Runs Trigger Valid CONN-02")
+
+    with patch("app.routers.runs.run_ingestion", new_callable=AsyncMock) as mock_run:
+        resp = client.post(
+            f"/api/v1/connectors/{connector_id}/runs",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+
+    assert resp.status_code == 202
+    data = resp.json()
+    assert data["status"] == "running"
+    assert "run_id" in data

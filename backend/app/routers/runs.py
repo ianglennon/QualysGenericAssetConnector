@@ -8,9 +8,11 @@ from app.core.errors import make_error
 from app.core.security import require_role
 from app.db.session import get_db
 from app.models.connector import Connector
-from app.models.run_history import RunHistory, RunFailure, RunStatus
-from app.schemas.run_history import RunHistoryResponse, RunFailureSummary
+from app.models.connector_endpoint import ConnectorEndpoint
+from app.models.run_history import RunHistory, RunFailure, RunStatus, EndpointRunLog
+from app.schemas.run_history import RunHistoryResponse, RunFailureSummary, EndpointRunLogResponse
 from app.services.ingestion_service import create_run, run_ingestion
+from app.services.validation import validate_endpoint_mappings
 
 router = APIRouter(tags=["runs"])
 
@@ -26,7 +28,11 @@ def _map_failures(failures: list[RunFailure]) -> list[RunFailureSummary]:
     ]
 
 
-def _to_response(run: RunHistory, failures: list[RunFailure]) -> RunHistoryResponse:
+def _to_response(
+    run: RunHistory,
+    failures: list[RunFailure],
+    endpoint_logs: list[EndpointRunLog] | None = None,
+) -> RunHistoryResponse:
     return RunHistoryResponse(
         id=run.id,
         connector_id=run.connector_id,
@@ -40,6 +46,7 @@ def _to_response(run: RunHistory, failures: list[RunFailure]) -> RunHistoryRespo
         error_message=run.error_message,
         error_context=run.error_context,
         failures=_map_failures(failures),
+        endpoint_logs=[EndpointRunLogResponse.model_validate(log) for log in (endpoint_logs or [])],
     )
 
 
@@ -117,8 +124,16 @@ def get_run(
         .order_by(RunFailure.created_at.asc())
         .all()
     )
-    
-    response = _to_response(run, failures)
+
+    # Load endpoint logs ordered by execution_order
+    endpoint_logs = (
+        db.query(EndpointRunLog)
+        .filter(EndpointRunLog.run_id == run_id)
+        .order_by(EndpointRunLog.execution_order.asc())
+        .all()
+    )
+
+    response = _to_response(run, failures, endpoint_logs)
     response.connector_name = connector_name
     return response
 
@@ -177,16 +192,40 @@ def trigger_connector_run(
             detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
         )
 
-    # Check connector has valid field mappings
-    if not connector.is_valid_mappings:
+    # Guard: no enabled endpoints
+    enabled_count = (
+        db.query(ConnectorEndpoint)
+        .filter(
+            ConnectorEndpoint.connector_id == connector_id,
+            ConnectorEndpoint.is_enabled == True,
+        )
+        .count()
+    )
+    if enabled_count == 0:
         raise HTTPException(
             status_code=400,
             detail=make_error(
-                "INVALID_MAPPINGS",
-                "Connector has invalid field mappings. At least one identity attribute must be mapped.",
-                {"connector_id": connector_id}
+                "NO_ENABLED_ENDPOINTS",
+                "Connector has no enabled endpoints",
+                {"connector_id": connector_id},
             ),
         )
+
+    # Guard: CONN-02 endpoint mapping validity
+    is_valid, invalid_endpoints = validate_endpoint_mappings(connector_id, db)
+    if not is_valid:
+        connector.is_valid_mappings = False
+        db.commit()
+        raise HTTPException(
+            status_code=400,
+            detail=make_error(
+                "INVALID_ENDPOINT_MAPPINGS",
+                "One or more enabled endpoints are missing an identity mapping",
+                {"invalid_endpoints": invalid_endpoints},
+            ),
+        )
+    connector.is_valid_mappings = True
+    db.commit()
 
     existing_run = (
         db.query(RunHistory)

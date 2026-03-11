@@ -1,171 +1,116 @@
-"""Unit tests for validation service."""
+"""Unit tests for validation service — validate_endpoint_mappings."""
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
 from app.db.base import Base
 from app.models.connector import Connector
+from app.models.connector_endpoint import ConnectorEndpoint
 from app.models.field_mapping import FieldMapping
-from app.services.validation import validate_connector_mappings, IDENTITY_ATTRIBUTES
+from app.services.validation import validate_endpoint_mappings, IDENTITY_ATTRIBUTES
 
 
 @pytest.fixture
 def db_session():
     """Create an in-memory SQLite database for testing."""
-    engine = create_engine("sqlite:///:memory:")
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
     Base.metadata.create_all(engine)
     SessionLocal = sessionmaker(bind=engine)
     session = SessionLocal()
     yield session
     session.close()
+    engine.dispose()
 
 
-def test_validate_no_mappings_returns_false(db_session):
-    """Test validation fails when no mappings exist."""
-    # Create a connector with no mappings
+def _make_connector(db, connector_id="connector-1"):
     connector = Connector(
-        id="test-connector-1",
+        id=connector_id,
         name="Test Connector",
         base_url="https://api.example.com",
         auth_method="bearer_token",
     )
-    db_session.add(connector)
-    db_session.commit()
-    
-    is_valid, errors = validate_connector_mappings("test-connector-1", db_session)
-    
-    assert is_valid is False
-    assert len(errors) == 1
-    assert "Missing identity attribute" in errors[0]
-    # Check that error message includes the full list
-    for attr in IDENTITY_ATTRIBUTES:
-        assert attr in errors[0]
+    db.add(connector)
+    db.commit()
+    return connector
 
 
-def test_validate_with_identity_attribute_returns_true(db_session):
-    """Test validation passes when identity attribute is mapped."""
-    # Create connector and mapping with identity attribute
-    connector = Connector(
-        id="test-connector-2",
-        name="Test Connector",
-        base_url="https://api.example.com",
-        auth_method="bearer_token",
+def _make_endpoint(db, connector_id, endpoint_id, name="Endpoint 1", is_enabled=True):
+    endpoint = ConnectorEndpoint(
+        id=endpoint_id,
+        connector_id=connector_id,
+        name=name,
+        path="/api/resources",
+        is_enabled=is_enabled,
     )
-    db_session.add(connector)
-    
+    db.add(endpoint)
+    db.commit()
+    return endpoint
+
+
+def _make_mapping(db, endpoint_id, mapping_id, target_field, source_field="field"):
     mapping = FieldMapping(
-        id="mapping-1",
-        connector_id="test-connector-2",
-        target_field="hostName",  # This is an identity attribute
+        id=mapping_id,
+        endpoint_id=endpoint_id,
+        target_field=target_field,
         mapping_type="direct_copy",
-        source_field="hostname",
+        source_field=source_field,
     )
-    db_session.add(mapping)
-    db_session.commit()
-    
-    is_valid, errors = validate_connector_mappings("test-connector-2", db_session)
-    
+    db.add(mapping)
+    db.commit()
+    return mapping
+
+
+def test_no_enabled_endpoints_returns_valid(db_session):
+    """Connector with no enabled endpoints returns (True, []) — guard is in run trigger."""
+    _make_connector(db_session, "conn-no-endpoints")
+
+    is_valid, invalid = validate_endpoint_mappings("conn-no-endpoints", db_session)
+
     assert is_valid is True
-    assert len(errors) == 0
+    assert invalid == []
 
 
-def test_validate_with_only_non_identity_fields_returns_false(db_session):
-    """Test validation fails when only non-identity fields are mapped."""
-    # Create connector and mappings with NO identity attributes
-    connector = Connector(
-        id="test-connector-3",
-        name="Test Connector",
-        base_url="https://api.example.com",
-        auth_method="bearer_token",
-    )
-    db_session.add(connector)
-    
-    # These are core attributes but NOT identity attributes
-    mapping1 = FieldMapping(
-        id="mapping-1",
-        connector_id="test-connector-3",
-        target_field="operatingSystem",
-        mapping_type="direct_copy",
-        source_field="os",
-    )
-    mapping2 = FieldMapping(
-        id="mapping-2",
-        connector_id="test-connector-3",
-        target_field="lastLoggedOnUser",
-        mapping_type="direct_copy",
-        source_field="user",
-    )
-    db_session.add_all([mapping1, mapping2])
-    db_session.commit()
-    
-    is_valid, errors = validate_connector_mappings("test-connector-3", db_session)
-    
-    assert is_valid is False
-    assert len(errors) == 1
-    assert "Missing identity attribute" in errors[0]
+def test_enabled_endpoint_with_identity_mapping_returns_valid(db_session):
+    """Connector with enabled endpoint that has an identity mapping returns (True, [])."""
+    _make_connector(db_session, "conn-valid")
+    _make_endpoint(db_session, "conn-valid", "ep-valid", is_enabled=True)
+    _make_mapping(db_session, "ep-valid", "map-1", target_field="hostName")
 
+    is_valid, invalid = validate_endpoint_mappings("conn-valid", db_session)
 
-def test_validate_error_message_format(db_session):
-    """Test that error message includes full attribute list in sorted order."""
-    connector = Connector(
-        id="test-connector-4",
-        name="Test Connector",
-        base_url="https://api.example.com",
-        auth_method="bearer_token",
-    )
-    db_session.add(connector)
-    db_session.commit()
-    
-    is_valid, errors = validate_connector_mappings("test-connector-4", db_session)
-    
-    assert is_valid is False
-    error_msg = errors[0]
-    
-    # Should start with standard prefix
-    assert error_msg.startswith("Missing identity attribute. Valid identity attributes are:")
-    
-    # Should contain all identity attributes
-    sorted_attrs = sorted(IDENTITY_ATTRIBUTES)
-    for attr in sorted_attrs:
-        assert attr in error_msg
-
-
-def test_validate_multiple_identity_attributes_still_valid(db_session):
-    """Test that having multiple identity attributes is valid."""
-    connector = Connector(
-        id="test-connector-5",
-        name="Test Connector",
-        base_url="https://api.example.com",
-        auth_method="bearer_token",
-    )
-    db_session.add(connector)
-    
-    # Map multiple identity attributes
-    mapping1 = FieldMapping(
-        id="mapping-1",
-        connector_id="test-connector-5",
-        target_field="hostName",
-        mapping_type="direct_copy",
-        source_field="hostname",
-    )
-    mapping2 = FieldMapping(
-        id="mapping-2",
-        connector_id="test-connector-5",
-        target_field="ipAddress",
-        mapping_type="direct_copy",
-        source_field="ip",
-    )
-    mapping3 = FieldMapping(
-        id="mapping-3",
-        connector_id="test-connector-5",
-        target_field="macAddress",
-        mapping_type="direct_copy",
-        source_field="mac",
-    )
-    db_session.add_all([mapping1, mapping2, mapping3])
-    db_session.commit()
-    
-    is_valid, errors = validate_connector_mappings("test-connector-5", db_session)
-    
     assert is_valid is True
-    assert len(errors) == 0
+    assert invalid == []
+
+
+def test_enabled_endpoint_missing_identity_mapping_returns_invalid(db_session):
+    """Connector with enabled endpoint that has no identity mapping returns (False, [{id, name}])."""
+    _make_connector(db_session, "conn-invalid")
+    endpoint = _make_endpoint(db_session, "conn-invalid", "ep-invalid", name="Bad Endpoint", is_enabled=True)
+    # Map a non-identity field only
+    _make_mapping(db_session, "ep-invalid", "map-bad", target_field="operatingSystem")
+
+    is_valid, invalid = validate_endpoint_mappings("conn-invalid", db_session)
+
+    assert is_valid is False
+    assert len(invalid) == 1
+    assert invalid[0]["id"] == endpoint.id
+    assert invalid[0]["name"] == "Bad Endpoint"
+
+
+def test_disabled_endpoint_missing_identity_mapping_is_ignored(db_session):
+    """Disabled endpoint with no identity mapping is ignored — connector is valid."""
+    _make_connector(db_session, "conn-disabled")
+    _make_endpoint(db_session, "conn-disabled", "ep-disabled", name="Disabled", is_enabled=False)
+    # No identity mapping for the disabled endpoint
+    _make_mapping(db_session, "ep-disabled", "map-dis", target_field="operatingSystem")
+
+    is_valid, invalid = validate_endpoint_mappings("conn-disabled", db_session)
+
+    assert is_valid is True
+    assert invalid == []

@@ -69,30 +69,24 @@ def test_create_connector_as_admin(client, admin_token):
     assert "credentials" not in data
 
 
-def test_create_connector_with_pagination(client, admin_token):
-    """POST with cursor pagination strategy; response includes strategy in pagination_strategies."""
+def test_create_connector_basic(client, admin_token):
+    """POST creates a basic connector; response contains expected fields without pagination_strategies (removed in v1.2)."""
     resp = client.post(
         "/api/v1/connectors/",
         headers={"Authorization": f"Bearer {admin_token}"},
         json={
-            "name": "Paginated Connector",
-            "base_url": "https://paginated.example.com",
+            "name": "Basic Connector",
+            "base_url": "https://basic.example.com",
             "auth_method": "bearer_token",
-            "pagination_strategies": [
-                {
-                    "strategy": "cursor",
-                    "cursor_field": "next_cursor",
-                    "cursor_param": "cursor",
-                    "page_size": 100,
-                }
-            ],
         },
     )
     assert resp.status_code == 201
     data = resp.json()
-    assert len(data["pagination_strategies"]) == 1
-    assert data["pagination_strategies"][0]["strategy"] == "cursor"
-    assert data["pagination_strategies"][0]["cursor_field"] == "next_cursor"
+    assert data["name"] == "Basic Connector"
+    assert data["base_url"] == "https://basic.example.com"
+    assert data["auth_method"] == "bearer_token"
+    # v1.2: pagination_strategies removed from ConnectorResponse
+    assert "pagination_strategies" not in data
 
 
 def test_list_connectors_as_admin(client, admin_token):

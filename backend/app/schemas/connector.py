@@ -2,8 +2,6 @@ from typing import Optional, Literal
 from pydantic import BaseModel
 from datetime import datetime
 
-from app.schemas.pagination import PaginationStrategy
-
 
 class ConnectorCredentialsCreate(BaseModel):
     """Plaintext credentials for connector creation. Never stored as-is."""
@@ -29,7 +27,6 @@ class ConnectorCreate(BaseModel):
     test_path: Optional[str] = None
     auth_method: Literal["bearer_token", "basic_auth", "api_key_header"]
     credentials: Optional[ConnectorCredentialsCreate] = None
-    pagination_strategies: list[PaginationStrategy] = []
     source_retry_limit: Optional[int] = None
     qualys_retry_limit: Optional[int] = None
 
@@ -41,7 +38,6 @@ class ConnectorUpdate(BaseModel):
     test_path: Optional[str] = None
     auth_method: Optional[Literal["bearer_token", "basic_auth", "api_key_header"]] = None
     credentials: Optional[ConnectorCredentialsUpdate] = None
-    pagination_strategies: Optional[list[PaginationStrategy]] = None
     source_retry_limit: Optional[int] = None
     qualys_retry_limit: Optional[int] = None
 
@@ -60,7 +56,6 @@ class ConnectorResponse(BaseModel):
     has_password: bool
     has_api_key: bool
     api_key_name: Optional[str]  # plaintext header name, not a secret
-    pagination_strategies: list[PaginationStrategy]
     source_retry_limit: Optional[int]
     qualys_retry_limit: Optional[int]
     created_at: datetime

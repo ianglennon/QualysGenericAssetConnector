@@ -1,12 +1,10 @@
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import TypeAdapter
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.connector import Connector
 from app.schemas.connector import ConnectorCreate, ConnectorUpdate, ConnectorResponse
 from app.schemas.field_mapping import DiscoverResponse
-from app.schemas.pagination import PaginationStrategy
 from app.services import source_client as _source_client
 from app.services.connector_service import _build_headers, HTTPX_TIMEOUT, test_connector_connection
 from app.services.credential_crypto import get_crypto
@@ -19,11 +17,6 @@ router = APIRouter(prefix="/connectors", tags=["connectors"])
 
 def _to_response(connector: Connector) -> ConnectorResponse:
     """Map a Connector ORM row to a safe ConnectorResponse (no plaintext credentials)."""
-    pagination_adapter = TypeAdapter(PaginationStrategy)
-    pagination_strategies = [
-        pagination_adapter.validate_python(s)
-        for s in (connector.pagination_config or [])
-    ]
     return ConnectorResponse(
         id=connector.id,
         name=connector.name,
@@ -35,7 +28,6 @@ def _to_response(connector: Connector) -> ConnectorResponse:
         has_password=bool(connector.encrypted_password),
         has_api_key=bool(connector.encrypted_api_key),
         api_key_name=connector.api_key_name,
-        pagination_strategies=pagination_strategies,
         source_retry_limit=connector.source_retry_limit,
         qualys_retry_limit=connector.qualys_retry_limit,
         created_at=connector.created_at,
@@ -57,7 +49,6 @@ def create_connector(
         base_url=payload.base_url,
         test_path=payload.test_path,
         auth_method=payload.auth_method,
-        pagination_config=[s.model_dump() for s in payload.pagination_strategies],
         source_retry_limit=payload.source_retry_limit,
         qualys_retry_limit=payload.qualys_retry_limit,
     )
@@ -130,8 +121,6 @@ def update_connector(
         connector.test_path = payload.test_path
     if payload.auth_method is not None:
         connector.auth_method = payload.auth_method
-    if payload.pagination_strategies is not None:
-        connector.pagination_config = [s.model_dump() for s in payload.pagination_strategies]
     if payload.source_retry_limit is not None:
         connector.source_retry_limit = payload.source_retry_limit
     if payload.qualys_retry_limit is not None:

@@ -5,8 +5,6 @@ from typing import Any
 from urllib.parse import urljoin
 
 import httpx
-from pydantic import TypeAdapter
-
 from app.models.connector import Connector
 from app.schemas.pagination import (
     CursorPagination,
@@ -91,8 +89,8 @@ def _resolve_pagination_strategies(
 ) -> list[PaginationStrategy]:
     if pagination_strategies is not None:
         return pagination_strategies
-    adapter = TypeAdapter(PaginationStrategy)
-    return [adapter.validate_python(s) for s in (connector.pagination_config or [])]
+    # TODO Phase 11: read pagination_config from ConnectorEndpoint
+    return []
 
 
 async def fetch_all_pages(

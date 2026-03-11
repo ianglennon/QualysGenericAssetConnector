@@ -50,7 +50,6 @@ export default function Mappings() {
     return edges.map((e, i) => {
       const d = e.data!
       const base: FieldMappingCreate = {
-        connector_id: selectedConnectorId,
         source_field: e.sourceHandle ?? '',
         target_field: e.targetHandle ?? '',
         mapping_type: canvasTypeToAPI(d.mappingType),

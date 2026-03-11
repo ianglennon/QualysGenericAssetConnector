@@ -17,7 +17,7 @@ export interface ConditionRule {
 
 export interface FieldMapping {
   id: string
-  connector_id: string
+  endpoint_id: string
   source_field: string
   target_field: string
   mapping_type: MappingTypeAPI
@@ -29,7 +29,7 @@ export interface FieldMapping {
 }
 
 export interface FieldMappingCreate {
-  connector_id: string
+  endpoint_id?: string
   source_field?: string
   target_field: string
   mapping_type: MappingTypeAPI   // use API type strings when calling the API
@@ -54,6 +54,42 @@ export interface PreviewRequest {
 export interface PreviewResponse {
   transformed: any
   warnings: string[]
+}
+
+// Connector Endpoint Types
+export interface ConnectorEndpoint {
+  id: string
+  connector_id: string
+  name: string
+  path: string
+  pagination_config: Record<string, unknown> | null
+  is_enabled: boolean
+  display_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface EndpointCreate {
+  name: string
+  path: string
+  pagination_config?: Record<string, unknown>
+  is_enabled?: boolean
+  display_order?: number
+}
+
+export interface EndpointRunLog {
+  id: string
+  run_id: string
+  endpoint_id: string
+  endpoint_name?: string
+  endpoint_path?: string
+  execution_order: number
+  records_fetched: number
+  records_submitted: number
+  records_failed: number
+  status: string
+  error_message?: string
+  created_at: string
 }
 
 // Connector Types
@@ -148,6 +184,7 @@ export interface RunHistory {
   request_headers?: any
   response_body?: any
   response_headers?: any
+  endpoint_logs: EndpointRunLog[]
 }
 
 export interface RunHistoryList {

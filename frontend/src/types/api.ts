@@ -192,6 +192,13 @@ export interface RunHistoryList {
   cursor?: string
 }
 
+export interface RunStats {
+  total_runs: number
+  success_rate: number  // 0.0 to 1.0
+  last_sync_at: string | null
+  recent_runs_24h: number
+}
+
 // Qualys Configuration Types
 export interface QualysConfig {
   id: string

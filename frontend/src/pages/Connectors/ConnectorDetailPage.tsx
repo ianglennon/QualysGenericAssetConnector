@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { Button } from '@/components/ui/button'
@@ -12,14 +13,22 @@ export function ConnectorDetailPage() {
   const { id } = useParams<{ id: string }>()
   const triggerRun = useTriggerRun()
   const { toast } = useToast()
+  const [syncSucceeded, setSyncSucceeded] = useState(false)
 
   const handleTriggerSync = async () => {
     if (!id) return
     try {
       await triggerRun.mutateAsync(id)
-      toast({ title: 'Sync triggered', description: 'Run started successfully.' })
-    } catch {
-      toast({ title: 'Sync failed', variant: 'destructive' })
+      setSyncSucceeded(true)
+      setTimeout(() => setSyncSucceeded(false), 3000)
+    } catch (error: unknown) {
+      const axiosError = error as { response?: { data?: { error?: { message?: string } } } }
+      const message = axiosError.response?.data?.error?.message ?? 'An unexpected error occurred'
+      toast({
+        title: 'Sync failed',
+        description: message,
+        variant: 'destructive',
+      })
     }
   }
   const { data: connector, isLoading } = useConnector(id)
@@ -51,11 +60,12 @@ export function ConnectorDetailPage() {
           <Button variant="outline">Edit</Button>
           <Button variant="outline">Test</Button>
           <Button
-            disabled={!connector?.has_valid_endpoints || triggerRun.isPending}
+            disabled={!connector?.has_valid_endpoints || triggerRun.isPending || syncSucceeded}
             onClick={handleTriggerSync}
+            className={syncSucceeded ? 'bg-green-600 hover:bg-green-600 text-white' : ''}
             title={connector?.has_valid_endpoints ? 'Trigger Sync' : 'Connector has invalid endpoint mappings'}
           >
-            {triggerRun.isPending ? 'Running...' : 'Trigger Sync'}
+            {triggerRun.isPending ? 'Running...' : syncSucceeded ? 'Sync Triggered' : 'Trigger Sync'}
           </Button>
         </div>
       }

@@ -1,7 +1,8 @@
 from datetime import timedelta
 from datetime import datetime as _datetime
+from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc, func, case
 from fastapi_pagination import Page, Params
@@ -93,6 +94,10 @@ def list_runs(
     db: Session = Depends(get_db),
     params: Params = Depends(),
     _user=Depends(require_role("admin", "operator")),
+    connector_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
 ):
     """List all runs across all connectors with cursor pagination."""
     # Build query returning only RunHistory objects (paginator validates against response_model)
@@ -100,6 +105,32 @@ def list_runs(
         select(RunHistory)
         .order_by(desc(RunHistory.started_at))
     )
+
+    # Apply optional filters
+    if connector_id is not None:
+        query = query.where(RunHistory.connector_id == connector_id)
+
+    if status is not None:
+        try:
+            query = query.where(RunHistory.status == RunStatus(status))
+        except ValueError:
+            pass  # Silently ignore unknown status values
+
+    if date_from is not None:
+        try:
+            dt_from = _datetime.strptime(date_from, "%Y-%m-%d")
+            query = query.where(RunHistory.started_at >= dt_from)
+        except ValueError:
+            pass  # Silently ignore malformed dates
+
+    if date_to is not None:
+        try:
+            dt_to = _datetime.strptime(date_to, "%Y-%m-%d").replace(
+                hour=23, minute=59, second=59, microsecond=999999
+            )
+            query = query.where(RunHistory.started_at <= dt_to)
+        except ValueError:
+            pass  # Silently ignore malformed dates
 
     # Paginate
     page = paginate(db, query, params)

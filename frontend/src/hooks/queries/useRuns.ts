@@ -57,6 +57,7 @@ export const useTriggerRun = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['runs'] })
+      queryClient.invalidateQueries({ queryKey: ['runStats'] })
     },
   })
 }

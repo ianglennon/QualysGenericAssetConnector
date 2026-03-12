@@ -1,13 +1,16 @@
 import { Plus } from 'lucide-react'
+import { formatDistanceToNow, format } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { useAuth } from '@/hooks/useAuth'
 import { useConnectors } from '@/hooks/queries/useConnectors'
+import { useRunStats } from '@/hooks/queries/useRunStats'
 
 export default function Dashboard() {
   const { user } = useAuth()
   const { data: connectors = [] } = useConnectors()
+  const { data: stats } = useRunStats()
 
   const isAdmin = user?.role === 'admin'
 
@@ -55,9 +58,9 @@ export default function Dashboard() {
               <CardTitle className="text-sm font-medium">Recent Runs</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">-</div>
+              <div className="text-2xl font-bold">{stats?.recent_runs_24h ?? 0}</div>
               <p className="text-xs text-muted-foreground">
-                Placeholder (coming soon)
+                In the last 24 hours
               </p>
             </CardContent>
           </Card>
@@ -67,9 +70,11 @@ export default function Dashboard() {
               <CardTitle className="text-sm font-medium">Success Rate</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">-</div>
+              <div className="text-2xl font-bold">
+                {(!stats || stats.total_runs === 0) ? '—' : `${Math.round(stats.success_rate * 100)}%`}
+              </div>
               <p className="text-xs text-muted-foreground">
-                Placeholder (coming soon)
+                {(!stats || stats.total_runs === 0) ? 'No runs yet' : 'All-time success rate'}
               </p>
             </CardContent>
           </Card>
@@ -79,9 +84,15 @@ export default function Dashboard() {
               <CardTitle className="text-sm font-medium">Last Sync</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold">-</div>
+              <div
+                className="text-2xl font-bold"
+                title={stats?.last_sync_at ? format(new Date(stats.last_sync_at), 'MMM d, yyyy h:mm:ss a') : undefined}
+                style={stats?.last_sync_at ? { cursor: 'help' } : undefined}
+              >
+                {stats?.last_sync_at ? formatDistanceToNow(new Date(stats.last_sync_at), { addSuffix: true }) : '—'}
+              </div>
               <p className="text-xs text-muted-foreground">
-                Placeholder (coming soon)
+                {stats?.last_sync_at ? 'Most recent sync' : 'No runs yet'}
               </p>
             </CardContent>
           </Card>

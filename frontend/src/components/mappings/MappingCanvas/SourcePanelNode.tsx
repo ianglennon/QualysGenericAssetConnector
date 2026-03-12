@@ -73,7 +73,8 @@ export function SourcePanelNode({ data }: NodeProps & { data: SourcePanelData })
                   position={Position.Right}
                   id={field.path}
                   isConnectable={false}
-                  style={{ right: -8 }}
+                  className="!w-3 !h-3 !bg-primary/60 !border-2 !border-background"
+                  style={{ right: 2 }}
                 />
               </div>
             ))

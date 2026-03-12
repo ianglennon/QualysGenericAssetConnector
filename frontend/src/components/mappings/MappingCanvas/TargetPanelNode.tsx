@@ -64,7 +64,8 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
                   position={Position.Left}
                   id={field.field}
                   isConnectable={false}
-                  style={{ left: -8 }}
+                  className="!w-3 !h-3 !bg-primary/60 !border-2 !border-background"
+                  style={{ left: 2 }}
                 />
                 <span className="flex-1 font-mono truncate">
                   {field.is_identity ? `★ ${field.field}` : field.field}

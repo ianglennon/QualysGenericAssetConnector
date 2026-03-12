@@ -2,12 +2,13 @@ import { Link, useLocation } from 'react-router-dom'
 import { Home, Database, History, Settings } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
+import { ROUTES } from '@/routes/constants'
 
 const navigation = [
-  { name: 'Dashboard', href: '/dashboard', icon: Home, roles: ['admin', 'operator'] },
-  { name: 'Connectors', href: '/connectors', icon: Database, roles: ['admin', 'operator'] },
-  { name: 'Run History', href: '/run-history', icon: History, roles: ['admin', 'operator'] },
-  { name: 'Settings', href: '/settings', icon: Settings, roles: ['admin'] },
+  { name: 'Dashboard', href: ROUTES.DASHBOARD, icon: Home, roles: ['admin', 'operator'] },
+  { name: 'Connectors', href: ROUTES.CONNECTORS, icon: Database, roles: ['admin', 'operator'] },
+  { name: 'Run History', href: ROUTES.RUNS, icon: History, roles: ['admin', 'operator'] },
+  { name: 'Settings', href: ROUTES.SETTINGS, icon: Settings, roles: ['admin'] },
 ]
 
 export function Sidebar() {

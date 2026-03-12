@@ -6,6 +6,7 @@ import {
   BackgroundVariant,
   useNodesState,
   useEdgesState,
+  useUpdateNodeInternals,
   addEdge,
   type Connection,
   type Edge,
@@ -41,14 +42,27 @@ const edgeTypes = {
   mapping: MappingEdge,
 }
 
+// Normalize connection so source is always source-panel, target is always target-panel.
+// React Flow may invert source/target depending on drag direction.
+export function normalizeConnection(connection: Connection): Connection {
+  if (connection.source === 'source-panel') return connection
+  return {
+    source: 'target-panel' === connection.source ? 'source-panel' : connection.source,
+    target: 'source-panel' === connection.target ? 'target-panel' : connection.target,
+    sourceHandle: connection.targetHandle,
+    targetHandle: connection.sourceHandle,
+  }
+}
+
 // Pure helper for onConnect — exported for unit testing
 export function applyConnect(connection: Connection, currentEdges: Edge[]): Edge[] {
-  // Replace any existing edge from this source OR to this target (one-to-one enforcement)
+  const norm = normalizeConnection(connection)
+  // One-to-one: each source field maps to one target, each target receives from one source
   const filtered = currentEdges.filter(
-    e => e.source !== connection.source && e.target !== connection.target
+    e => e.sourceHandle !== norm.sourceHandle && e.targetHandle !== norm.targetHandle
   )
   return addEdge(
-    { ...connection, type: 'mapping', data: { mappingType: 'direct' } },
+    { ...norm, type: 'mapping', data: { mappingType: 'direct' } },
     filtered
   )
 }
@@ -111,6 +125,7 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+  const updateNodeInternals = useUpdateNodeInternals()
 
   const seededEndpointRef = useRef<string | null>(null)
 
@@ -211,6 +226,20 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
       )
     )
   }, [schemaData, edges, setNodes])
+
+  // Recalculate handle positions after fields move between linked/unlinked sections.
+  // Without this, edge lines point to stale handle positions and become invisible.
+  const prevEdgeCountRef = useRef(0)
+  useEffect(() => {
+    if (edges.length !== prevEdgeCountRef.current) {
+      prevEdgeCountRef.current = edges.length
+      // Allow React to re-render the nodes first, then update internals
+      requestAnimationFrame(() => {
+        updateNodeInternals('source-panel')
+        updateNodeInternals('target-panel')
+      })
+    }
+  }, [edges, updateNodeInternals])
 
   function handleDiscoverClick() {
     discoverFields.mutate(

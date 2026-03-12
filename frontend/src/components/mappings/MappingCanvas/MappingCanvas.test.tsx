@@ -4,7 +4,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { SourcePanelNode } from './SourcePanelNode'
 import { TargetPanelNode } from './TargetPanelNode'
-import { applyConnect, isValidConnection, MappingCanvas } from './MappingCanvas'
+import { applyConnect, normalizeConnection, isValidConnection, MappingCanvas } from './MappingCanvas'
 import type { Edge, Connection } from '@xyflow/react'
 
 // These stubs are RED until Plans 02 and 03 implement the components.
@@ -308,6 +308,32 @@ describe('MappingCanvas', () => {
   })
 })
 
+describe('normalizeConnection', () => {
+  it('passes through connection already in source→target order', () => {
+    const conn: Connection = {
+      source: 'source-panel',
+      target: 'target-panel',
+      sourceHandle: 'hostname',
+      targetHandle: 'name',
+    }
+    expect(normalizeConnection(conn)).toEqual(conn)
+  })
+
+  it('swaps inverted target→source connection to source→target', () => {
+    const conn: Connection = {
+      source: 'target-panel',
+      target: 'source-panel',
+      sourceHandle: 'name',
+      targetHandle: 'hostname',
+    }
+    const result = normalizeConnection(conn)
+    expect(result.source).toBe('source-panel')
+    expect(result.target).toBe('target-panel')
+    expect(result.sourceHandle).toBe('hostname')
+    expect(result.targetHandle).toBe('name')
+  })
+})
+
 describe('connection logic', () => {
   it('applyConnect adds edge with mappingType=direct', () => {
     const connection: Connection = {
@@ -360,6 +386,42 @@ describe('connection logic', () => {
     const result = applyConnect(connection, [existing])
     expect(result).toHaveLength(1)
     expect(result[0].sourceHandle).toBe('address.city')
+  })
+
+  it('applyConnect preserves unrelated edges (no overwrite)', () => {
+    const existing: Edge = {
+      id: '1',
+      source: 'source-panel',
+      target: 'target-panel',
+      sourceHandle: 'hostname',
+      targetHandle: 'name',
+      data: { mappingType: 'direct' },
+    }
+    const connection: Connection = {
+      source: 'source-panel',
+      target: 'target-panel',
+      sourceHandle: 'address.city',
+      targetHandle: 'address',
+    }
+    const result = applyConnect(connection, [existing])
+    expect(result).toHaveLength(2)
+    expect(result.find(e => e.sourceHandle === 'hostname')).toBeTruthy()
+    expect(result.find(e => e.sourceHandle === 'address.city')).toBeTruthy()
+  })
+
+  it('applyConnect normalizes inverted connection from target panel drag', () => {
+    const connection: Connection = {
+      source: 'target-panel',
+      target: 'source-panel',
+      sourceHandle: 'name',
+      targetHandle: 'hostname',
+    }
+    const result = applyConnect(connection, [])
+    expect(result).toHaveLength(1)
+    expect(result[0].source).toBe('source-panel')
+    expect(result[0].target).toBe('target-panel')
+    expect(result[0].sourceHandle).toBe('hostname')
+    expect(result[0].targetHandle).toBe('name')
   })
 
   it('isValidConnection returns false for self-loop (source === target)', () => {

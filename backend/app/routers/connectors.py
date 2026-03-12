@@ -162,15 +162,6 @@ def delete_connector(
             detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
         )
 
-    # TODO Phase 3: Activate this guard when RunHistory model exists
-    # from app.models.run_history import RunHistory
-    # active_run = db.query(RunHistory).filter(
-    #     RunHistory.connector_id == connector_id,
-    #     RunHistory.status == "running"
-    # ).first()
-    # if active_run:
-    #     raise HTTPException(status_code=409, detail=make_error("CONNECTOR_RUN_IN_PROGRESS", "Cannot delete connector while a run is active", {}))
-
     db.delete(connector)
     db.commit()
 

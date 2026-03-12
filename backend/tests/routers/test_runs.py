@@ -519,6 +519,144 @@ def test_runs_stats_not_captured_as_run_id(client, admin_token, seeded_runs):
     assert "error" not in data
 
 
+def test_list_runs_filter_by_connector(client, admin_token, seeded_runs):
+    """GET /runs?connector_id=X returns only runs for connector X."""
+    connector_a_id = seeded_runs["connector_a_id"]
+    resp = client.get(
+        f"/api/v1/runs?connector_id={connector_a_id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    items = data["items"]
+    # Connector A has run1 (success) and run2 (failed) — both must appear
+    assert len(items) >= 2
+    for run in items:
+        assert run["connector_id"] == connector_a_id
+    # Connector B's run3 must NOT appear
+    run_ids = {run["id"] for run in items}
+    assert seeded_runs["run3_id"] not in run_ids
+    assert seeded_runs["run1_id"] in run_ids
+    assert seeded_runs["run2_id"] in run_ids
+
+
+def test_list_runs_filter_by_status(client, admin_token, seeded_runs):
+    """GET /runs?status=failed returns only failed runs."""
+    resp = client.get(
+        "/api/v1/runs?status=failed",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    items = data["items"]
+    for run in items:
+        assert run["status"] == "failed"
+    run_ids = {run["id"] for run in items}
+    assert seeded_runs["run2_id"] in run_ids
+    assert seeded_runs["run1_id"] not in run_ids
+    assert seeded_runs["run3_id"] not in run_ids
+
+
+def test_list_runs_filter_date_from(client, admin_token, seeded_runs):
+    """GET /runs?date_from=YYYY-MM-DD excludes runs started before that date."""
+    from app.db.session import SessionLocal as _SessionLocal
+    # Create an old run 3 days ago
+    old_started_at = datetime.utcnow() - timedelta(days=3)
+    db = _SessionLocal()
+    try:
+        old_run = RunHistory(
+            connector_id=seeded_runs["connector_a_id"],
+            status=RunStatus.success,
+            started_at=old_started_at,
+            finished_at=old_started_at + timedelta(minutes=1),
+            records_fetched=1,
+            records_submitted=1,
+            records_failed=0,
+        )
+        db.add(old_run)
+        db.commit()
+        db.refresh(old_run)
+        old_run_id = old_run.id
+    finally:
+        db.close()
+
+    # Filter with date_from = yesterday (ISO date string)
+    yesterday = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
+    resp = client.get(
+        f"/api/v1/runs?date_from={yesterday}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    run_ids = {run["id"] for run in data["items"]}
+    # Recent runs (started within last 10 minutes) must be included
+    assert seeded_runs["run1_id"] in run_ids
+    assert seeded_runs["run2_id"] in run_ids
+    assert seeded_runs["run3_id"] in run_ids
+    # Old run (3 days ago) must be excluded
+    assert old_run_id not in run_ids
+
+
+def test_list_runs_filter_date_to(client, admin_token, seeded_runs):
+    """GET /runs?date_to=YYYY-MM-DD excludes runs started after that date."""
+    from app.db.session import SessionLocal as _SessionLocal
+    # Create an old run 3 days ago so we have something within the date_to range
+    old_started_at = datetime.utcnow() - timedelta(days=3)
+    db = _SessionLocal()
+    try:
+        old_run = RunHistory(
+            connector_id=seeded_runs["connector_b_id"],
+            status=RunStatus.failed,
+            started_at=old_started_at,
+            finished_at=old_started_at + timedelta(minutes=1),
+            records_fetched=2,
+            records_submitted=0,
+            records_failed=2,
+        )
+        db.add(old_run)
+        db.commit()
+        db.refresh(old_run)
+        old_run_id = old_run.id
+    finally:
+        db.close()
+
+    # Filter with date_to = yesterday — only runs started on or before yesterday
+    yesterday = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
+    resp = client.get(
+        f"/api/v1/runs?date_to={yesterday}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    run_ids = {run["id"] for run in data["items"]}
+    # Old run (3 days ago) must be included
+    assert old_run_id in run_ids
+    # Recent runs (started within last 10 minutes, i.e. today) must be excluded
+    assert seeded_runs["run1_id"] not in run_ids
+    assert seeded_runs["run2_id"] not in run_ids
+    assert seeded_runs["run3_id"] not in run_ids
+
+
+def test_list_runs_filter_combined(client, admin_token, seeded_runs):
+    """GET /runs?connector_id=A&status=success returns only run1 (connector A + success)."""
+    connector_a_id = seeded_runs["connector_a_id"]
+    resp = client.get(
+        f"/api/v1/runs?connector_id={connector_a_id}&status=success",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    items = data["items"]
+    # Only run1 (connector A, success) should appear
+    for run in items:
+        assert run["connector_id"] == connector_a_id
+        assert run["status"] == "success"
+    run_ids = {run["id"] for run in items}
+    assert seeded_runs["run1_id"] in run_ids
+    assert seeded_runs["run2_id"] not in run_ids  # connector A but failed
+    assert seeded_runs["run3_id"] not in run_ids  # connector B
+
+
 def test_runs_stats_empty_history():
     """Stats endpoint handles empty run history — zero runs edge case."""
     db_path = os.path.abspath("test_runs_empty_stats.db")

@@ -4,6 +4,7 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from alembic import command
 from alembic.config import Config
+from fastapi_pagination import add_pagination
 import logging
 
 from app.core.settings import get_settings
@@ -62,6 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(field_mappings.router, prefix="/api/v1")
     app.include_router(endpoints.router, prefix="/api/v1")
 
+    add_pagination(app)
     return app
 
 

@@ -330,6 +330,17 @@ def test_trigger_run_updates_status_on_completion(client, admin_token):
         db.close()
 
 
+def test_pagination_initialized(client, admin_token, seeded_runs):
+    """Smoke test: confirms add_pagination(app) is active and paginated response includes full metadata."""
+    resp = client.get("/api/v1/runs", headers={"Authorization": f"Bearer {admin_token}"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "items" in data
+    assert "total" in data
+    assert "page" in data
+    assert "size" in data
+
+
 def test_list_runs_pagination_params(client, admin_token, seeded_runs):
     """Test that pagination parameters work correctly."""
     resp = client.get(

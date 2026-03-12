@@ -92,29 +92,37 @@ def list_runs(
     _user=Depends(require_role("admin", "operator")),
 ):
     """List all runs across all connectors with cursor pagination."""
-    # Build query with connector name joined
+    # Build query returning only RunHistory objects (paginator validates against response_model)
     query = (
-        select(RunHistory, Connector.name.label("connector_name"))
-        .join(Connector, RunHistory.connector_id == Connector.id)
+        select(RunHistory)
         .order_by(desc(RunHistory.started_at))
     )
-    
+
     # Paginate
     page = paginate(db, query, params)
-    
+
+    # Batch-load connector names for this page
+    connector_ids = list({run.connector_id for run in page.items})
+    connectors = (
+        db.query(Connector)
+        .filter(Connector.id.in_(connector_ids))
+        .all()
+    ) if connector_ids else []
+    connector_name_map = {c.id: c.name for c in connectors}
+
     # Transform results to include connector_name and failures
     items = []
-    for run, connector_name in page.items:
+    for run in page.items:
         # Load failures if status is failed or partial_success
         failures = []
         if run.status in ["failed", "partial_success"]:
             failures_query = db.query(RunFailure).filter_by(run_id=run.id).limit(10).all()
             failures = failures_query
-        
+
         response = _to_response(run, failures)
-        response.connector_name = connector_name
+        response.connector_name = connector_name_map.get(run.connector_id)
         items.append(response)
-    
+
     page.items = items
     return page
 
@@ -183,26 +191,25 @@ def list_connector_runs(
         )
     
     query = (
-        select(RunHistory, Connector.name.label("connector_name"))
-        .join(Connector, RunHistory.connector_id == Connector.id)
+        select(RunHistory)
         .filter(RunHistory.connector_id == connector_id)
         .order_by(desc(RunHistory.started_at))
     )
-    
+
     page = paginate(db, query, params)
-    
+
     # Transform with failures
     items = []
-    for run, connector_name in page.items:
+    for run in page.items:
         failures = []
         if run.status in ["failed", "partial_success"]:
             failures_query = db.query(RunFailure).filter_by(run_id=run.id).limit(10).all()
             failures = failures_query
-        
+
         response = _to_response(run, failures)
-        response.connector_name = connector_name
+        response.connector_name = connector.name
         items.append(response)
-    
+
     page.items = items
     return page
 

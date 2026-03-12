@@ -4,7 +4,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ArrowLeft, AlertCircle } from 'lucide-react'
 import { useRun } from '@/hooks/queries/useRuns'
@@ -44,14 +43,6 @@ export default function RunDetailPage() {
       return `${minutes}m ${seconds % 60}s`
     }
     return `${seconds}s`
-  }
-
-  const filterAuthHeaders = (headers: any): any => {
-    if (!headers) return headers
-    const filtered = { ...headers }
-    delete filtered.authorization
-    delete filtered.Authorization
-    return filtered
   }
 
   if (isLoading) {
@@ -98,15 +89,7 @@ export default function RunDetailPage() {
         <p className="text-muted-foreground mt-2">Run ID: {run.id}</p>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="request">Request</TabsTrigger>
-          <TabsTrigger value="response">Response</TabsTrigger>
-          {run.error_details && <TabsTrigger value="errors">Error Details</TabsTrigger>}
-        </TabsList>
-
-        <TabsContent value="overview" className="space-y-4">
+      <div className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle>Run Summary</CardTitle>
@@ -206,86 +189,7 @@ export default function RunDetailPage() {
                 ))}
             </div>
           )}
-        </TabsContent>
-
-        <TabsContent value="request" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Request Payload</CardTitle>
-              <CardDescription>Data sent to target API</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <pre className="text-xs p-4 bg-muted rounded-md overflow-auto max-h-96">
-                {run.request_payload
-                  ? JSON.stringify(run.request_payload, null, 2)
-                  : 'No request payload recorded'}
-              </pre>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Request Headers</CardTitle>
-              <CardDescription>
-                HTTP headers (authorization headers excluded for security)
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <pre className="text-xs p-4 bg-muted rounded-md overflow-auto max-h-96">
-                {run.request_headers
-                  ? JSON.stringify(filterAuthHeaders(run.request_headers), null, 2)
-                  : 'No request headers recorded'}
-              </pre>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="response" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Response Body</CardTitle>
-              <CardDescription>Response received from target API</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <pre className="text-xs p-4 bg-muted rounded-md overflow-auto max-h-96">
-                {run.response_body
-                  ? JSON.stringify(run.response_body, null, 2)
-                  : 'No response body recorded'}
-              </pre>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Response Headers</CardTitle>
-              <CardDescription>HTTP response headers</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <pre className="text-xs p-4 bg-muted rounded-md overflow-auto max-h-96">
-                {run.response_headers
-                  ? JSON.stringify(run.response_headers, null, 2)
-                  : 'No response headers recorded'}
-              </pre>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {run.error_details && (
-          <TabsContent value="errors">
-            <Card>
-              <CardHeader>
-                <CardTitle>Error Details</CardTitle>
-                <CardDescription>Detailed error information</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <pre className="text-xs p-4 bg-muted rounded-md overflow-auto max-h-96">
-                  {JSON.stringify(run.error_details, null, 2)}
-                </pre>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        )}
-      </Tabs>
+      </div>
     </div>
   )
 }

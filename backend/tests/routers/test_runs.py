@@ -31,20 +31,28 @@ def client():
         os.remove(db_path)
 
 
+def _get_or_create_user(email: str, password: str, role: UserRole) -> None:
+    """Create user if not already present (idempotent helper for module-scoped fixtures)."""
+    from app.models.user import User
+    db = SessionLocal()
+    try:
+        existing = db.query(User).filter(User.email == email).first()
+        if not existing:
+            create_user(db, email, password, role)
+    finally:
+        db.close()
+
+
 @pytest.fixture(scope="module")
 def admin_token(client):
-    db = SessionLocal()
-    create_user(db, "runs_admin@test.com", "AdminPass12!", UserRole.admin)
-    db.close()
+    _get_or_create_user("runs_admin@test.com", "AdminPass12!", UserRole.admin)
     resp = client.post("/api/v1/auth/login", json={"email": "runs_admin@test.com", "password": "AdminPass12!"})
     return resp.json()["access_token"]
 
 
 @pytest.fixture(scope="module")
 def operator_token(client):
-    db = SessionLocal()
-    create_user(db, "runs_op@test.com", "OperatorPass12!", UserRole.operator)
-    db.close()
+    _get_or_create_user("runs_op@test.com", "OperatorPass12!", UserRole.operator)
     resp = client.post("/api/v1/auth/login", json={"email": "runs_op@test.com", "password": "OperatorPass12!"})
     return resp.json()["access_token"]
 
@@ -138,10 +146,10 @@ def test_list_runs_as_admin(client, admin_token, seeded_runs):
     assert seeded_runs["run1_id"] in run_ids
     assert seeded_runs["run2_id"] in run_ids
 
-    # Verify connector_name is included
+    # Verify connector_name is included (DB may contain runs from other tests, so just verify it's populated)
     for run in data["items"]:
         assert "connector_name" in run
-        assert run["connector_name"] in ["Runs Connector A", "Runs Connector B"]
+        assert run["connector_name"] is not None
 
     run2 = next(run for run in data["items"] if run["id"] == seeded_runs["run2_id"])
     assert run2["status"] == "failed"
@@ -462,3 +470,113 @@ def test_trigger_returns_202_when_endpoints_valid(client, admin_token):
     data = resp.json()
     assert data["status"] == "running"
     assert "run_id" in data
+
+
+# Stats endpoint tests
+
+def test_get_runs_stats(client, admin_token, seeded_runs):
+    """GET /runs/stats returns 200 with all 4 required fields and sensible values."""
+    resp = client.get("/api/v1/runs/stats", headers={"Authorization": f"Bearer {admin_token}"})
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # All 4 fields must be present
+    assert "total_runs" in data
+    assert "success_rate" in data
+    assert "last_sync_at" in data
+    assert "recent_runs_24h" in data
+
+    # With seeded_runs (3 runs), totals should be >= 3
+    assert data["total_runs"] >= 3
+
+    # success_rate is a float 0.0 to 1.0
+    assert isinstance(data["success_rate"], float)
+    assert 0.0 <= data["success_rate"] <= 1.0
+
+    # All seeded runs are within last 24h
+    assert data["recent_runs_24h"] >= 3
+
+    # last_sync_at is not None (at least one run has finished)
+    assert data["last_sync_at"] is not None
+
+
+def test_get_runs_stats_as_operator(client, operator_token, seeded_runs):
+    """Stats endpoint is accessible by operator role."""
+    resp = client.get("/api/v1/runs/stats", headers={"Authorization": f"Bearer {operator_token}"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "total_runs" in data
+
+
+def test_runs_stats_not_captured_as_run_id(client, admin_token, seeded_runs):
+    """GET /runs/stats returns 200 (not 404 RUN_NOT_FOUND), confirming route order is correct."""
+    resp = client.get("/api/v1/runs/stats", headers={"Authorization": f"Bearer {admin_token}"})
+    # Must be 200, NOT 404 with RUN_NOT_FOUND
+    assert resp.status_code == 200
+    # Explicitly confirm it's not a RUN_NOT_FOUND error
+    data = resp.json()
+    assert "total_runs" in data
+    assert "error" not in data
+
+
+def test_runs_stats_empty_history():
+    """Stats endpoint handles empty run history — zero runs edge case."""
+    db_path = os.path.abspath("test_runs_empty_stats.db")
+    if os.path.exists(db_path):
+        os.remove(db_path)
+
+    # Spin up an isolated app with its own SQLite DB and session factory
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.db.base import Base
+    from app.main import create_app as _create_app
+    from app.db import session as _session_module
+
+    db_url = f"sqlite:///{db_path}"
+    engine = create_engine(db_url, connect_args={"check_same_thread": False})
+    Base.metadata.create_all(bind=engine)
+    IsolatedSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    empty_app = _create_app()
+
+    def _override_get_db():
+        db = IsolatedSession()
+        try:
+            db.execute(__import__("sqlalchemy").text("PRAGMA foreign_keys=ON"))
+            yield db
+        finally:
+            db.close()
+
+    from app.db.session import get_db
+    empty_app.dependency_overrides[get_db] = _override_get_db
+
+    try:
+        with TestClient(empty_app) as empty_client:
+            # Create admin user directly using isolated session
+            _db = IsolatedSession()
+            create_user(_db, "empty_stats_admin@test.com", "AdminPass12!", UserRole.admin)
+            _db.close()
+
+            # Log in
+            login_resp = empty_client.post(
+                "/api/v1/auth/login",
+                json={"email": "empty_stats_admin@test.com", "password": "AdminPass12!"},
+            )
+            assert login_resp.status_code == 200, login_resp.text
+            empty_token = login_resp.json()["access_token"]
+
+            # Call stats on empty DB (no runs)
+            resp = empty_client.get(
+                "/api/v1/runs/stats",
+                headers={"Authorization": f"Bearer {empty_token}"},
+            )
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["total_runs"] == 0
+            assert data["success_rate"] == 0.0
+            assert data["last_sync_at"] is None
+            assert data["recent_runs_24h"] == 0
+    finally:
+        engine.dispose()
+        if os.path.exists(db_path):
+            os.remove(db_path)

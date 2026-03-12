@@ -4,6 +4,13 @@ from typing import Optional
 from pydantic import BaseModel
 
 
+class RunStatsResponse(BaseModel):
+    total_runs: int
+    success_rate: float  # 0.0 to 1.0
+    last_sync_at: Optional[datetime]
+    recent_runs_24h: int
+
+
 class RunFailureSummary(BaseModel):
     record_identifier: str
     error_message: str

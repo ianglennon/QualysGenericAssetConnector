@@ -1,6 +1,9 @@
+from datetime import timedelta
+from datetime import datetime as _datetime
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, func, case
 from fastapi_pagination import Page, Params
 from fastapi_pagination.ext.sqlalchemy import paginate
 
@@ -10,7 +13,7 @@ from app.db.session import get_db
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
 from app.models.run_history import RunHistory, RunFailure, RunStatus, EndpointRunLog
-from app.schemas.run_history import RunHistoryResponse, RunFailureSummary, EndpointRunLogResponse
+from app.schemas.run_history import RunHistoryResponse, RunFailureSummary, EndpointRunLogResponse, RunStatsResponse
 from app.services.ingestion_service import create_run, run_ingestion
 from app.services.validation import validate_endpoint_mappings
 
@@ -125,6 +128,52 @@ def list_runs(
 
     page.items = items
     return page
+
+
+@router.get("/runs/stats", response_model=RunStatsResponse)
+def get_runs_stats(
+    db: Session = Depends(get_db),
+    _user=Depends(require_role("admin", "operator")),
+):
+    """Return aggregate run statistics for dashboard cards."""
+    now = _datetime.utcnow()
+    cutoff_24h = now - timedelta(hours=24)
+
+    total_runs = db.query(func.count(RunHistory.id)).scalar() or 0
+
+    if total_runs == 0:
+        return RunStatsResponse(
+            total_runs=0,
+            success_rate=0.0,
+            last_sync_at=None,
+            recent_runs_24h=0,
+        )
+
+    # Count runs with status in success or partial_success
+    successful_count = (
+        db.query(func.count(RunHistory.id))
+        .filter(RunHistory.status.in_([RunStatus.success, RunStatus.partial_success]))
+        .scalar()
+        or 0
+    )
+
+    success_rate = float(successful_count) / float(total_runs)
+
+    last_sync_at = db.query(func.max(RunHistory.finished_at)).scalar()
+
+    recent_runs_24h = (
+        db.query(func.count(RunHistory.id))
+        .filter(RunHistory.started_at >= cutoff_24h)
+        .scalar()
+        or 0
+    )
+
+    return RunStatsResponse(
+        total_runs=total_runs,
+        success_rate=success_rate,
+        last_sync_at=last_sync_at,
+        recent_runs_24h=recent_runs_24h,
+    )
 
 
 @router.get("/runs/{run_id}", response_model=RunHistoryResponse)

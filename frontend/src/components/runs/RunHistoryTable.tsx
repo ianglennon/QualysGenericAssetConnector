@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import {
   Table,
   TableBody,
@@ -9,39 +8,37 @@ import {
 } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useRuns } from '@/hooks/queries/useRuns'
-import { useConnectors } from '@/hooks/queries/useConnectors'
 import type { RunHistory, RunStatus } from '@/types/api'
 import { format } from 'date-fns'
 
+interface RunFilters {
+  connectorFilter: string
+  statusFilter: string
+  dateFrom: string
+  dateTo: string
+}
+
 interface RunHistoryTableProps {
+  filters: RunFilters
+  page: number
+  onPageChange: (page: number) => void
   onRowClick: (run: RunHistory) => void
 }
 
-export const RunHistoryTable = ({ onRowClick }: RunHistoryTableProps) => {
-  const [connectorFilter, setConnectorFilter] = useState<string>('all')
-  const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [dateFrom, setDateFrom] = useState<string>('')
-  const [dateTo, setDateTo] = useState<string>('')
-  const [page, setPage] = useState(1)
-
-  const { data: connectors } = useConnectors()
+export const RunHistoryTable = ({
+  filters,
+  page,
+  onPageChange,
+  onRowClick,
+}: RunHistoryTableProps) => {
   const { data: runsData, isLoading } = useRuns({
-    connector_id: connectorFilter !== 'all' ? connectorFilter : undefined,
-    status: statusFilter !== 'all' ? statusFilter : undefined,
-    date_from: dateFrom || undefined,
-    date_to: dateTo || undefined,
+    connector_id: filters.connectorFilter !== 'all' ? filters.connectorFilter : undefined,
+    status: filters.statusFilter !== 'all' ? filters.statusFilter : undefined,
+    date_from: filters.dateFrom || undefined,
+    date_to: filters.dateTo || undefined,
     page,
     size: 20,
   })
@@ -79,59 +76,6 @@ export const RunHistoryTable = ({ onRowClick }: RunHistoryTableProps) => {
 
   return (
     <div className="space-y-4">
-      {/* Filters */}
-      <div className="grid grid-cols-4 gap-4 p-4 border rounded-lg bg-card">
-        <div className="space-y-2">
-          <Label>Connector</Label>
-          <Select value={connectorFilter} onValueChange={setConnectorFilter}>
-            <SelectTrigger>
-              <SelectValue placeholder="All connectors" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All connectors</SelectItem>
-              {connectors?.map((connector) => (
-                <SelectItem key={connector.id} value={connector.id}>
-                  {connector.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-2">
-          <Label>Status</Label>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger>
-              <SelectValue placeholder="All statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              <SelectItem value="success">Success</SelectItem>
-              <SelectItem value="partial_success">Partial Success</SelectItem>
-              <SelectItem value="failed">Failed</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="space-y-2">
-          <Label>Date From</Label>
-          <Input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label>Date To</Label>
-          <Input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-          />
-        </div>
-      </div>
-
       {/* Table */}
       <div className="border rounded-lg">
         <Table>
@@ -209,7 +153,7 @@ export const RunHistoryTable = ({ onRowClick }: RunHistoryTableProps) => {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            onClick={() => onPageChange(Math.max(1, page - 1))}
             disabled={page === 1}
           >
             <ChevronLeft className="h-4 w-4" />
@@ -218,7 +162,7 @@ export const RunHistoryTable = ({ onRowClick }: RunHistoryTableProps) => {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setPage((p) => p + 1)}
+            onClick={() => onPageChange(page + 1)}
             disabled={!runsData?.cursor && (runsData?.items.length || 0) < 20}
           >
             Next

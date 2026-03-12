@@ -12,6 +12,23 @@ import {
   type Edge,
   type Node,
 } from '@xyflow/react'
+
+// Must be a child of <ReactFlow> to access the zustand store.
+// Recalculates handle positions after fields move between linked/unlinked sections.
+function HandlePositionUpdater({ edgeCount }: { edgeCount: number }) {
+  const updateNodeInternals = useUpdateNodeInternals()
+  const prevRef = useRef(edgeCount)
+  useEffect(() => {
+    if (edgeCount !== prevRef.current) {
+      prevRef.current = edgeCount
+      requestAnimationFrame(() => {
+        updateNodeInternals('source-panel')
+        updateNodeInternals('target-panel')
+      })
+    }
+  }, [edgeCount, updateNodeInternals])
+  return null
+}
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { useQualysSchema } from '@/hooks/queries/useQualysSchema'
@@ -125,7 +142,6 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
 
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
-  const updateNodeInternals = useUpdateNodeInternals()
 
   const seededEndpointRef = useRef<string | null>(null)
 
@@ -227,20 +243,6 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
     )
   }, [schemaData, edges, setNodes])
 
-  // Recalculate handle positions after fields move between linked/unlinked sections.
-  // Without this, edge lines point to stale handle positions and become invisible.
-  const prevEdgeCountRef = useRef(0)
-  useEffect(() => {
-    if (edges.length !== prevEdgeCountRef.current) {
-      prevEdgeCountRef.current = edges.length
-      // Allow React to re-render the nodes first, then update internals
-      requestAnimationFrame(() => {
-        updateNodeInternals('source-panel')
-        updateNodeInternals('target-panel')
-      })
-    }
-  }, [edges, updateNodeInternals])
-
   function handleDiscoverClick() {
     discoverFields.mutate(
       { connectorId, endpointId },
@@ -315,6 +317,7 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
           style={{ width: '100%', height: '100%' }}
         >
           <Background variant={BackgroundVariant.Dots} />
+          <HandlePositionUpdater edgeCount={edges.length} />
         </ReactFlow>
       </div>
     </div>

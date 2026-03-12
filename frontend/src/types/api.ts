@@ -178,11 +178,6 @@ export interface RunHistory {
   records_submitted: number
   records_failed: number
   error_message?: string
-  error_details?: any
-  request_payload?: any
-  request_headers?: any
-  response_body?: any
-  response_headers?: any
   endpoint_logs: EndpointRunLog[]
 }
 

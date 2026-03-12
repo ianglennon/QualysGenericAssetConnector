@@ -236,6 +236,71 @@ def test_batch_replace_endpoint_mappings_returns_actual_is_valid(setup_db):
 
 
 # ---------------------------------------------------------------------------
+# DB persistence of is_valid_mappings
+# ---------------------------------------------------------------------------
+
+def test_batch_replace_persists_is_valid_mappings_to_connector(setup_db):
+    """batch_replace_endpoint_mappings must write is_valid_mappings to the Connector row.
+
+    Step 1: PUT valid mappings (identity hostName) → response is_valid_mappings=True,
+            AND querying Connector row directly shows is_valid_mappings=True.
+    Step 2: PUT empty mappings → response is_valid_mappings=False,
+            AND querying Connector row directly shows is_valid_mappings=False.
+    """
+    conn_id = _seed_connector(setup_db)
+    ep_id = _seed_endpoint(setup_db, conn_id)
+
+    with TestClient(fastapi_app) as client:
+        # Step 1: identity mapping → valid
+        resp = client.put(
+            f"/api/v1/connectors/{conn_id}/endpoints/{ep_id}/mappings",
+            json={
+                "mappings": [
+                    {
+                        "mapping_type": "direct_copy",
+                        "target_field": "hostName",
+                        "source_field": "name",
+                        "order": 0,
+                    }
+                ]
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["is_valid_mappings"] is True
+
+    # Verify DB state (new session to avoid cache)
+    db = setup_db()
+    try:
+        connector = db.query(Connector).filter_by(id=conn_id).first()
+        assert connector is not None
+        assert connector.is_valid_mappings == True, (
+            f"Expected Connector.is_valid_mappings=True in DB after valid PUT, got {connector.is_valid_mappings}"
+        )
+    finally:
+        db.close()
+
+    with TestClient(fastapi_app) as client:
+        # Step 2: empty mappings → invalid
+        resp = client.put(
+            f"/api/v1/connectors/{conn_id}/endpoints/{ep_id}/mappings",
+            json={"mappings": []},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["is_valid_mappings"] is False
+
+    # Verify DB state (new session)
+    db = setup_db()
+    try:
+        connector = db.query(Connector).filter_by(id=conn_id).first()
+        assert connector is not None
+        assert connector.is_valid_mappings == False, (
+            f"Expected Connector.is_valid_mappings=False in DB after empty PUT, got {connector.is_valid_mappings}"
+        )
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
 # Deprecated connector-scoped discover route test
 # ---------------------------------------------------------------------------
 

@@ -97,6 +97,12 @@ def batch_replace_endpoint_mappings(
     is_valid, invalid_endpoints = validate_endpoint_mappings(connector_id, db)
     validation_errors = [ep["name"] for ep in invalid_endpoints]
 
+    # Persist validity to connector row so UI badge updates immediately
+    connector = db.query(Connector).filter_by(id=connector_id).first()
+    if connector:
+        connector.is_valid_mappings = is_valid
+        db.commit()
+
     return BatchReplaceResponse(
         replaced=len(payload.mappings),
         is_valid_mappings=is_valid,

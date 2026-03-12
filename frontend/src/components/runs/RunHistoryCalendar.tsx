@@ -18,19 +18,29 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useState } from 'react'
 
+interface RunFilters {
+  connectorFilter: string
+  statusFilter: string
+  dateFrom: string
+  dateTo: string
+}
+
 interface RunHistoryCalendarProps {
+  filters: RunFilters
   onDayClick: (date: Date) => void
 }
 
-export const RunHistoryCalendar = ({ onDayClick }: RunHistoryCalendarProps) => {
+export const RunHistoryCalendar = ({ filters, onDayClick }: RunHistoryCalendarProps) => {
   const [currentMonth, setCurrentMonth] = useState(new Date())
-  
+
   const monthStart = startOfMonth(currentMonth)
   const monthEnd = endOfMonth(currentMonth)
   const calendarStart = startOfWeek(monthStart)
   const calendarEnd = endOfWeek(monthEnd)
 
   const { data: runsData, isLoading } = useRuns({
+    connector_id: filters.connectorFilter !== 'all' ? filters.connectorFilter : undefined,
+    status: filters.statusFilter !== 'all' ? filters.statusFilter : undefined,
     date_from: format(monthStart, 'yyyy-MM-dd'),
     date_to: format(monthEnd, 'yyyy-MM-dd'),
     size: 1000,

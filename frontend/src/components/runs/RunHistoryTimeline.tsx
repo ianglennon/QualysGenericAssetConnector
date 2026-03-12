@@ -5,12 +5,26 @@ import type { RunHistory, RunStatus } from '@/types/api'
 import { format, parseISO, startOfDay, isSameDay } from 'date-fns'
 import { CheckCircle2, AlertCircle, XCircle, Clock } from 'lucide-react'
 
+interface RunFilters {
+  connectorFilter: string
+  statusFilter: string
+  dateFrom: string
+  dateTo: string
+}
+
 interface RunHistoryTimelineProps {
+  filters: RunFilters
   onRunClick: (run: RunHistory) => void
 }
 
-export const RunHistoryTimeline = ({ onRunClick }: RunHistoryTimelineProps) => {
-  const { data: runsData, isLoading } = useRuns({ size: 50 })
+export const RunHistoryTimeline = ({ filters, onRunClick }: RunHistoryTimelineProps) => {
+  const { data: runsData, isLoading } = useRuns({
+    connector_id: filters.connectorFilter !== 'all' ? filters.connectorFilter : undefined,
+    status: filters.statusFilter !== 'all' ? filters.statusFilter : undefined,
+    date_from: filters.dateFrom || undefined,
+    date_to: filters.dateTo || undefined,
+    size: 50,
+  })
 
   const getStatusIcon = (status: RunStatus) => {
     switch (status) {
@@ -40,13 +54,13 @@ export const RunHistoryTimeline = ({ onRunClick }: RunHistoryTimelineProps) => {
 
   // Group runs by day
   const groupedRuns: { date: Date; runs: RunHistory[] }[] = []
-  
+
   runsData?.items.forEach((run) => {
     const runDate = startOfDay(parseISO(run.started_at))
     const existingGroup = groupedRuns.find((group) =>
       isSameDay(group.date, runDate)
     )
-    
+
     if (existingGroup) {
       existingGroup.runs.push(run)
     } else {

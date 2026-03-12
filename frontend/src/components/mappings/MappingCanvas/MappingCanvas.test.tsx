@@ -178,6 +178,17 @@ describe('SourcePanelNode', () => {
     expect(screen.getByText(/Linked \(1\)/)).toBeInTheDocument()
     expect(screen.getByText(/Unlinked \(1\)/)).toBeInTheDocument()
   })
+
+  it('outer div does NOT have overflow-hidden (handles must be visible)', () => {
+    const { container } = render(
+      <SourcePanelNode
+        {...minimalNodeProps as any}
+        data={{ fields: mockSourceFields, linkedSourceFields: new Set() }}
+      />
+    )
+    const outerDiv = container.querySelector('.bg-card.border.rounded-lg')
+    expect(outerDiv?.className).not.toContain('overflow-hidden')
+  })
 })
 
 describe('TargetPanelNode', () => {
@@ -235,6 +246,17 @@ describe('TargetPanelNode', () => {
       />
     )
     expect(screen.getByText(/Linked \(0\)/)).toBeInTheDocument()
+  })
+
+  it('outer div does NOT have overflow-hidden (handles must be visible)', () => {
+    const { container } = render(
+      <TargetPanelNode
+        {...minimalNodeProps as any}
+        data={{ fields: mockTargetFields, linkedTargetFields: new Set() }}
+      />
+    )
+    const outerDiv = container.querySelector('.bg-card.border.rounded-lg')
+    expect(outerDiv?.className).not.toContain('overflow-hidden')
   })
 })
 

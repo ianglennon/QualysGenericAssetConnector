@@ -8,14 +8,16 @@ interface ConnectorListProps {
   onEdit?: (connector: Connector) => void
   onDelete?: (connector: Connector) => void
   onTriggerSync?: (connector: Connector) => void
+  syncSuccessId?: string | null
 }
 
-export function ConnectorList({ 
-  connectors = [], 
-  isLoading = false, 
-  onEdit, 
-  onDelete, 
-  onTriggerSync 
+export function ConnectorList({
+  connectors = [],
+  isLoading = false,
+  onEdit,
+  onDelete,
+  onTriggerSync,
+  syncSuccessId,
 }: ConnectorListProps) {
   if (isLoading) {
     return (
@@ -47,6 +49,7 @@ export function ConnectorList({
           onEdit={onEdit}
           onDelete={onDelete}
           onTriggerSync={onTriggerSync}
+          isSyncSucceeded={syncSuccessId === connector.id}
         />
       ))}
     </div>

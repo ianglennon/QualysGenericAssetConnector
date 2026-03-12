@@ -29,6 +29,7 @@ export function ConnectorListPage() {
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
   const [selectedConnector, setSelectedConnector] = useState<Connector | null>(null)
+  const [syncSuccessId, setSyncSuccessId] = useState<string | null>(null)
 
   const isAdmin = user?.role === 'admin'
 
@@ -102,9 +103,16 @@ export function ConnectorListPage() {
   const handleTriggerSync = async (connector: Connector) => {
     try {
       await triggerRunMutation.mutateAsync(connector.id)
-      toast({ title: 'Sync triggered', description: `${connector.name} run started.` })
-    } catch {
-      toast({ title: 'Sync failed', variant: 'destructive' })
+      setSyncSuccessId(connector.id)
+      setTimeout(() => setSyncSuccessId(null), 3000)
+    } catch (error: unknown) {
+      const axiosError = error as { response?: { data?: { error?: { message?: string } } } }
+      const message = axiosError.response?.data?.error?.message ?? 'An unexpected error occurred'
+      toast({
+        title: 'Sync failed',
+        description: message,
+        variant: 'destructive',
+      })
     }
   }
 
@@ -127,6 +135,7 @@ export function ConnectorListPage() {
           onEdit={isAdmin ? handleEdit : undefined}
           onDelete={isAdmin ? handleDeleteClick : undefined}
           onTriggerSync={handleTriggerSync}
+          syncSuccessId={syncSuccessId}
         />
       </PageContainer>
 

@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { ROUTES } from '@/routes/constants'
-import { MoreVertical, Play, Pencil, Trash2 } from 'lucide-react'
+import { MoreVertical, Play, Check, Pencil, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -18,9 +18,10 @@ interface ConnectorCardProps {
   onEdit?: (connector: Connector) => void
   onDelete?: (connector: Connector) => void
   onTriggerSync?: (connector: Connector) => void
+  isSyncSucceeded?: boolean
 }
 
-export function ConnectorCard({ connector, onEdit, onDelete, onTriggerSync }: ConnectorCardProps) {
+export function ConnectorCard({ connector, onEdit, onDelete, onTriggerSync, isSyncSucceeded }: ConnectorCardProps) {
   const { user } = useAuth()
   const navigate = useNavigate()
 
@@ -36,10 +37,15 @@ export function ConnectorCard({ connector, onEdit, onDelete, onTriggerSync }: Co
               variant="ghost"
               size="sm"
               onClick={() => onTriggerSync(connector)}
-              disabled={!connector.has_valid_endpoints}
-              title={connector.has_valid_endpoints ? 'Trigger Sync' : 'Connector has invalid endpoint mappings'}
+              disabled={!connector.has_valid_endpoints || isSyncSucceeded}
+              title={
+                isSyncSucceeded ? 'Sync triggered'
+                : connector.has_valid_endpoints ? 'Trigger Sync'
+                : 'Connector has invalid endpoint mappings'
+              }
+              className={isSyncSucceeded ? 'text-green-600' : ''}
             >
-              <Play className="h-4 w-4" />
+              {isSyncSucceeded ? <Check className="h-4 w-4" /> : <Play className="h-4 w-4" />}
             </Button>
           )}
           {isAdmin && (onEdit || onDelete) && (

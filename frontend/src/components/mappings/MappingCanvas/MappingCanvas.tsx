@@ -1,34 +1,16 @@
 import '@xyflow/react/dist/style.css'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
   BackgroundVariant,
   useNodesState,
   useEdgesState,
-  useUpdateNodeInternals,
   addEdge,
   type Connection,
   type Edge,
   type Node,
 } from '@xyflow/react'
-
-// Must be a child of <ReactFlow> to access the zustand store.
-// Recalculates handle positions after fields move between linked/unlinked sections.
-function HandlePositionUpdater({ edgeCount }: { edgeCount: number }) {
-  const updateNodeInternals = useUpdateNodeInternals()
-  const prevRef = useRef(edgeCount)
-  useEffect(() => {
-    if (edgeCount !== prevRef.current) {
-      prevRef.current = edgeCount
-      requestAnimationFrame(() => {
-        updateNodeInternals('source-panel')
-        updateNodeInternals('target-panel')
-      })
-    }
-  }, [edgeCount, updateNodeInternals])
-  return null
-}
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { useQualysSchema } from '@/hooks/queries/useQualysSchema'
@@ -202,7 +184,7 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
   }, [SOURCE_WIDTH, TARGET_WIDTH, TARGET_X, setNodes])
 
   // Compute source fields: discovered > saved mappings fallback > empty
-  const sourceFields = (() => {
+  const sourceFields = useMemo(() => {
     if (discoveredFields) return discoveredFields.fields
     if (savedMappings && savedMappings.length > 0) {
       // Extract unique source field names from saved mappings
@@ -212,7 +194,7 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
         .map(m => ({ path: m.source_field!, type: 'string', sample_value: null }))
     }
     return []
-  })()
+  }, [discoveredFields, savedMappings])
 
   // Update source panel data when fields change
   useEffect(() => {
@@ -317,7 +299,6 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
           style={{ width: '100%', height: '100%' }}
         >
           <Background variant={BackgroundVariant.Dots} />
-          <HandlePositionUpdater edgeCount={edges.length} />
         </ReactFlow>
       </div>
     </div>

@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useUpdateNodeInternals, useNodeId, Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import type { TargetPanelData, QualysSchemaField } from '@/types/canvas'
@@ -45,6 +46,13 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
     data.fields.filter(f => !data.linkedTargetFields.has(f.field))
   )
 
+  // Re-register handle positions when fields change (initial load, seeding)
+  useEffect(() => {
+    if (data.fields.length > 0) {
+      requestAnimationFrame(() => updateNodeInternals(nodeId))
+    }
+  }, [data.fields, data.linkedTargetFields, nodeId, updateNodeInternals])
+
   function handleScroll() {
     updateNodeInternals(nodeId)
   }
@@ -71,7 +79,7 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
             linkedFields.map(field => (
               <div
                 key={field.field}
-                className="relative flex items-center gap-2 px-3 py-1 text-xs border-r-2 border-primary/40 bg-primary/5"
+                className="relative flex items-center gap-2 px-3 py-2 text-xs border-r-2 border-primary/40 bg-primary/5"
               >
                 <Handle
                   type="target"
@@ -98,7 +106,7 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
         {unlinkedFields.map(field => (
           <div
             key={field.field}
-            className="relative flex items-center gap-2 px-3 py-1 text-xs hover:bg-muted/30"
+            className="relative flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted/30"
           >
             <Handle
               type="target"

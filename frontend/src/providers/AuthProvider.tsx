@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { apiClient, setTokens, clearTokens, getAccessToken } from '@/lib/api-client'
+import { ROUTES } from '@/routes/constants'
 import type { User, LoginRequest, TokenResponse } from '@/types/auth'
 
 interface AuthContextType {
@@ -56,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     clearTokens()
     setUser(null)
-    navigate('/login')
+    navigate(ROUTES.LOGIN)
   }
 
   const value: AuthContextType = {

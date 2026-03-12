@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ROUTES } from '@/routes/constants'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { GripVertical, Pencil, Trash2, MapPin } from 'lucide-react'
@@ -100,7 +101,7 @@ export function EndpointCard({ endpoint, connectorId, onEdit }: EndpointCardProp
           />
 
           <Button variant="outline" size="sm" asChild>
-            <Link to={`/connectors/${connectorId}/endpoints/${endpoint.id}/mappings`}>
+            <Link to={ROUTES.connectorMappings(connectorId, endpoint.id)}>
               <MapPin className="h-3 w-3 mr-1" />
               Mappings
             </Link>

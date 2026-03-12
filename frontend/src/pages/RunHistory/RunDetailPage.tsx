@@ -1,4 +1,5 @@
 import { useParams, Link } from 'react-router-dom'
+import { ROUTES } from '@/routes/constants'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -79,7 +80,7 @@ export default function RunDetailPage() {
   return (
     <div className="container mx-auto p-6 space-y-6">
       <div className="flex items-center gap-4">
-        <Link to="/runs">
+        <Link to={ROUTES.RUNS}>
           <Button variant="ghost" size="sm">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Run History

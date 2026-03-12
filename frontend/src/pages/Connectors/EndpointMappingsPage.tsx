@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import { ROUTES } from '@/routes/constants'
 import { ArrowLeft, Save } from 'lucide-react'
 import { useConnector } from '@/hooks/queries/useConnectors'
 import { useEndpoints } from '@/hooks/queries/useEndpoints'
@@ -92,7 +93,7 @@ export function EndpointMappingsPage() {
       <div className="flex items-center justify-between px-6 py-4 border-b shrink-0">
         <div className="flex items-center gap-4">
           <Link
-            to={`/connectors/${connectorId}`}
+            to={ROUTES.connectorDetail(connectorId ?? '')}
             className="text-muted-foreground hover:text-foreground transition-colors"
             aria-label="Back to connector"
           >

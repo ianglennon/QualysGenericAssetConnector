@@ -1,4 +1,5 @@
 import { createBrowserRouter, Outlet, Navigate } from 'react-router-dom'
+import { ROUTES } from './constants'
 import Login from '@/pages/Login'
 import Dashboard from '@/pages/Dashboard'
 import { ConnectorListPage } from '@/pages/Connectors/ConnectorListPage'
@@ -40,8 +41,8 @@ export const router = createBrowserRouter([
         children: [
           {
             index: true,
-            element: <Navigate to="/dashboard" replace />,
-          },
+            element: <Navigate to={ROUTES.DASHBOARD} replace />,
+},
           {
             path: 'dashboard',
             element: <Dashboard />,
@@ -80,7 +81,7 @@ export const router = createBrowserRouter([
             children: [
               {
                 index: true,
-                element: <Navigate to="/settings/qualys" replace />,
+                element: <Navigate to={ROUTES.SETTINGS_QUALYS} replace />,
               },
               {
                 path: 'qualys',

@@ -14,6 +14,7 @@ import { ExternalLink, AlertCircle } from 'lucide-react'
 import type { RunHistory } from '@/types/api'
 import { format } from 'date-fns'
 import { Link } from 'react-router-dom'
+import { ROUTES } from '@/routes/constants'
 
 interface RunDetailDrawerProps {
   run: RunHistory | null
@@ -130,7 +131,7 @@ export const RunDetailDrawer = ({ run, isOpen, onClose }: RunDetailDrawerProps) 
 
             {/* View Full Details Link */}
             <div className="flex justify-center pt-2">
-              <Link to={`/runs/${run.id}`} onClick={onClose}>
+              <Link to={ROUTES.runDetail(run.id)} onClick={onClose}>
                 <Button variant="outline">
                   <ExternalLink className="h-4 w-4 mr-2" />
                   View Full Details

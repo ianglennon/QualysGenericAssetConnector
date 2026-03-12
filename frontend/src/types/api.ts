@@ -165,7 +165,7 @@ export interface TestConnectionResponse {
 }
 
 // Run History Types
-export type RunStatus = 'success' | 'partial_success' | 'failed'
+export type RunStatus = 'success' | 'partial_success' | 'failed' | 'running'
 
 export interface RunHistory {
   id: string

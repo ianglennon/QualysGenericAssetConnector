@@ -4,10 +4,24 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { useConnector } from '@/hooks/queries/useConnectors'
+import { useTriggerRun } from '@/hooks/queries/useRuns'
+import { useToast } from '@/hooks/use-toast'
 import { EndpointList } from '@/components/connectors/EndpointList'
 
 export function ConnectorDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const triggerRun = useTriggerRun()
+  const { toast } = useToast()
+
+  const handleTriggerSync = async () => {
+    if (!id) return
+    try {
+      await triggerRun.mutateAsync(id)
+      toast({ title: 'Sync triggered', description: 'Run started successfully.' })
+    } catch {
+      toast({ title: 'Sync failed', variant: 'destructive' })
+    }
+  }
   const { data: connector, isLoading } = useConnector(id)
 
   if (isLoading) {
@@ -37,10 +51,11 @@ export function ConnectorDetailPage() {
           <Button variant="outline">Edit</Button>
           <Button variant="outline">Test</Button>
           <Button
-            disabled={!connector?.has_valid_endpoints}
+            disabled={!connector?.has_valid_endpoints || triggerRun.isPending}
+            onClick={handleTriggerSync}
             title={connector?.has_valid_endpoints ? 'Trigger Sync' : 'Connector has invalid endpoint mappings'}
           >
-            Trigger Sync
+            {triggerRun.isPending ? 'Running...' : 'Trigger Sync'}
           </Button>
         </div>
       }

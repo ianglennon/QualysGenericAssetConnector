@@ -11,6 +11,7 @@ import { PageContainer } from '@/components/layout/PageContainer'
 import { ConnectorList } from '@/components/connectors/ConnectorList'
 import { ConnectorWizard } from '@/components/connectors/ConnectorWizard'
 import { useConnectors, useCreateConnector, useUpdateConnector, useDeleteConnector } from '@/hooks/queries/useConnectors'
+import { useTriggerRun } from '@/hooks/queries/useRuns'
 import { useAuth } from '@/hooks/useAuth'
 import { useToast } from '@/hooks/use-toast'
 import type { Connector, ConnectorCreate } from '@/types/api'
@@ -21,6 +22,7 @@ export function ConnectorListPage() {
   const createMutation = useCreateConnector()
   const updateMutation = useUpdateConnector()
   const deleteMutation = useDeleteConnector()
+  const triggerRunMutation = useTriggerRun()
   const { toast } = useToast()
 
   const [isCreateOpen, setIsCreateOpen] = useState(false)
@@ -97,6 +99,15 @@ export function ConnectorListPage() {
     }
   }
 
+  const handleTriggerSync = async (connector: Connector) => {
+    try {
+      await triggerRunMutation.mutateAsync(connector.id)
+      toast({ title: 'Sync triggered', description: `${connector.name} run started.` })
+    } catch {
+      toast({ title: 'Sync failed', variant: 'destructive' })
+    }
+  }
+
   return (
     <>
       <PageContainer
@@ -115,6 +126,7 @@ export function ConnectorListPage() {
           isLoading={isLoading}
           onEdit={isAdmin ? handleEdit : undefined}
           onDelete={isAdmin ? handleDeleteClick : undefined}
+          onTriggerSync={handleTriggerSync}
         />
       </PageContainer>
 

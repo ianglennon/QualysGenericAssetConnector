@@ -30,16 +30,16 @@ interface RunHistoryTableProps {
 }
 
 export const RunHistoryTable = ({ onRowClick }: RunHistoryTableProps) => {
-  const [connectorFilter, setConnectorFilter] = useState<string>('')
-  const [statusFilter, setStatusFilter] = useState<string>('')
+  const [connectorFilter, setConnectorFilter] = useState<string>('all')
+  const [statusFilter, setStatusFilter] = useState<string>('all')
   const [dateFrom, setDateFrom] = useState<string>('')
   const [dateTo, setDateTo] = useState<string>('')
   const [page, setPage] = useState(1)
 
   const { data: connectors } = useConnectors()
   const { data: runsData, isLoading } = useRuns({
-    connector_id: connectorFilter || undefined,
-    status: statusFilter || undefined,
+    connector_id: connectorFilter !== 'all' ? connectorFilter : undefined,
+    status: statusFilter !== 'all' ? statusFilter : undefined,
     date_from: dateFrom || undefined,
     date_to: dateTo || undefined,
     page,
@@ -88,7 +88,7 @@ export const RunHistoryTable = ({ onRowClick }: RunHistoryTableProps) => {
               <SelectValue placeholder="All connectors" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All connectors</SelectItem>
+              <SelectItem value="all">All connectors</SelectItem>
               {connectors?.map((connector) => (
                 <SelectItem key={connector.id} value={connector.id}>
                   {connector.name}
@@ -105,7 +105,7 @@ export const RunHistoryTable = ({ onRowClick }: RunHistoryTableProps) => {
               <SelectValue placeholder="All statuses" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All statuses</SelectItem>
+              <SelectItem value="all">All statuses</SelectItem>
               <SelectItem value="success">Success</SelectItem>
               <SelectItem value="partial_success">Partial Success</SelectItem>
               <SelectItem value="failed">Failed</SelectItem>

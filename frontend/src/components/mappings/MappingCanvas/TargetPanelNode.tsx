@@ -9,6 +9,20 @@ function sortFields(fields: QualysSchemaField[]): QualysSchemaField[] {
   })
 }
 
+// Inline styles override React Flow's default handle CSS (6x6, transform: translate(-50%,-50%))
+// which pushes handles outside the container where overflow-x-hidden clips them.
+const TARGET_HANDLE_STYLE: React.CSSProperties = {
+  left: 0,
+  top: '50%',
+  transform: 'translateY(-50%)',
+  width: 12,
+  height: 12,
+  background: 'hsl(var(--primary) / 0.6)',
+  border: '2px solid hsl(var(--background))',
+  borderRadius: '50%',
+  zIndex: 10,
+}
+
 function Separator({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 py-1 px-2 text-xs text-muted-foreground">
@@ -64,8 +78,7 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
                   position={Position.Left}
                   id={field.field}
                   isConnectable={false}
-                  className="!w-3 !h-3 !bg-primary/60 !border-2 !border-background"
-                  style={{ left: 2 }}
+                  style={TARGET_HANDLE_STYLE}
                 />
                 <span className="flex-1 font-mono truncate">
                   {field.is_identity ? `★ ${field.field}` : field.field}
@@ -92,7 +105,7 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
               position={Position.Left}
               id={field.field}
               isConnectable={true}
-              style={{ left: -8 }}
+              style={TARGET_HANDLE_STYLE}
             />
             <span className="flex-1 font-mono truncate">
               {field.is_identity ? `★ ${field.field}` : field.field}

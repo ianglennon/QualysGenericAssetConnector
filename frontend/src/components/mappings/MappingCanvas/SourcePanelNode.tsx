@@ -14,6 +14,20 @@ function typeBadgeClass(type: string): string {
   return TYPE_BADGE[type] ?? 'bg-gray-100 text-gray-500'
 }
 
+// Inline styles override React Flow's default handle CSS (6x6, transform: translate(50%,-50%))
+// which pushes handles outside the container where overflow-x-hidden clips them.
+const SOURCE_HANDLE_STYLE: React.CSSProperties = {
+  right: 0,
+  top: '50%',
+  transform: 'translateY(-50%)',
+  width: 12,
+  height: 12,
+  background: 'hsl(var(--primary) / 0.6)',
+  border: '2px solid hsl(var(--background))',
+  borderRadius: '50%',
+  zIndex: 10,
+}
+
 function Separator({ label }: { label: string }) {
   return (
     <div className="flex items-center gap-2 py-1 px-2 text-xs text-muted-foreground">
@@ -73,8 +87,7 @@ export function SourcePanelNode({ data }: NodeProps & { data: SourcePanelData })
                   position={Position.Right}
                   id={field.path}
                   isConnectable={false}
-                  className="!w-3 !h-3 !bg-primary/60 !border-2 !border-background"
-                  style={{ right: 2 }}
+                  style={SOURCE_HANDLE_STYLE}
                 />
               </div>
             ))
@@ -97,7 +110,7 @@ export function SourcePanelNode({ data }: NodeProps & { data: SourcePanelData })
               position={Position.Right}
               id={field.path}
               isConnectable={true}
-              style={{ right: -8 }}
+              style={SOURCE_HANDLE_STYLE}
             />
           </div>
         ))}

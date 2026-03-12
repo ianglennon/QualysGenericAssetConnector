@@ -41,13 +41,14 @@ export function SourcePanelNode({ data }: NodeProps & { data: SourcePanelData })
   }
 
   return (
-    <div className="flex flex-col h-full bg-card border rounded-lg shadow-sm overflow-hidden">
+    <div className="flex flex-col h-full bg-card border rounded-lg shadow-sm">
       <div className="px-3 py-2 border-b font-semibold text-sm bg-muted/40">
         Source Fields
       </div>
 
       <div
-        className="nowheel overflow-y-auto flex-1"
+        className="nowheel overflow-y-auto overflow-x-hidden flex-1"
+        style={{ pointerEvents: 'auto' }}
         onScroll={handleScroll}
       >
         <Separator label={`——— Linked (${linked.length}) ———`} />

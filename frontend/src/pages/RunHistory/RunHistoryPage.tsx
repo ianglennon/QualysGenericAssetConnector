@@ -60,10 +60,7 @@ export default function RunHistoryPage() {
     setIsDrawerOpen(true)
   }
 
-  const handleDayClick = (date: Date) => {
-    // When clicking a day in calendar view, switch to table view filtered by that day
-    console.log('Day clicked:', date)
-    // TODO: Could implement day filtering in table view
+  const handleDayClick = (_date: Date) => {
     setViewMode('table')
   }
 

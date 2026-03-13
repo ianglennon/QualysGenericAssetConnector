@@ -5,10 +5,12 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 from sqlalchemy import text
+from sqlalchemy import inspect as sa_inspect
 from alembic import command
 from alembic.config import Config
 from fastapi_pagination import add_pagination
 import logging
+import sys
 import time
 
 from app.core.settings import get_settings
@@ -18,6 +20,17 @@ from app.db.session import SessionLocal
 _app_ready: bool = False
 
 logger = logging.getLogger(__name__)
+
+EXPECTED_TABLES = {
+    "connectors",
+    "connector_endpoints",
+    "field_mappings",
+    "qualys_config",
+    "run_history",
+    "run_failures",
+    "endpoint_run_logs",
+    "users",
+}
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
@@ -43,11 +56,50 @@ def run_migrations():
     logger.info("Database migrations applied")
 
 
+def verify_db_integrity() -> None:
+    """Verify all expected tables exist after migrations.
+
+    If tables are missing: stamp Alembic to base, re-run migrations.
+    If still missing after re-migration: log ERROR and sys.exit(1).
+    """
+    from app.db.session import engine
+    inspector = sa_inspect(engine)
+    actual = set(inspector.get_table_names())
+    missing = EXPECTED_TABLES - actual
+
+    if not missing:
+        logger.info("DB integrity OK — all %d expected tables present", len(EXPECTED_TABLES))
+        return
+
+    logger.error(
+        "DB integrity check FAILED — missing tables: %s. "
+        "Stamping Alembic to base and re-running migrations.",
+        sorted(missing),
+    )
+    cfg = Config("alembic.ini")
+    command.stamp(cfg, "base")
+    command.upgrade(cfg, "head")
+
+    # Fresh inspector to avoid cached results
+    inspector2 = sa_inspect(engine)
+    still_missing = EXPECTED_TABLES - set(inspector2.get_table_names())
+    if still_missing:
+        logger.error(
+            "Re-migration did NOT resolve missing tables: %s. "
+            "Manual intervention required. Exiting.",
+            sorted(still_missing),
+        )
+        sys.exit(1)
+
+    logger.info("Re-migration successful — all expected tables now present.")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _app_ready
     settings = get_settings()
     run_migrations()
+    verify_db_integrity()
     # Seed admin user on first startup if users table is empty
     from app.services.bootstrap_service import seed_admin_if_empty
     db = SessionLocal()

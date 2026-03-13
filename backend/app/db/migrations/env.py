@@ -22,7 +22,10 @@ settings = get_settings()
 config.set_main_option("sqlalchemy.url", settings.database_url)
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Pass disable_existing_loggers=False so uvicorn loggers registered at startup
+    # are not silenced by this fileConfig call. Python 3.12's fileConfig() does not
+    # read this value from the INI file — it must be passed as a keyword argument.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

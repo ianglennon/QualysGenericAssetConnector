@@ -69,6 +69,16 @@ vi.mock('@/components/mappings/MappingCanvas', () => ({
     }, [onEdgesSnapshot])
     return <div data-testid="mapping-canvas" />
   },
+  ConfirmClearDialog: ({ open, onConfirm, onCancel }: { open: boolean; onConfirm: () => void; onCancel: () => void }) => {
+    if (!open) return null
+    return (
+      <div data-testid="confirm-clear-dialog">
+        <p>Remove all mappings for this endpoint? This cannot be undone.</p>
+        <button onClick={onCancel}>Keep mappings</button>
+        <button onClick={onConfirm}>Remove all mappings</button>
+      </div>
+    )
+  },
 }))
 
 // --- QueryClient wrapper ---
@@ -177,6 +187,77 @@ describe('EndpointMappingsPage', () => {
     await waitFor(() =>
       expect(mockToast).toHaveBeenCalledWith(
         expect.objectContaining({ title: 'Mappings saved' })
+      )
+    )
+  })
+
+  // --- Remove All flow tests ---
+
+  it('Remove All button renders in the page', () => {
+    _canvasEdges = directEdgeWithIdentity
+    render(<EndpointMappingsPage />, { wrapper: makeWrapper() })
+    expect(screen.getByRole('button', { name: /remove all/i })).toBeInTheDocument()
+  })
+
+  it('Remove All button is disabled when no edges exist', () => {
+    _canvasEdges = []
+    render(<EndpointMappingsPage />, { wrapper: makeWrapper() })
+    expect(screen.getByRole('button', { name: /remove all/i })).toBeDisabled()
+  })
+
+  it('Remove All button is enabled when edges exist', () => {
+    _canvasEdges = directEdgeWithIdentity
+    render(<EndpointMappingsPage />, { wrapper: makeWrapper() })
+    expect(screen.getByRole('button', { name: /remove all/i })).not.toBeDisabled()
+  })
+
+  it('clicking Remove All opens ConfirmClearDialog', () => {
+    _canvasEdges = directEdgeWithIdentity
+    render(<EndpointMappingsPage />, { wrapper: makeWrapper() })
+    fireEvent.click(screen.getByRole('button', { name: /remove all/i }))
+    expect(screen.getByTestId('confirm-clear-dialog')).toBeInTheDocument()
+  })
+
+  it('confirming removal calls batchReplace with empty mappings', async () => {
+    _canvasEdges = directEdgeWithIdentity
+    render(<EndpointMappingsPage />, { wrapper: makeWrapper() })
+    fireEvent.click(screen.getByRole('button', { name: /remove all/i }))
+    fireEvent.click(screen.getByRole('button', { name: /remove all mappings/i }))
+    await waitFor(() =>
+      expect(mockMutateAsync).toHaveBeenCalledWith(
+        expect.objectContaining({
+          connectorId: 'conn-1',
+          endpointId: 'ep-1',
+          mappings: [],
+        })
+      )
+    )
+  })
+
+  it('successful removal shows All mappings removed toast', async () => {
+    _canvasEdges = directEdgeWithIdentity
+    render(<EndpointMappingsPage />, { wrapper: makeWrapper() })
+    fireEvent.click(screen.getByRole('button', { name: /remove all/i }))
+    fireEvent.click(screen.getByRole('button', { name: /remove all mappings/i }))
+    await waitFor(() =>
+      expect(mockToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'All mappings removed' })
+      )
+    )
+  })
+
+  it('failed removal shows destructive toast', async () => {
+    mockMutateAsync.mockRejectedValueOnce(new Error('Network error'))
+    _canvasEdges = directEdgeWithIdentity
+    render(<EndpointMappingsPage />, { wrapper: makeWrapper() })
+    fireEvent.click(screen.getByRole('button', { name: /remove all/i }))
+    fireEvent.click(screen.getByRole('button', { name: /remove all mappings/i }))
+    await waitFor(() =>
+      expect(mockToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Failed to remove mappings',
+          variant: 'destructive',
+        })
       )
     )
   })

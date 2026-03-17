@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Edge } from '@xyflow/react'
 import type { MappingEdgeData } from '@/types/canvas'
 import { EndpointMappingsPage } from './EndpointMappingsPage'
+import { useBatchReplaceEndpointMappings } from '@/hooks/queries/useEndpointMappings'
 
 // --- Module-level mocks ---
 
@@ -61,9 +62,12 @@ vi.mock('@/hooks/use-toast', () => ({
 
 // Module-scoped injectable edge state — set per test in beforeEach
 let _canvasEdges: Edge<MappingEdgeData>[] = []
+// Module-scoped render counter — incremented each time MappingCanvas mock renders
+let _canvasRenderCount = 0
 
 vi.mock('@/components/mappings/MappingCanvas', () => ({
   MappingCanvas: ({ onEdgesSnapshot }: { onEdgesSnapshot?: (e: Edge<MappingEdgeData>[]) => void }) => {
+    _canvasRenderCount++
     React.useEffect(() => {
       onEdgesSnapshot?.(_canvasEdges)
     }, [onEdgesSnapshot])
@@ -135,8 +139,13 @@ const conditionalEdgeUnconfigured: Edge<MappingEdgeData>[] = [
 describe('EndpointMappingsPage', () => {
   beforeEach(() => {
     _canvasEdges = []
+    _canvasRenderCount = 0
     mockMutateAsync.mockClear()
     mockToast.mockClear()
+    vi.mocked(useBatchReplaceEndpointMappings).mockReturnValue({
+      mutateAsync: mockMutateAsync,
+      isPending: false,
+    } as ReturnType<typeof useBatchReplaceEndpointMappings>)
   })
 
   it('Save button is disabled when no identity field is linked', () => {
@@ -260,5 +269,30 @@ describe('EndpointMappingsPage', () => {
         })
       )
     )
+  })
+
+  it('Remove All button is disabled while mutation is pending', () => {
+    vi.mocked(useBatchReplaceEndpointMappings).mockReturnValue({
+      mutateAsync: mockMutateAsync,
+      isPending: true,
+    } as ReturnType<typeof useBatchReplaceEndpointMappings>)
+    _canvasEdges = directEdgeWithIdentity
+    render(<EndpointMappingsPage />, { wrapper: makeWrapper() })
+    expect(screen.getByRole('button', { name: /remove all/i })).toBeDisabled()
+  })
+
+  it('canvas remounts after successful removal', async () => {
+    _canvasEdges = directEdgeWithIdentity
+    render(<EndpointMappingsPage />, { wrapper: makeWrapper() })
+    const renderCountBeforeRemove = _canvasRenderCount
+    fireEvent.click(screen.getByRole('button', { name: /remove all/i }))
+    fireEvent.click(screen.getByRole('button', { name: /remove all mappings/i }))
+    await waitFor(() =>
+      expect(mockToast).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'All mappings removed' })
+      )
+    )
+    expect(_canvasRenderCount).toBeGreaterThan(renderCountBeforeRemove)
+    expect(screen.getByTestId('mapping-canvas')).toBeInTheDocument()
   })
 })

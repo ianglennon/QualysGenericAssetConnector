@@ -21,14 +21,14 @@ export function ConfirmClearDialog({ open, onConfirm, onCancel }: ConfirmClearDi
           <DialogTitle>Remove all mappings?</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          Remove all mappings for this connector? This cannot be undone.
+          Remove all mappings for this endpoint? This cannot be undone.
         </p>
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            Cancel
+            Keep mappings
           </Button>
           <Button variant="destructive" onClick={onConfirm}>
-            Remove all
+            Remove all mappings
           </Button>
         </DialogFooter>
       </DialogContent>

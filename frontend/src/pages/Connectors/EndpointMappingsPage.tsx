@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ROUTES } from '@/routes/constants'
-import { ArrowLeft, Save } from 'lucide-react'
+import { ArrowLeft, Save, Trash2 } from 'lucide-react'
 import { useConnector } from '@/hooks/queries/useConnectors'
 import { useEndpoints } from '@/hooks/queries/useEndpoints'
 import { useQualysSchema } from '@/hooks/queries/useQualysSchema'
 import { useBatchReplaceEndpointMappings } from '@/hooks/queries/useEndpointMappings'
-import { MappingCanvas } from '@/components/mappings/MappingCanvas'
+import { MappingCanvas, ConfirmClearDialog } from '@/components/mappings/MappingCanvas'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/hooks/use-toast'
@@ -18,6 +18,8 @@ import type { Edge } from '@xyflow/react'
 export function EndpointMappingsPage() {
   const { connectorId, endpointId } = useParams<{ connectorId: string; endpointId: string }>()
   const [canvasEdges, setCanvasEdges] = useState<Edge<MappingEdgeData>[]>([])
+  const [confirmClearOpen, setConfirmClearOpen] = useState(false)
+  const [clearKey, setClearKey] = useState(0)
 
   const { data: connector, isLoading: loadingConnector } = useConnector(connectorId)
   const { data: endpoints, isLoading: loadingEndpoints } = useEndpoints(connectorId)
@@ -47,6 +49,8 @@ export function EndpointMappingsPage() {
     !hasIdentityLinked ||
     hasUnconfiguredWidget ||
     batchReplace.isPending
+
+  const removeAllDisabled = canvasEdges.length === 0 || batchReplace.isPending
 
   function buildSavePayload(edges: Edge<MappingEdgeData>[]): FieldMappingCreate[] {
     return edges.map((e, i) => {
@@ -79,6 +83,22 @@ export function EndpointMappingsPage() {
     } catch (err) {
       toast({
         title: 'Failed to save mappings',
+        description: String(err),
+        variant: 'destructive',
+      })
+    }
+  }
+
+  async function handleRemoveAll() {
+    setConfirmClearOpen(false)
+    if (!connectorId || !endpointId) return
+    try {
+      await batchReplace.mutateAsync({ connectorId, endpointId, mappings: [] })
+      setClearKey(k => k + 1)
+      toast({ title: 'All mappings removed' })
+    } catch (err) {
+      toast({
+        title: 'Failed to remove mappings',
         description: String(err),
         variant: 'destructive',
       })
@@ -118,21 +138,34 @@ export function EndpointMappingsPage() {
           </div>
         </div>
 
-        <Button
-          onClick={handleSave}
-          disabled={saveDisabled}
-          size="sm"
-          title={!hasIdentityLinked ? 'Link at least one identity attribute (★) to save' : undefined}
-        >
-          <Save className="w-4 h-4 mr-1" />
-          Save Mappings
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={removeAllDisabled}
+            onClick={() => setConfirmClearOpen(true)}
+            title={canvasEdges.length === 0 ? 'No mappings to remove' : undefined}
+          >
+            <Trash2 className="w-4 h-4 mr-1" />
+            Remove All
+          </Button>
+          <Button
+            onClick={handleSave}
+            disabled={saveDisabled}
+            size="sm"
+            title={!hasIdentityLinked ? 'Link at least one identity attribute (\u2605) to save' : undefined}
+          >
+            <Save className="w-4 h-4 mr-1" />
+            Save Mappings
+          </Button>
+        </div>
       </div>
 
       {/* Canvas area */}
       <div className="flex-1 min-h-0">
         {connectorId && endpointId ? (
           <MappingCanvas
+            key={clearKey}
             connectorId={connectorId}
             endpointId={endpointId}
             onEdgesSnapshot={setCanvasEdges}
@@ -143,6 +176,11 @@ export function EndpointMappingsPage() {
           </div>
         )}
       </div>
+      <ConfirmClearDialog
+        open={confirmClearOpen}
+        onConfirm={handleRemoveAll}
+        onCancel={() => setConfirmClearOpen(false)}
+      />
     </div>
   )
 }

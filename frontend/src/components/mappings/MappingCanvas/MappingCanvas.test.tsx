@@ -1,6 +1,6 @@
 import { describe, it, vi, expect, beforeAll } from 'vitest'
 import React from 'react'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { SourcePanelNode } from './SourcePanelNode'
 import { TargetPanelNode } from './TargetPanelNode'
@@ -39,7 +39,7 @@ const mockSavedMappings = [
     id: 'mapping-1',
     connector_id: 'conn-1',
     source_field: 'hostname',
-    target_field: 'instanceUuidSource',
+    target_field: 'hostName',
     mapping_type: 'direct_copy',
     static_value: null,
     conditions: null,
@@ -53,6 +53,7 @@ vi.mock('@/hooks/queries/useEndpointMappings', () => ({
   useEndpointMappings: vi.fn(() => ({
     data: mockSavedMappings,
     isLoading: false,
+    isError: false,
   })),
 }))
 
@@ -60,7 +61,7 @@ vi.mock('@/hooks/queries/useQualysSchema', () => ({
   useQualysSchema: vi.fn(() => ({
     data: {
       fields: [
-        { field: 'instanceUuidSource', is_identity: true },
+        { field: 'hostName', is_identity: true },
         { field: 'name', is_identity: false },
         { field: 'address', is_identity: false },
       ],
@@ -105,7 +106,7 @@ const mockSourceFields = [
 ]
 
 const mockTargetFields = [
-  { field: 'instanceUuidSource', is_identity: true },
+  { field: 'hostName', is_identity: true },
   { field: 'name', is_identity: false },
   { field: 'address', is_identity: false },
 ]
@@ -209,9 +210,9 @@ describe('TargetPanelNode', () => {
         data={{ fields: mockTargetFields, linkedTargetFields: new Set() }}
       />
     )
-    const items = screen.getAllByText(/instanceUuidSource|name|address/)
-    // instanceUuidSource (identity) should appear before name and address
-    const idxIdentity = items.findIndex(el => el.textContent?.includes('instanceUuidSource'))
+    const items = screen.getAllByText(/hostName|name|address/)
+    // hostName (identity) should appear before name and address
+    const idxIdentity = items.findIndex(el => el.textContent?.includes('hostName'))
     const idxName = items.findIndex(el => el.textContent === 'name')
     const idxAddress = items.findIndex(el => el.textContent === 'address')
     expect(idxIdentity).toBeLessThan(idxName)
@@ -225,7 +226,7 @@ describe('TargetPanelNode', () => {
         data={{ fields: mockTargetFields, linkedTargetFields: new Set() }}
       />
     )
-    expect(screen.getByText('★ instanceUuidSource')).toBeInTheDocument()
+    expect(screen.getByText('★ hostName')).toBeInTheDocument()
   })
 
   it('identity fields display [IDENTITY] badge', () => {
@@ -267,19 +268,25 @@ describe('MappingCanvas', () => {
   })
 
   it('linked/unlinked separator shows correct count after connection is added', async () => {
-    const onEdgesSnapshot = vi.fn()
-    render(
-      <MappingCanvas connectorId="conn-1" endpointId="ep-1" onEdgesSnapshot={onEdgesSnapshot} />,
-      { wrapper: makeWrapper() }
-    )
-    await waitFor(() => {
+    // Edge seeding defers setEdges via double-rAF (so handles register first).
+    // Make rAF synchronous so the chain completes within a single act() flush.
+    const origRAF = globalThis.requestAnimationFrame
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => { cb(performance.now()); return 0 }) as typeof requestAnimationFrame
+    try {
+      const onEdgesSnapshot = vi.fn()
+      render(
+        <MappingCanvas connectorId="conn-1" endpointId="ep-1" onEdgesSnapshot={onEdgesSnapshot} />,
+        { wrapper: makeWrapper() }
+      )
+      await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+
       const lastCall = onEdgesSnapshot.mock.calls[onEdgesSnapshot.mock.calls.length - 1]
       expect(lastCall[0]).toHaveLength(1)
-    })
-    // Verify the seeded edge maps hostname -> instanceUuidSource
-    const lastEdges = onEdgesSnapshot.mock.calls[onEdgesSnapshot.mock.calls.length - 1][0]
-    expect(lastEdges[0].sourceHandle).toBe('hostname')
-    expect(lastEdges[0].targetHandle).toBe('instanceUuidSource')
+      expect(lastCall[0][0].sourceHandle).toBe('hostname')
+      expect(lastCall[0][0].targetHandle).toBe('hostName')
+    } finally {
+      globalThis.requestAnimationFrame = origRAF
+    }
   })
 
   it('breaking a connection returns fields to unlinked zone', async () => {
@@ -305,6 +312,65 @@ describe('MappingCanvas', () => {
     )
     // onEdgesSnapshot should be called (via useEffect on edges changes)
     expect(onEdgesSnapshot).toHaveBeenCalled()
+  })
+
+  it('restores saved mappings after unmount and remount (navigate away & back)', async () => {
+    // Restore mock in case a prior test changed it
+    const { useEndpointMappings } = await import('@/hooks/queries/useEndpointMappings')
+    vi.mocked(useEndpointMappings).mockReturnValue({ data: mockSavedMappings, isLoading: false } as any)
+
+    const origRAF = globalThis.requestAnimationFrame
+    globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+      cb(performance.now()); return 0
+    }) as typeof requestAnimationFrame
+    try {
+      const onEdgesSnapshot = vi.fn()
+
+      // First mount — edges should be seeded from savedMappings
+      const { unmount } = render(
+        <MappingCanvas connectorId="conn-1" endpointId="ep-1" onEdgesSnapshot={onEdgesSnapshot} />,
+        { wrapper: makeWrapper() }
+      )
+      await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+
+      let lastCall = onEdgesSnapshot.mock.calls[onEdgesSnapshot.mock.calls.length - 1]
+      expect(lastCall[0]).toHaveLength(1)
+      expect(lastCall[0][0].sourceHandle).toBe('hostname')
+
+      // Navigate away (unmount)
+      unmount()
+
+      // Navigate back (remount) — edges should be re-seeded
+      onEdgesSnapshot.mockClear()
+      render(
+        <MappingCanvas connectorId="conn-1" endpointId="ep-1" onEdgesSnapshot={onEdgesSnapshot} />,
+        { wrapper: makeWrapper() }
+      )
+      await act(async () => { await new Promise(r => setTimeout(r, 0)) })
+
+      lastCall = onEdgesSnapshot.mock.calls[onEdgesSnapshot.mock.calls.length - 1]
+      expect(lastCall[0]).toHaveLength(1)
+      expect(lastCall[0][0].sourceHandle).toBe('hostname')
+      expect(lastCall[0][0].targetHandle).toBe('hostName')
+    } finally {
+      globalThis.requestAnimationFrame = origRAF
+    }
+  })
+
+  it('shows skeleton while mappings are loading (cache miss)', async () => {
+    const { useEndpointMappings } = await import('@/hooks/queries/useEndpointMappings')
+    const mockHook = vi.mocked(useEndpointMappings)
+    mockHook.mockReturnValue({ data: undefined, isLoading: true, isError: false } as any)
+
+    const { container } = render(
+      <MappingCanvas connectorId="conn-1" endpointId="ep-1" />,
+      { wrapper: makeWrapper() }
+    )
+    // Should show skeleton, not the empty-state overlay
+    expect(container.querySelector('[data-testid="react-flow"]')).toBeNull()
+
+    // Restore mock
+    mockHook.mockReturnValue({ data: mockSavedMappings, isLoading: false, isError: false } as any)
   })
 })
 

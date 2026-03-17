@@ -33,7 +33,7 @@ vi.mock('@/hooks/queries/useQualysSchema', () => ({
   useQualysSchema: vi.fn(() => ({
     data: {
       fields: [
-        { field: 'instanceUuidSource', is_identity: true },
+        { field: 'hostName', is_identity: true },
         { field: 'name', is_identity: false },
       ],
     },
@@ -98,7 +98,7 @@ const directEdgeWithIdentity: Edge<MappingEdgeData>[] = [
     source: 'source-panel',
     sourceHandle: 'hostname',
     target: 'target-panel',
-    targetHandle: 'instanceUuidSource',
+    targetHandle: 'hostName',
     type: 'mapping',
     data: { mappingType: 'direct' },
   },

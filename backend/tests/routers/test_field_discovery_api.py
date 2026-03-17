@@ -290,3 +290,19 @@ def test_batch_replace_rbac(client, operator_token, connector_id):
         json=payload,
     )
     assert resp.status_code == 403
+
+
+def test_schema_instanceuuidsource_is_not_identity(client, admin_token):
+    """instanceUuidSource must NOT be flagged as identity in the schema response.
+
+    It lives in the Qualys payload identityAttributes block but is not a valid
+    identity gate field for connector validation (not in IDENTITY_ATTRIBUTES).
+    """
+    resp = client.get(
+        "/api/v1/qualys/schema",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert resp.status_code == 200
+    fields_by_name = {f["field"]: f for f in resp.json()["fields"]}
+    assert "instanceUuidSource" in fields_by_name
+    assert fields_by_name["instanceUuidSource"]["is_identity"] is False

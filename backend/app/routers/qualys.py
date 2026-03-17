@@ -15,19 +15,15 @@ router = APIRouter(prefix="/qualys", tags=["qualys"])
 # Derived from qualys_formatter.identity_mappings (lines 87-99)
 # ---------------------------------------------------------------------------
 _IDENTITY_FIELDS = frozenset({
-    "qualysAssetId", "sourceNativeKey", "instanceUuid", "instanceUuidSource",
+    "qualysAssetId", "sourceNativeKey", "instanceUuid",
     "hostName", "netBiosName", "fqdn", "macAddress", "ipAddress",
     "serialNumber", "hardwareUuid", "networkUuid",
 })
-# NOTE: instanceUuidSource appears in qualys_formatter.identity_mappings but NOT in
-# validation.py IDENTITY_ATTRIBUTES (which has 11 fields). This is a pre-existing
-# discrepancy. The schema endpoint uses the formatter as the authoritative source. A
-# mapping targeting instanceUuidSource will show is_identity=true here but will NOT
-# make is_valid_mappings=true. Track in Phase 9 or a follow-up.
 
 # Core-only fields: keys from qualys_formatter.core_mappings minus those already
 # in _IDENTITY_FIELDS (hostName, netBiosName, fqdn overlap — identity wins).
 _CORE_ONLY_FIELDS = frozenset({
+    "instanceUuidSource",
     "lastLoggedOnUser", "operatingSystem", "address", "dnsName",
     "isContainer", "domain", "osVersion", "osArchitecture", "domainRole",
 })
@@ -109,7 +105,7 @@ def get_qualys_schema(_user=Depends(require_role("admin", "operator"))):
 
     Identity fields are surfaced at the top of the visual canvas field panel
     and must be present for is_valid_mappings=true. Core-only fields follow.
-    Total: 21 fields (12 identity + 9 core-only).
+    Total: 21 fields (11 identity + 10 core-only).
     """
     fields = (
         [QualysSchemaField(field=f, is_identity=True) for f in sorted(_IDENTITY_FIELDS)]

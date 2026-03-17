@@ -38,9 +38,15 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
   const nodeId = useNodeId() ?? 'target-panel'
   const updateNodeInternals = useUpdateNodeInternals()
 
-  const linkedFields = sortFields(
-    data.fields.filter(f => data.linkedTargetFields.has(f.field))
-  )
+  // Sort linked fields by edge index (matches source panel order → straight lines)
+  const linkedFields = [...data.fields]
+    .filter(f => data.linkedTargetFields.has(f.field))
+    .sort((a, b) => {
+      const posA = data.linkedFieldOrder?.get(a.field) ?? Infinity
+      const posB = data.linkedFieldOrder?.get(b.field) ?? Infinity
+      if (posA !== posB) return posA - posB
+      return a.field.localeCompare(b.field)
+    })
 
   const unlinkedFields = sortFields(
     data.fields.filter(f => !data.linkedTargetFields.has(f.field))
@@ -51,7 +57,7 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
     if (data.fields.length > 0) {
       requestAnimationFrame(() => updateNodeInternals(nodeId))
     }
-  }, [data.fields, data.linkedTargetFields, nodeId, updateNodeInternals])
+  }, [data.fields, data.linkedTargetFields, data.linkedFieldOrder, nodeId, updateNodeInternals])
 
   function handleScroll() {
     updateNodeInternals(nodeId)

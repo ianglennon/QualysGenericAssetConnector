@@ -62,11 +62,13 @@ export interface DraftMapping {
 export interface SourcePanelData {
   fields: FieldDiscoveryItem[]
   linkedSourceFields: Set<string>   // paths with an active edge
+  linkedFieldOrder: Map<string, number>  // source field → sort position (matching target panel order)
 }
 
 export interface TargetPanelData {
   fields: QualysSchemaField[]
   linkedTargetFields: Set<string>   // field names with an active edge
+  linkedFieldOrder: Map<string, number>  // target field → sort position (matching source panel order)
 }
 
 // Edge data shape for MappingEdge custom edge

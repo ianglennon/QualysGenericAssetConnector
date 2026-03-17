@@ -16,7 +16,7 @@ export const useEndpointMappings = (
       return data
     },
     enabled: !!connectorId && !!endpointId,
-    staleTime: 1000 * 60 * 5, // 5 minutes
+    staleTime: 0, // always refetch on revisit so saved mappings are fresh
   })
 }
 

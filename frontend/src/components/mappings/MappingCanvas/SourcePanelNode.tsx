@@ -43,9 +43,15 @@ export function SourcePanelNode({ data }: NodeProps & { data: SourcePanelData })
   const nodeId = useNodeId() ?? 'source-panel'
   const updateNodeInternals = useUpdateNodeInternals()
 
+  // Sort linked fields by target panel position (eliminates line crossing)
   const linked = [...data.fields]
     .filter(f => data.linkedSourceFields.has(f.path))
-    .sort((a, b) => a.path.localeCompare(b.path))
+    .sort((a, b) => {
+      const posA = data.linkedFieldOrder?.get(a.path) ?? Infinity
+      const posB = data.linkedFieldOrder?.get(b.path) ?? Infinity
+      if (posA !== posB) return posA - posB
+      return a.path.localeCompare(b.path)
+    })
 
   const unlinked = [...data.fields]
     .filter(f => !data.linkedSourceFields.has(f.path))
@@ -56,7 +62,7 @@ export function SourcePanelNode({ data }: NodeProps & { data: SourcePanelData })
     if (data.fields.length > 0) {
       requestAnimationFrame(() => updateNodeInternals(nodeId))
     }
-  }, [data.fields, data.linkedSourceFields, nodeId, updateNodeInternals])
+  }, [data.fields, data.linkedSourceFields, data.linkedFieldOrder, nodeId, updateNodeInternals])
 
   function handleScroll() {
     updateNodeInternals(nodeId)

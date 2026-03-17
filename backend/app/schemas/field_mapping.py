@@ -1,4 +1,5 @@
 import enum
+from datetime import datetime
 from typing import Annotated, Any, Literal, Union
 
 from pydantic import BaseModel, Field, field_validator
@@ -103,7 +104,7 @@ class FieldMappingResponse(BaseModel):
     conditions: list[dict] | None = None  # JSON from DB
     fallback: str | None = None
     order: int
-    created_at: str  # ISO datetime string
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 

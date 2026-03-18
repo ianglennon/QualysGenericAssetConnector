@@ -1,10 +1,13 @@
 import asyncio
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urljoin
 
 import httpx
+
+logger = logging.getLogger(__name__)
 from app.models.connector import Connector
 from app.schemas.pagination import (
     CursorPagination,
@@ -68,7 +71,13 @@ async def _fetch_with_retries(
     attempts = 0
     while True:
         try:
+            logger.debug("Source API request: GET %s params=%s", url, params)
             response = await client.get(url, headers=headers, params=params)
+            logger.debug(
+                "Source API response: status=%d size=%d",
+                response.status_code,
+                len(response.content),
+            )
             if 200 <= response.status_code < 300:
                 return response
             raise httpx.HTTPStatusError(
@@ -76,8 +85,12 @@ async def _fetch_with_retries(
                 request=response.request,
                 response=response,
             )
-        except (httpx.RequestError, httpx.HTTPStatusError):
+        except (httpx.RequestError, httpx.HTTPStatusError) as exc:
             attempts += 1
+            logger.debug(
+                "Source API request failed (attempt %d/%d): %s",
+                attempts, retry_limit, exc,
+            )
             if attempts > retry_limit:
                 return None
             await asyncio.sleep(_backoff_seconds(attempts))
@@ -114,6 +127,11 @@ async def fetch_all_pages(
         close_client = True
 
     try:
+        logger.debug(
+            "Starting source fetch: url=%s strategy=%s",
+            url,
+            type(strategy).__name__ if strategy else "none",
+        )
         if strategy is None:
             response = await _fetch_with_retries(
                 client,
@@ -123,9 +141,11 @@ async def fetch_all_pages(
                 effective_retry_limit,
             )
             if response is None:
+                logger.debug("Source fetch failed: no response after retries")
                 return SourceFetchResult([], 0, 0, True)
             payload = response.json()
             records = _extract_records(payload)
+            logger.debug("Source fetch complete: %d records in 1 page", len(records))
             return SourceFetchResult(records, len(records), 1, False)
 
         if isinstance(strategy, CursorPagination):

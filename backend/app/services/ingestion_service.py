@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 import httpx
+
+logger = logging.getLogger(__name__)
 from pydantic import TypeAdapter
 
 from app.db.session import SessionLocal
@@ -99,8 +102,15 @@ async def _run_endpoint(
 
     try:
         resolved_url = connector.base_url.rstrip("/") + "/" + endpoint.path.lstrip("/")
+        logger.debug(
+            "Endpoint %s: fetching from %s", endpoint.path, resolved_url,
+        )
         source_result = await fetch_all_pages(connector, url=resolved_url, client=client)
         records_fetched = source_result.records_fetched
+        logger.debug(
+            "Endpoint %s: fetched %d records (partial=%s)",
+            endpoint.path, records_fetched, source_result.partial,
+        )
 
         mappings = (
             db.query(FieldMapping)
@@ -112,7 +122,12 @@ async def _run_endpoint(
         transformed_records = [apply_mappings(record, mapping_rules) for record in source_result.records]
 
         failures: list[QualysFailure] = []
-        for batch in _chunk_records(transformed_records, QUALYS_BATCH_SIZE):
+        batches = _chunk_records(transformed_records, QUALYS_BATCH_SIZE)
+        logger.debug(
+            "Endpoint %s: submitting %d records in %d batches",
+            endpoint.path, len(transformed_records), len(batches),
+        )
+        for batch in batches:
             if not batch:
                 continue
             result = await submit_batch(batch, connector, qualys_config, client=client)
@@ -163,6 +178,7 @@ async def run_ingestion(run_id: str) -> None:
         if not run:
             return
 
+        logger.debug("Starting ingestion run_id=%s connector_id=%s", run_id, run.connector_id)
         connector = db.query(Connector).filter(Connector.id == run.connector_id).first()
         if not connector:
             _mark_failed(
@@ -219,6 +235,10 @@ async def run_ingestion(run_id: str) -> None:
         run.records_failed = total_failed
         run.finished_at = datetime.utcnow()
         run.status = _rollup_status(logs)
+        logger.debug(
+            "Ingestion run_id=%s complete: status=%s fetched=%d submitted=%d failed=%d",
+            run_id, run.status.value, total_fetched, total_submitted, total_failed,
+        )
         db.commit()
 
     except QualysClientError as exc:

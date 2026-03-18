@@ -1,8 +1,11 @@
 import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from app.models.connector import Connector
 from app.models.qualys_config import QualysConfig
@@ -149,6 +152,11 @@ async def _post_with_retries(
     attempts = 0
     while True:
         try:
+            logger.debug(
+                "Qualys API request: POST %s records=%d",
+                url,
+                len(payload.get("assets", [])) if isinstance(payload, dict) else 0,
+            )
             response = await client.post(url, json=payload, auth=auth, headers=headers)
         except httpx.TimeoutException as exc:
             attempts += 1
@@ -172,6 +180,11 @@ async def _post_with_retries(
             continue
 
         if response.status_code in (200, 207):
+            logger.debug(
+                "Qualys API response: status=%d size=%d",
+                response.status_code,
+                len(response.content),
+            )
             return response
 
         if 500 <= response.status_code < 600:
@@ -248,12 +261,17 @@ async def submit_batch(
         if response.status_code == 207:
             payload = response.json() if response.content else {}
             failures = _parse_failure_items(payload)
+            logger.debug(
+                "Qualys batch partial success: submitted=%d failed=%d",
+                len(records), len(failures),
+            )
             return QualysSubmitResult(
                 submitted_count=len(records),
                 failed_count=len(failures),
                 failures=failures,
             )
 
+        logger.debug("Qualys batch success: submitted=%d", len(records))
         return QualysSubmitResult(
             submitted_count=len(records),
             failed_count=0,

@@ -9,6 +9,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 from app.models.connector import Connector
+from app.services.payload_capture import capture_request, capture_response
 from app.schemas.pagination import (
     CursorPagination,
     LinkHeaderPagination,
@@ -23,11 +24,20 @@ DEFAULT_BACKOFF_SECONDS = 0.1
 
 
 @dataclass
+class FetchResult:
+    """Internal result from _fetch_with_retries."""
+    response: httpx.Response | None
+    last_failed_response: httpx.Response | None = None
+
+
+@dataclass
 class SourceFetchResult:
     records: list[Any]
     records_fetched: int
     pages_fetched: int
     partial: bool
+    http_request: dict | None = None
+    http_response: dict | None = None
 
 
 def _extract_records(payload: Any) -> list[Any]:
@@ -67,8 +77,9 @@ async def _fetch_with_retries(
     headers: dict,
     params: dict | None,
     retry_limit: int,
-) -> httpx.Response | None:
+) -> FetchResult:
     attempts = 0
+    last_failed_response: httpx.Response | None = None
     while True:
         try:
             logger.debug("Source API request: GET %s params=%s", url, params)
@@ -79,21 +90,37 @@ async def _fetch_with_retries(
                 len(response.content),
             )
             if 200 <= response.status_code < 300:
-                return response
+                return FetchResult(response=response)
             raise httpx.HTTPStatusError(
                 f"HTTP {response.status_code}",
                 request=response.request,
                 response=response,
             )
         except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+            if isinstance(exc, httpx.HTTPStatusError):
+                last_failed_response = exc.response
             attempts += 1
             logger.debug(
                 "Source API request failed (attempt %d/%d): %s",
                 attempts, retry_limit, exc,
             )
             if attempts > retry_limit:
-                return None
+                return FetchResult(response=None, last_failed_response=last_failed_response)
             await asyncio.sleep(_backoff_seconds(attempts))
+
+
+def _maybe_capture(
+    fetch_result: FetchResult,
+    auth_type: str,
+    api_key_name: str | None,
+) -> tuple[dict | None, dict | None]:
+    """Capture request/response from a failed fetch, or return (None, None)."""
+    if fetch_result.last_failed_response is not None:
+        return (
+            capture_request(fetch_result.last_failed_response.request, auth_type, api_key_name),
+            capture_response(fetch_result.last_failed_response),
+        )
+    return None, None
 
 
 def _resolve_pagination_strategies(
@@ -133,17 +160,18 @@ async def fetch_all_pages(
             type(strategy).__name__ if strategy else "none",
         )
         if strategy is None:
-            response = await _fetch_with_retries(
+            fetch_result = await _fetch_with_retries(
                 client,
                 url,
                 headers,
                 None,
                 effective_retry_limit,
             )
-            if response is None:
+            if fetch_result.response is None:
                 logger.debug("Source fetch failed: no response after retries")
-                return SourceFetchResult([], 0, 0, True)
-            payload = response.json()
+                req_capture, resp_capture = _maybe_capture(fetch_result, connector.auth_method, connector.api_key_name)
+                return SourceFetchResult([], 0, 0, True, req_capture, resp_capture)
+            payload = fetch_result.response.json()
             records = _extract_records(payload)
             logger.debug("Source fetch complete: %d records in 1 page", len(records))
             return SourceFetchResult(records, len(records), 1, False)
@@ -155,6 +183,8 @@ async def fetch_all_pages(
                 headers,
                 strategy,
                 effective_retry_limit,
+                connector.auth_method,
+                connector.api_key_name,
             )
         if isinstance(strategy, OffsetLimitPagination):
             return await _fetch_offset_limit_pages(
@@ -163,6 +193,8 @@ async def fetch_all_pages(
                 headers,
                 strategy,
                 effective_retry_limit,
+                connector.auth_method,
+                connector.api_key_name,
             )
         if isinstance(strategy, LinkHeaderPagination):
             return await _fetch_link_header_pages(
@@ -170,6 +202,8 @@ async def fetch_all_pages(
                 url,
                 headers,
                 effective_retry_limit,
+                connector.auth_method,
+                connector.api_key_name,
             )
         if isinstance(strategy, PageNumberPagination):
             return await _fetch_page_number_pages(
@@ -178,6 +212,8 @@ async def fetch_all_pages(
                 headers,
                 strategy,
                 effective_retry_limit,
+                connector.auth_method,
+                connector.api_key_name,
             )
 
         return SourceFetchResult([], 0, 0, False)
@@ -192,6 +228,8 @@ async def _fetch_cursor_pages(
     headers: dict,
     strategy: CursorPagination,
     retry_limit: int,
+    auth_type: str,
+    api_key_name: str | None,
 ) -> SourceFetchResult:
     records: list[Any] = []
     pages_fetched = 0
@@ -204,13 +242,14 @@ async def _fetch_cursor_pages(
         if strategy.page_size is not None:
             params["page_size"] = strategy.page_size
 
-        response = await _fetch_with_retries(
+        fetch_result = await _fetch_with_retries(
             client, base_url, headers, params, retry_limit
         )
-        if response is None:
-            return SourceFetchResult(records, len(records), pages_fetched, True)
+        if fetch_result.response is None:
+            req_capture, resp_capture = _maybe_capture(fetch_result, auth_type, api_key_name)
+            return SourceFetchResult(records, len(records), pages_fetched, True, req_capture, resp_capture)
 
-        payload = response.json()
+        payload = fetch_result.response.json()
         page_records = _extract_records(payload)
         records.extend(page_records)
         pages_fetched += 1
@@ -227,6 +266,8 @@ async def _fetch_offset_limit_pages(
     headers: dict,
     strategy: OffsetLimitPagination,
     retry_limit: int,
+    auth_type: str,
+    api_key_name: str | None,
 ) -> SourceFetchResult:
     records: list[Any] = []
     pages_fetched = 0
@@ -238,13 +279,14 @@ async def _fetch_offset_limit_pages(
         if limit is not None:
             params[strategy.limit_param] = limit
 
-        response = await _fetch_with_retries(
+        fetch_result = await _fetch_with_retries(
             client, base_url, headers, params, retry_limit
         )
-        if response is None:
-            return SourceFetchResult(records, len(records), pages_fetched, True)
+        if fetch_result.response is None:
+            req_capture, resp_capture = _maybe_capture(fetch_result, auth_type, api_key_name)
+            return SourceFetchResult(records, len(records), pages_fetched, True, req_capture, resp_capture)
 
-        payload = response.json()
+        payload = fetch_result.response.json()
         page_records = _extract_records(payload)
         records.extend(page_records)
         pages_fetched += 1
@@ -262,24 +304,27 @@ async def _fetch_link_header_pages(
     base_url: str,
     headers: dict,
     retry_limit: int,
+    auth_type: str,
+    api_key_name: str | None,
 ) -> SourceFetchResult:
     records: list[Any] = []
     pages_fetched = 0
     next_url = base_url
 
     while True:
-        response = await _fetch_with_retries(
+        fetch_result = await _fetch_with_retries(
             client, next_url, headers, None, retry_limit
         )
-        if response is None:
-            return SourceFetchResult(records, len(records), pages_fetched, True)
+        if fetch_result.response is None:
+            req_capture, resp_capture = _maybe_capture(fetch_result, auth_type, api_key_name)
+            return SourceFetchResult(records, len(records), pages_fetched, True, req_capture, resp_capture)
 
-        payload = response.json()
+        payload = fetch_result.response.json()
         page_records = _extract_records(payload)
         records.extend(page_records)
         pages_fetched += 1
 
-        next_link = _parse_next_link(response.headers.get("link"))
+        next_link = _parse_next_link(fetch_result.response.headers.get("link"))
         if not next_link:
             return SourceFetchResult(records, len(records), pages_fetched, False)
         next_url = urljoin(next_url, next_link)
@@ -291,6 +336,8 @@ async def _fetch_page_number_pages(
     headers: dict,
     strategy: PageNumberPagination,
     retry_limit: int,
+    auth_type: str,
+    api_key_name: str | None,
 ) -> SourceFetchResult:
     records: list[Any] = []
     pages_fetched = 0
@@ -301,13 +348,14 @@ async def _fetch_page_number_pages(
         if strategy.page_size is not None:
             params[strategy.page_size_param] = strategy.page_size
 
-        response = await _fetch_with_retries(
+        fetch_result = await _fetch_with_retries(
             client, base_url, headers, params, retry_limit
         )
-        if response is None:
-            return SourceFetchResult(records, len(records), pages_fetched, True)
+        if fetch_result.response is None:
+            req_capture, resp_capture = _maybe_capture(fetch_result, auth_type, api_key_name)
+            return SourceFetchResult(records, len(records), pages_fetched, True, req_capture, resp_capture)
 
-        payload = response.json()
+        payload = fetch_result.response.json()
         page_records = _extract_records(payload)
         records.extend(page_records)
         pages_fetched += 1

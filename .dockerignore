@@ -1,0 +1,16 @@
+# QualysAPIConnectionManager build artifacts (68MB+ savings)
+QualysAPIConnectionManager/.git
+QualysAPIConnectionManager/venv
+QualysAPIConnectionManager/dist
+QualysAPIConnectionManager/tests
+QualysAPIConnectionManager/*.egg-info
+QualysAPIConnectionManager/qualys_client.egg-info
+QualysAPIConnectionManager/qualys_connection_manager.egg-info
+
+# Standard exclusions
+**/__pycache__
+**/.pytest_cache
+.env
+*.pyc
+.git
+.planning

@@ -77,6 +77,19 @@ export interface EndpointCreate {
   display_order?: number
 }
 
+export interface HttpRequestDetail {
+  url: string
+  method: string
+  headers: Record<string, string>
+  body?: string | null
+}
+
+export interface HttpResponseDetail {
+  status_code: number
+  headers: Record<string, string>
+  body?: string | null
+}
+
 export interface EndpointRunLog {
   id: string
   run_id: string
@@ -89,6 +102,9 @@ export interface EndpointRunLog {
   records_failed: number
   status: string
   error_message?: string
+  failure_stage?: string | null
+  http_request?: HttpRequestDetail | null
+  http_response?: HttpResponseDetail | null
   created_at: string
 }
 

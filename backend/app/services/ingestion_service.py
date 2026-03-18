@@ -19,6 +19,7 @@ from app.services.source_client import SourceFetchResult, fetch_all_pages
 from app.services.transform_engine import apply_mappings
 from app.services.qualys_client import QualysClientError, QualysFailure, submit_batch
 from app.services.connector_service import HTTPX_TIMEOUT
+from app.services.payload_capture import cleanup_old_payloads
 
 QUALYS_BATCH_SIZE = 100
 
@@ -174,6 +175,7 @@ async def run_ingestion(run_id: str) -> None:
     db = SessionLocal()
     run: RunHistory | None = None
     try:
+        cleanup_old_payloads(db)  # purge old diagnostic payloads
         run = db.query(RunHistory).filter(RunHistory.id == run_id).first()
         if not run:
             return

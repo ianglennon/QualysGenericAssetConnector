@@ -100,6 +100,7 @@ async def _run_endpoint(
     records_fetched = 0
     records_submitted = 0
     records_failed = 0
+    source_result: SourceFetchResult | None = None
 
     try:
         resolved_url = connector.base_url.rstrip("/") + "/" + endpoint.path.lstrip("/")
@@ -146,6 +147,8 @@ async def _run_endpoint(
             records_failed=records_failed,
             status="success",
             error_message=None,
+            http_request=source_result.http_request,
+            http_response=source_result.http_response,
         )
         db.add(log)
         db.commit()
@@ -165,6 +168,8 @@ async def _run_endpoint(
             records_failed=records_failed,
             status="failed",
             error_message=str(exc),
+            http_request=source_result.http_request if source_result else None,
+            http_response=source_result.http_response if source_result else None,
         )
         db.add(log)
         db.commit()

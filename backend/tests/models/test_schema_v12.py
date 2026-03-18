@@ -5,7 +5,7 @@ import sqlalchemy as sa
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from app.models.connector_endpoint import ConnectorEndpoint
-from app.models.run_history import EndpointRunLog
+from app.models.run_history import EndpointRunLog, FailureStage
 from app.models.field_mapping import FieldMapping
 from app.models.connector import Connector
 
@@ -41,16 +41,32 @@ def test_endpoint_run_log_columns():
         "status",
         "error_message",
         "created_at",
+        "failure_stage",
+        "http_request",
+        "http_response",
     }
     assert expected.issubset(columns.keys())
     # status must be String (not Enum) — consistent with project convention for new models
     assert isinstance(columns["status"].type, sa.String)
+    assert isinstance(columns["failure_stage"].type, sa.String)
+    assert columns["failure_stage"].nullable is True
+    assert isinstance(columns["http_request"].type, sa.JSON)
+    assert columns["http_request"].nullable is True
+    assert isinstance(columns["http_response"].type, sa.JSON)
+    assert columns["http_response"].nullable is True
 
 
 def test_field_mapping_columns():
     columns = {column.name: column for column in FieldMapping.__table__.columns}
     assert "endpoint_id" in columns
     assert "connector_id" not in columns
+
+
+def test_failure_stage_enum():
+    assert FailureStage.source_fetch.value == "source_fetch"
+    assert FailureStage.transformation.value == "transformation"
+    assert FailureStage.qualys_submit.value == "qualys_submit"
+    assert len(FailureStage) == 3
 
 
 def test_connector_columns():

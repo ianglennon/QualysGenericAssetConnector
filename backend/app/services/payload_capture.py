@@ -46,12 +46,21 @@ def capture_request(
     request: httpx.Request,
     auth_type: str,
     api_key_name: str | None = None,
+    body_override: str | None = None,
 ) -> dict:
-    """Capture an httpx.Request as a JSON-serializable dict with redacted headers."""
+    """Capture an httpx.Request as a JSON-serializable dict with redacted headers.
+
+    When body_override is provided, it replaces the actual request body content.
+    This is used for Qualys submissions where the body contains asset records
+    that should not be captured -- replaced with record count metadata instead.
+    """
     headers = dict(request.headers)
     redacted = redact_headers(headers, auth_type, api_key_name)
 
-    body = _truncate_body(request.content) if request.content else None
+    if body_override is not None:
+        body = body_override
+    else:
+        body = _truncate_body(request.content) if request.content else None
 
     return {
         "method": request.method,

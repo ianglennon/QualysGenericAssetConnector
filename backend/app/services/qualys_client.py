@@ -38,11 +38,13 @@ class QualysClientError(Exception):
         error_type: str = "qualys_error",
         status_code: int | None = None,
         error_context: dict | None = None,
+        response: httpx.Response | None = None,
     ) -> None:
         super().__init__(message)
         self.error_type = error_type
         self.status_code = status_code
         self.error_context = error_context or {}
+        self.response = response
 
 
 def _qualys_url(api_url: str) -> str:
@@ -195,6 +197,7 @@ async def _post_with_retries(
                     error_type="qualys_server_error",
                     status_code=response.status_code,
                     error_context={"response": response.text},
+                    response=response,
                 )
             await asyncio.sleep(_backoff_seconds(attempts))
             continue
@@ -204,6 +207,7 @@ async def _post_with_retries(
             error_type="qualys_http_error",
             status_code=response.status_code,
             error_context={"response": response.text},
+            response=response,
         )
 
 

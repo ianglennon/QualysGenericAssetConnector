@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from app.services.credential_crypto import get_crypto
-from app.services.qualys_client import QualysClientError, submit_batch
+from app.services.qualys_client import QualysClientError, _post_with_retries, submit_batch
 
 
 def _make_connector(qualys_retry_limit=None):
@@ -126,3 +126,64 @@ async def test_retry_limit_respected_when_set():
             await submit_batch(records, connector, config, client=client)
 
     assert len(requests) == 2
+
+
+# --------------- QualysClientError.response Tests ---------------
+
+
+def test_qualys_client_error_with_response():
+    resp = httpx.Response(403, content=b"forbidden")
+    exc = QualysClientError("test", response=resp)
+    assert exc.response is resp
+
+
+def test_qualys_client_error_without_response():
+    exc = QualysClientError("test")
+    assert exc.response is None
+
+
+# --------------- _post_with_retries response attachment Tests ---------------
+
+
+@pytest.mark.asyncio
+async def test_post_with_retries_attaches_response_on_4xx():
+    def handler(request):
+        return httpx.Response(403, content=b'{"error": "forbidden"}', request=request)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(QualysClientError) as exc_info:
+            await _post_with_retries(client, "https://qualys.example.com/api", None, {}, retry_limit=1)
+        assert exc_info.value.response is not None
+        assert exc_info.value.response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_post_with_retries_attaches_response_on_5xx():
+    responses = [(500, b"error"), (500, b"error")]
+    idx = [0]
+
+    def handler(request):
+        i = idx[0]
+        idx[0] += 1
+        status, body = responses[i] if i < len(responses) else responses[-1]
+        return httpx.Response(status, content=body, request=request)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(QualysClientError) as exc_info:
+            await _post_with_retries(client, "https://qualys.example.com/api", None, {}, retry_limit=1)
+        assert exc_info.value.response is not None
+        assert exc_info.value.response.status_code == 500
+
+
+@pytest.mark.asyncio
+async def test_post_with_retries_no_response_on_timeout():
+    def handler(request):
+        raise httpx.ReadTimeout("timed out")
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(QualysClientError) as exc_info:
+            await _post_with_retries(client, "https://qualys.example.com/api", None, {}, retry_limit=0)
+        assert exc_info.value.response is None

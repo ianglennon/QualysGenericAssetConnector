@@ -148,6 +148,35 @@ def test_capture_response_empty_body():
     assert result["status_code"] == 204
 
 
+# --------------- Body Override Tests ---------------
+
+
+def test_capture_request_body_override():
+    body = b'{"assets": [{"name": "host1"}, {"name": "host2"}]}'
+    request = httpx.Request(
+        "POST",
+        "https://qualys.example.com/rest/2.0/am/connector/asset/data/sync",
+        headers={"Authorization": "Basic abc123", "Content-Type": "application/json"},
+        content=body,
+    )
+    result = capture_request(request, auth_type="qualys", body_override="[50 asset records omitted]")
+    assert result["body"] == "[50 asset records omitted]"
+    # httpx normalizes header names to lowercase
+    assert result["headers"]["authorization"] == "[REDACTED]"
+    assert result["method"] == "POST"
+
+
+def test_capture_request_body_override_none_uses_content():
+    body = b'{"key": "value"}'
+    request = httpx.Request(
+        "POST",
+        "https://api.example.com/data",
+        content=body,
+    )
+    result = capture_request(request, auth_type="bearer_token", body_override=None)
+    assert result["body"] == '{"key": "value"}'
+
+
 # --------------- Cleanup Old Payloads Tests ---------------
 
 

@@ -37,6 +37,7 @@ def _to_response(
     failures: list[RunFailure],
     endpoint_logs: list[EndpointRunLog] | None = None,
     endpoint_lookup: dict[str, ConnectorEndpoint] | None = None,
+    include_payloads: bool = False,
 ) -> RunHistoryResponse:
     ep_lookup = endpoint_lookup or {}
 
@@ -54,6 +55,9 @@ def _to_response(
             records_failed=log.records_failed,
             status=log.status,
             error_message=log.error_message,
+            failure_stage=log.failure_stage,
+            http_request=log.http_request if include_payloads else None,
+            http_response=log.http_response if include_payloads else None,
             created_at=log.created_at,
         )
 
@@ -250,7 +254,7 @@ def get_run(
     ) if endpoint_ids else []
     endpoint_lookup = {ep.id: ep for ep in endpoints}
 
-    response = _to_response(run, failures, endpoint_logs, endpoint_lookup)
+    response = _to_response(run, failures, endpoint_logs, endpoint_lookup, include_payloads=True)
     response.connector_name = connector_name
     return response
 

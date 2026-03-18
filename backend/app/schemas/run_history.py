@@ -32,6 +32,9 @@ class EndpointRunLogResponse(BaseModel):
     records_failed: int
     status: str
     error_message: Optional[str]
+    failure_stage: Optional[str] = None
+    http_request: Optional[dict] = None
+    http_response: Optional[dict] = None
     created_at: datetime
 
     class Config:

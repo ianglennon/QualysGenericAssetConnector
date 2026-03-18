@@ -4,11 +4,14 @@ import { HttpDetailPanel } from './HttpDetailPanel'
 import type { HttpRequestDetail, HttpResponseDetail } from '@/types/api'
 
 // Mock clipboard API
+const writeTextMock = vi.fn().mockResolvedValue(undefined)
+
 beforeEach(() => {
-  Object.assign(navigator, {
-    clipboard: {
-      writeText: vi.fn().mockResolvedValue(undefined),
-    },
+  writeTextMock.mockClear()
+  Object.defineProperty(navigator, 'clipboard', {
+    value: { writeText: writeTextMock },
+    writable: true,
+    configurable: true,
   })
 })
 
@@ -71,7 +74,9 @@ describe('HttpDetailPanel', () => {
 
     expect(screen.getByText('Request')).toBeDefined()
     expect(screen.getByText('Response')).toBeDefined()
-    expect(screen.getByRole('separator')).toBeDefined()
+    // Separator is decorative (no role), verify it's in the DOM via its data attribute
+    const separators = document.querySelectorAll('[data-orientation="horizontal"]')
+    expect(separators.length).toBeGreaterThan(0)
   })
 
   // Test 6 (UI-03): Copy request content

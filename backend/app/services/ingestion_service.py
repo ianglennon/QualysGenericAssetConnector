@@ -17,9 +17,9 @@ from app.models.run_history import EndpointRunLog, RunFailure, RunHistory, RunSt
 from app.schemas.field_mapping import FieldMappingRule
 from app.services.source_client import SourceFetchResult, fetch_all_pages
 from app.services.transform_engine import apply_mappings
-from app.services.qualys_client import QualysClientError, QualysFailure, submit_batch
+from app.services.qualys_client import QualysClientError, QualysFailure, submit_batch, _decrypt_secret
 from app.services.connector_service import HTTPX_TIMEOUT
-from app.services.payload_capture import cleanup_old_payloads
+from app.services.payload_capture import capture_request, capture_response, cleanup_old_payloads
 
 QUALYS_BATCH_SIZE = 100
 
@@ -100,6 +100,7 @@ async def _run_endpoint(
     records_fetched = 0
     records_submitted = 0
     records_failed = 0
+    current_batch_size = 0
     source_result: SourceFetchResult | None = None
 
     try:
@@ -132,6 +133,7 @@ async def _run_endpoint(
         for batch in batches:
             if not batch:
                 continue
+            current_batch_size = len(batch)
             result = await submit_batch(batch, connector, qualys_config, client=client)
             records_submitted += result.submitted_count
             failures.extend(result.failures)
@@ -154,9 +156,32 @@ async def _run_endpoint(
         db.commit()
         return log
 
-    except QualysClientError:
-        # QualysClientError must NOT be caught here — propagate to outer handler
-        raise
+    except QualysClientError as exc:
+        http_req = None
+        http_resp = None
+        if exc.response is not None:
+            http_req = capture_request(
+                exc.response.request,
+                auth_type="qualys",
+                body_override=f"[{current_batch_size} asset records omitted]",
+            )
+            http_resp = capture_response(exc.response)
+        log = EndpointRunLog(
+            run_id=run.id,
+            endpoint_id=endpoint.id,
+            execution_order=idx,
+            records_fetched=records_fetched,
+            records_submitted=records_submitted,
+            records_failed=records_failed,
+            status="failed",
+            error_message=str(exc),
+            failure_stage="qualys_submit",
+            http_request=http_req,
+            http_response=http_resp,
+        )
+        db.add(log)
+        db.commit()
+        return log
 
     except Exception as exc:
         log = EndpointRunLog(
@@ -203,6 +228,10 @@ async def run_ingestion(run_id: str) -> None:
                 "Qualys configuration not found",
                 error_type="qualys_not_configured",
             )
+
+        # Pre-flight: validate Qualys credentials can be decrypted
+        # This separates "config is broken" (run-level) from "API returned error" (endpoint-level)
+        _decrypt_secret(qualys_config)
 
         enabled_endpoints = (
             db.query(ConnectorEndpoint)

@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -366,3 +367,205 @@ async def test_fetch_all_pages_called_once_per_enabled_endpoint(db_session):
         await run_ingestion(run.id)
 
     assert mock_fetch.call_count == 3
+
+
+# --------------- Per-endpoint QualysClientError isolation Tests ---------------
+
+
+@pytest.mark.asyncio
+async def test_qualys_submit_failure_captured_with_http_exchange(db_session):
+    """QualysClientError with response → EndpointRunLog has http_request/http_response populated."""
+    connector = _seed_connector(db_session)
+    _seed_qualys_config(db_session)
+    ep = _seed_endpoint(db_session, connector.id, path="/assets", display_order=0)
+    _seed_mapping(db_session, ep.id)
+    run = _seed_run(db_session, connector.id)
+
+    mock_response = httpx.Response(
+        403,
+        content=b'{"error": "forbidden"}',
+        headers={"Content-Type": "application/json"},
+        request=httpx.Request(
+            "POST",
+            "https://qualys.example.com/rest/2.0/am/connector/asset/data/sync",
+            headers={"Authorization": "Basic abc123", "Content-Type": "application/json"},
+            content=b'{"assets": [{"name": "host1"}]}',
+        ),
+    )
+
+    with patch(
+        "app.services.ingestion_service.fetch_all_pages",
+        new=AsyncMock(return_value=_make_source_result()),
+    ), patch(
+        "app.services.ingestion_service.submit_batch",
+        new=AsyncMock(side_effect=QualysClientError("forbidden", status_code=403, response=mock_response)),
+    ):
+        await run_ingestion(run.id)
+
+    db_session.expire_all()
+    logs = db_session.query(EndpointRunLog).filter(EndpointRunLog.run_id == run.id).all()
+    assert len(logs) == 1
+    log = logs[0]
+    assert log.status == "failed"
+    assert log.failure_stage == "qualys_submit"
+    assert log.http_request is not None
+    assert log.http_request["method"] == "POST"
+    assert log.http_request["headers"]["authorization"] == "[REDACTED]"
+    assert log.http_response is not None
+    assert log.http_response["status_code"] == 403
+
+
+@pytest.mark.asyncio
+async def test_qualys_submit_connection_error_no_capture(db_session):
+    """QualysClientError with response=None (connection error) → http_request/http_response are None."""
+    connector = _seed_connector(db_session)
+    _seed_qualys_config(db_session)
+    ep = _seed_endpoint(db_session, connector.id, path="/assets", display_order=0)
+    _seed_mapping(db_session, ep.id)
+    run = _seed_run(db_session, connector.id)
+
+    with patch(
+        "app.services.ingestion_service.fetch_all_pages",
+        new=AsyncMock(return_value=_make_source_result()),
+    ), patch(
+        "app.services.ingestion_service.submit_batch",
+        new=AsyncMock(side_effect=QualysClientError("timeout", error_type="qualys_timeout")),
+    ):
+        await run_ingestion(run.id)
+
+    db_session.expire_all()
+    logs = db_session.query(EndpointRunLog).filter(EndpointRunLog.run_id == run.id).all()
+    assert len(logs) == 1
+    log = logs[0]
+    assert log.status == "failed"
+    assert log.http_request is None
+    assert log.http_response is None
+
+
+@pytest.mark.asyncio
+async def test_qualys_capture_uses_body_override_with_record_count(db_session):
+    """Captured Qualys request body uses body_override with record count metadata."""
+    connector = _seed_connector(db_session)
+    _seed_qualys_config(db_session)
+    ep = _seed_endpoint(db_session, connector.id, path="/assets", display_order=0)
+    _seed_mapping(db_session, ep.id)
+    run = _seed_run(db_session, connector.id)
+
+    mock_response = httpx.Response(
+        500,
+        content=b'{"error": "server error"}',
+        request=httpx.Request(
+            "POST",
+            "https://qualys.example.com/rest/2.0/am/connector/asset/data/sync",
+            headers={"Authorization": "Basic abc123"},
+            content=b'{"assets": [{"name": "host1"}, {"name": "host2"}]}',
+        ),
+    )
+
+    with patch(
+        "app.services.ingestion_service.fetch_all_pages",
+        new=AsyncMock(return_value=_make_source_result()),
+    ), patch(
+        "app.services.ingestion_service.submit_batch",
+        new=AsyncMock(side_effect=QualysClientError("server error", status_code=500, response=mock_response)),
+    ):
+        await run_ingestion(run.id)
+
+    db_session.expire_all()
+    logs = db_session.query(EndpointRunLog).filter(EndpointRunLog.run_id == run.id).all()
+    assert len(logs) == 1
+    log = logs[0]
+    assert log.http_request is not None
+    # Body should contain record count metadata, not the actual payload
+    assert "asset records omitted" in log.http_request["body"]
+
+
+@pytest.mark.asyncio
+async def test_qualys_submit_failure_remaining_endpoints_continue(db_session):
+    """When one endpoint fails Qualys submit, remaining endpoints still execute → partial_success."""
+    connector = _seed_connector(db_session)
+    _seed_qualys_config(db_session)
+    ep1 = _seed_endpoint(db_session, connector.id, path="/assets", display_order=0)
+    ep2 = _seed_endpoint(db_session, connector.id, path="/servers", display_order=1)
+    _seed_mapping(db_session, ep1.id)
+    _seed_mapping(db_session, ep2.id)
+    run = _seed_run(db_session, connector.id)
+
+    call_count = 0
+    mock_response = httpx.Response(
+        403,
+        content=b'{"error": "forbidden"}',
+        request=httpx.Request(
+            "POST",
+            "https://qualys.example.com/api",
+            headers={"Authorization": "Basic abc123"},
+            content=b'{"assets": []}',
+        ),
+    )
+
+    async def submit_side_effect(batch, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise QualysClientError("forbidden", status_code=403, response=mock_response)
+        return _make_submit_result(count=len(batch))
+
+    with patch(
+        "app.services.ingestion_service.fetch_all_pages",
+        new=AsyncMock(return_value=_make_source_result()),
+    ), patch(
+        "app.services.ingestion_service.submit_batch",
+        new=AsyncMock(side_effect=submit_side_effect),
+    ):
+        await run_ingestion(run.id)
+
+    db_session.expire_all()
+    updated_run = db_session.query(RunHistory).filter(RunHistory.id == run.id).first()
+    assert updated_run.status == RunStatus.partial_success
+
+    logs = db_session.query(EndpointRunLog).filter(EndpointRunLog.run_id == run.id).order_by(EndpointRunLog.execution_order).all()
+    assert len(logs) == 2
+    assert logs[0].status == "failed"
+    assert logs[1].status == "success"
+
+
+@pytest.mark.asyncio
+async def test_preflight_validation_fails_run_before_endpoint_loop(db_session):
+    """Pre-flight validation (missing credentials) fails entire run before any endpoint executes."""
+    connector = _seed_connector(db_session)
+    # Create config with NO credentials (no password, no token)
+    config = QualysConfig(
+        api_url="https://qualys.example.com",
+        username="qualys-user",
+        encrypted_password=None,
+        encrypted_token=None,
+    )
+    db_session.add(config)
+    db_session.commit()
+
+    ep = _seed_endpoint(db_session, connector.id, path="/assets", display_order=0)
+    _seed_mapping(db_session, ep.id)
+    run = _seed_run(db_session, connector.id)
+
+    mock_fetch = AsyncMock(return_value=_make_source_result())
+
+    with patch(
+        "app.services.ingestion_service.fetch_all_pages",
+        new=mock_fetch,
+    ), patch(
+        "app.services.ingestion_service.submit_batch",
+        new=AsyncMock(return_value=_make_submit_result()),
+    ):
+        await run_ingestion(run.id)
+
+    db_session.expire_all()
+    updated_run = db_session.query(RunHistory).filter(RunHistory.id == run.id).first()
+    assert updated_run.status == RunStatus.failed
+    assert "credentials" in (updated_run.error_message or "").lower()
+
+    # No endpoint logs should exist -- run failed before endpoint loop
+    logs = db_session.query(EndpointRunLog).filter(EndpointRunLog.run_id == run.id).all()
+    assert len(logs) == 0
+
+    # fetch_all_pages should NOT have been called
+    assert mock_fetch.call_count == 0

@@ -8,7 +8,7 @@ from app.schemas.pagination import (
     OffsetLimitPagination,
     PageNumberPagination,
 )
-from app.services.source_client import fetch_all_pages
+from app.services.source_client import FetchResult, SourceFetchResult, fetch_all_pages
 
 
 def _make_connector(
@@ -172,3 +172,17 @@ async def test_retry_exhaustion_marks_partial():
     assert result.records_fetched == 2
     assert result.pages_fetched == 1
     assert result.partial is True
+
+
+def test_fetch_result_dataclass_exists():
+    """FetchResult has response and last_failed_response fields."""
+    fr = FetchResult(response=None, last_failed_response=None)
+    assert fr.response is None
+    assert fr.last_failed_response is None
+
+
+def test_source_fetch_result_has_capture_fields():
+    """SourceFetchResult has http_request and http_response fields defaulting to None."""
+    sfr = SourceFetchResult(records=[], records_fetched=0, pages_fetched=0, partial=False)
+    assert sfr.http_request is None
+    assert sfr.http_response is None

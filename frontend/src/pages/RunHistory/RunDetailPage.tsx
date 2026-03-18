@@ -7,8 +7,15 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ArrowLeft, AlertCircle } from 'lucide-react'
 import { useRun } from '@/hooks/queries/useRuns'
+import { HttpDetailPanel } from './HttpDetailPanel'
 import { format } from 'date-fns'
 import type { EndpointRunLog } from '@/types/api'
+
+const STAGE_LABELS: Record<string, string> = {
+  source_fetch: 'Source Fetch',
+  transformation: 'Transformation',
+  qualys_submit: 'Qualys Submit',
+}
 
 export default function RunDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -155,7 +162,14 @@ export default function RunDetailPage() {
                         <CardTitle className="text-base">
                           {log.endpoint_name || log.endpoint_id}
                         </CardTitle>
-                        {getStatusBadge(log.status)}
+                        <div className="flex items-center gap-2">
+                          {getStatusBadge(log.status)}
+                          {log.failure_stage && (
+                            <Badge variant="destructive">
+                              {STAGE_LABELS[log.failure_stage] ?? log.failure_stage}
+                            </Badge>
+                          )}
+                        </div>
                       </div>
                       <CardDescription>
                         {log.endpoint_path || 'Unknown path'}
@@ -184,6 +198,10 @@ export default function RunDetailPage() {
                           <AlertDescription>{log.error_message}</AlertDescription>
                         </Alert>
                       )}
+                      <HttpDetailPanel
+                        httpRequest={log.http_request}
+                        httpResponse={log.http_response}
+                      />
                     </CardContent>
                   </Card>
                 ))}

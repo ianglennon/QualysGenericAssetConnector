@@ -569,3 +569,86 @@ async def test_preflight_validation_fails_run_before_endpoint_loop(db_session):
 
     # fetch_all_pages should NOT have been called
     assert mock_fetch.call_count == 0
+
+
+# --------------- Pipeline Stage Tracking Tests ---------------
+
+
+@pytest.mark.asyncio
+async def test_source_fetch_failure_sets_stage(db_session):
+    """Source fetch exception (source_result is None) sets failure_stage='source_fetch'."""
+    connector = _seed_connector(db_session)
+    _seed_qualys_config(db_session)
+    ep = _seed_endpoint(db_session, connector.id, path="/assets", display_order=0)
+    run = _seed_run(db_session, connector.id)
+
+    with patch(
+        "app.services.ingestion_service.fetch_all_pages",
+        new=AsyncMock(side_effect=RuntimeError("connection refused")),
+    ), patch(
+        "app.services.ingestion_service.submit_batch",
+        new=AsyncMock(return_value=_make_submit_result()),
+    ):
+        await run_ingestion(run.id)
+
+    db_session.expire_all()
+    logs = db_session.query(EndpointRunLog).filter(EndpointRunLog.run_id == run.id).all()
+    assert len(logs) == 1
+    assert logs[0].status == "failed"
+    assert logs[0].failure_stage == "source_fetch"
+    # HTTP payloads should be None since source_result was never assigned
+    assert logs[0].http_request is None
+    assert logs[0].http_response is None
+
+
+@pytest.mark.asyncio
+async def test_transformation_failure_sets_stage(db_session):
+    """Transformation exception (source_result exists) sets failure_stage='transformation'."""
+    connector = _seed_connector(db_session)
+    _seed_qualys_config(db_session)
+    ep = _seed_endpoint(db_session, connector.id, path="/assets", display_order=0)
+    _seed_mapping(db_session, ep.id)
+    run = _seed_run(db_session, connector.id)
+
+    with patch(
+        "app.services.ingestion_service.fetch_all_pages",
+        new=AsyncMock(return_value=_make_source_result()),
+    ), patch(
+        "app.services.ingestion_service.apply_mappings",
+        side_effect=ValueError("bad mapping rule"),
+    ), patch(
+        "app.services.ingestion_service.submit_batch",
+        new=AsyncMock(return_value=_make_submit_result()),
+    ):
+        await run_ingestion(run.id)
+
+    db_session.expire_all()
+    logs = db_session.query(EndpointRunLog).filter(EndpointRunLog.run_id == run.id).all()
+    assert len(logs) == 1
+    assert logs[0].status == "failed"
+    assert logs[0].failure_stage == "transformation"
+
+
+@pytest.mark.asyncio
+async def test_successful_run_has_no_failure_stage(db_session):
+    """Successful endpoint run has failure_stage=None."""
+    connector = _seed_connector(db_session)
+    _seed_qualys_config(db_session)
+    ep = _seed_endpoint(db_session, connector.id, path="/assets", display_order=0)
+    _seed_mapping(db_session, ep.id)
+    run = _seed_run(db_session, connector.id)
+
+    with patch(
+        "app.services.ingestion_service.fetch_all_pages",
+        new=AsyncMock(return_value=_make_source_result()),
+    ), patch(
+        "app.services.ingestion_service.submit_batch",
+        new=AsyncMock(return_value=_make_submit_result(count=2)),
+    ):
+        await run_ingestion(run.id)
+
+    db_session.expire_all()
+    logs = db_session.query(EndpointRunLog).filter(EndpointRunLog.run_id == run.id).all()
+    assert len(logs) == 1
+    assert logs[0].status == "success"
+    assert logs[0].failure_stage is None

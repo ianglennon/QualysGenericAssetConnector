@@ -184,6 +184,7 @@ async def _run_endpoint(
         return log
 
     except Exception as exc:
+        failure_stage = "source_fetch" if source_result is None else "transformation"
         log = EndpointRunLog(
             run_id=run.id,
             endpoint_id=endpoint.id,
@@ -193,6 +194,7 @@ async def _run_endpoint(
             records_failed=records_failed,
             status="failed",
             error_message=str(exc),
+            failure_stage=failure_stage,
             http_request=source_result.http_request if source_result else None,
             http_response=source_result.http_response if source_result else None,
         )

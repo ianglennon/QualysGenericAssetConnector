@@ -215,23 +215,28 @@ def _make_run(db_session, connector_id: str) -> str:
 
 
 def _make_endpoint_run_log(db_session, run_id, endpoint_id, created_at, http_request=None, http_response=None):
-    """Create an EndpointRunLog with given payload data."""
+    """Create an EndpointRunLog with given payload data.
+
+    When http_request/http_response are None, they are omitted from the INSERT
+    so SQLite stores SQL NULL (not the JSON text "null").
+    """
     log_id = str(uuid.uuid4())
-    db_session.execute(
-        EndpointRunLog.__table__.insert().values(
-            id=log_id,
-            run_id=run_id,
-            endpoint_id=endpoint_id,
-            execution_order=0,
-            records_fetched=0,
-            records_submitted=0,
-            records_failed=0,
-            status="success",
-            http_request=http_request,
-            http_response=http_response,
-            created_at=created_at,
-        )
-    )
+    values = {
+        "id": log_id,
+        "run_id": run_id,
+        "endpoint_id": endpoint_id,
+        "execution_order": 0,
+        "records_fetched": 0,
+        "records_submitted": 0,
+        "records_failed": 0,
+        "status": "success",
+        "created_at": created_at,
+    }
+    if http_request is not None:
+        values["http_request"] = http_request
+    if http_response is not None:
+        values["http_response"] = http_response
+    db_session.execute(EndpointRunLog.__table__.insert().values(**values))
     db_session.commit()
     return log_id
 

@@ -16,6 +16,12 @@ class RunStatus(str, enum.Enum):
     skipped = "skipped"
 
 
+class FailureStage(str, enum.Enum):
+    source_fetch = "source_fetch"
+    transformation = "transformation"
+    qualys_submit = "qualys_submit"
+
+
 class RunHistory(Base):
     """Stores ingestion run history.
 
@@ -83,4 +89,7 @@ class EndpointRunLog(Base):
     # String (not Enum) — consistent with project convention for new models
     status: Mapped[str] = mapped_column(String, nullable=False)
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+    failure_stage: Mapped[str | None] = mapped_column(String, nullable=True)
+    http_request: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    http_response: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

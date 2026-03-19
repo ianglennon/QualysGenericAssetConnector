@@ -7,6 +7,8 @@ from app.schemas.qualys import QualysConfigCreate, QualysConfigResponse
 from app.schemas.field_mapping import QualysSchemaField, QualysSchemaResponse
 from app.services.credential_crypto import get_crypto
 from app.core.security import require_role
+from app.core.errors import make_error
+from qualys_client.platform import detect_platform
 
 router = APIRouter(prefix="/qualys", tags=["qualys"])
 
@@ -32,11 +34,9 @@ _CORE_ONLY_FIELDS = frozenset({
 def _to_response(config: QualysConfig) -> QualysConfigResponse:
     return QualysConfigResponse(
         id=config.id,
-        api_url=config.api_url,
         username=config.username,
         connector_uuid=config.connector_uuid,
         has_password=bool(config.encrypted_password),
-        has_token=bool(config.encrypted_token),
     )
 
 
@@ -47,16 +47,16 @@ def upsert_qualys_config(
     _admin=Depends(require_role("admin")),
 ):
     """Create or replace Qualys subscription credentials. Credentials are encrypted before storage."""
-    if not payload.password and not payload.token:
+    # Validate platform from username (CFG-01)
+    try:
+        detect_platform(payload.username)
+    except ValueError:
         raise HTTPException(
             status_code=422,
-            detail={
-                "error": {
-                    "code": "QUALYS_MISSING_CREDENTIAL",
-                    "message": "Either password or token must be provided",
-                    "details": {},
-                }
-            },
+            detail=make_error(
+                "QUALYS_INVALID_USERNAME",
+                "Username does not contain a valid Qualys platform identifier",
+            ),
         )
 
     crypto = get_crypto()
@@ -67,11 +67,9 @@ def upsert_qualys_config(
         config = QualysConfig()
         db.add(config)
 
-    config.api_url = payload.api_url
     config.username = payload.username
     config.connector_uuid = payload.connector_uuid
-    config.encrypted_password = crypto.encrypt(payload.password) if payload.password else None
-    config.encrypted_token = crypto.encrypt(payload.token) if payload.token else None
+    config.encrypted_password = crypto.encrypt(payload.password)
 
     db.commit()
     db.refresh(config)

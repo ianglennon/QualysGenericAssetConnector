@@ -213,19 +213,18 @@ export interface RunStats {
 // Qualys Configuration Types
 export interface QualysConfig {
   id: string
-  api_url: string
   username: string
   connector_uuid: string
   has_password: boolean
-  has_token: boolean
+  platform_name: string       // e.g. "US2"
+  api_server_url: string      // e.g. "https://qualysapi.qg2.apps.qualys.com"
+  api_gateway_url: string     // e.g. "https://gateway.qg2.apps.qualys.com"
 }
 
 export interface QualysConfigUpdate {
-  api_url: string
   username: string
   connector_uuid: string
   password?: string
-  token?: string
 }
 
 // Theme and User Profile Types

@@ -93,6 +93,25 @@ def test_get_qualys_config_never_returns_secrets(client, admin_token):
         assert forbidden_key not in data
 
 
+def test_get_qualys_config_includes_platform_fields(client, admin_token):
+    # Ensure config exists first
+    client.put(
+        "/api/v1/qualys/config",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"username": "quays2ab1", "password": "testpass123", "connector_uuid": "abc-123"},
+    )
+    resp = client.get("/api/v1/qualys/config", headers={"Authorization": f"Bearer {admin_token}"})
+    assert resp.status_code == 200
+    data = resp.json()
+    # Verify platform fields are present and non-empty
+    assert "platform_name" in data
+    assert "api_server_url" in data
+    assert "api_gateway_url" in data
+    assert isinstance(data["platform_name"], str) and len(data["platform_name"]) > 0
+    assert data["api_server_url"].startswith("https://")
+    assert data["api_gateway_url"].startswith("https://")
+
+
 def test_operator_cannot_access_qualys_config(client, operator_token):
     resp = client.get("/api/v1/qualys/config", headers={"Authorization": f"Bearer {operator_token}"})
     assert resp.status_code == 403

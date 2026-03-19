@@ -2,7 +2,6 @@ import os
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
-import httpx
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -17,7 +16,7 @@ from app.models.qualys_config import QualysConfig
 from app.models.run_history import EndpointRunLog, RunHistory, RunStatus
 from app.services.credential_crypto import get_crypto
 from app.services.ingestion_service import run_ingestion
-from app.services.qualys_adapter import QualysClientError, QualysFailure, QualysSubmitResult
+from app.services.qualys_adapter import QualysAdapterError, QualysFailure, QualysSubmitResult
 from app.services.source_client import SourceFetchResult
 
 
@@ -75,10 +74,9 @@ def _seed_mapping(db, endpoint_id: str) -> FieldMapping:
 def _seed_qualys_config(db) -> QualysConfig:
     crypto = get_crypto()
     config = QualysConfig(
-        api_url="https://qualys.example.com",
-        username="qualys-user",
+        username="quays2user1",
         encrypted_password=crypto.encrypt("secret"),
-        encrypted_token=None,
+        connector_uuid="test-connector-uuid",
     )
     db.add(config)
     db.commit()
@@ -369,36 +367,36 @@ async def test_fetch_all_pages_called_once_per_enabled_endpoint(db_session):
     assert mock_fetch.call_count == 3
 
 
-# --------------- Per-endpoint QualysClientError isolation Tests ---------------
+# --------------- Per-endpoint QualysAdapterError isolation Tests ---------------
 
 
 @pytest.mark.asyncio
 async def test_qualys_submit_failure_captured_with_http_exchange(db_session):
-    """QualysClientError with response → EndpointRunLog has http_request/http_response populated."""
+    """QualysAdapterError with http dicts → EndpointRunLog has http_request/http_response populated."""
     connector = _seed_connector(db_session)
     _seed_qualys_config(db_session)
     ep = _seed_endpoint(db_session, connector.id, path="/assets", display_order=0)
     _seed_mapping(db_session, ep.id)
     run = _seed_run(db_session, connector.id)
 
-    mock_response = httpx.Response(
-        403,
-        content=b'{"error": "forbidden"}',
-        headers={"Content-Type": "application/json"},
-        request=httpx.Request(
-            "POST",
-            "https://qualys.example.com/rest/2.0/am/connector/asset/data/sync",
-            headers={"Authorization": "Basic abc123", "Content-Type": "application/json"},
-            content=b'{"assets": [{"name": "host1"}]}',
-        ),
-    )
+    error_context = {
+        "http_request": {
+            "method": "POST",
+            "url": "https://qualys.example.com/rest/2.0/am/connector/asset/data/sync",
+            "headers": {"authorization": "[REDACTED]", "content-type": "application/json"},
+        },
+        "http_response": {
+            "status_code": 403,
+            "body": '{"error": "forbidden"}',
+        },
+    }
 
     with patch(
         "app.services.ingestion_service.fetch_all_pages",
         new=AsyncMock(return_value=_make_source_result()),
     ), patch(
         "app.services.ingestion_service.submit_batch",
-        new=AsyncMock(side_effect=QualysClientError("forbidden", status_code=403, response=mock_response)),
+        new=AsyncMock(side_effect=QualysAdapterError("forbidden", status_code=403, error_context=error_context)),
     ):
         await run_ingestion(run.id)
 
@@ -417,7 +415,7 @@ async def test_qualys_submit_failure_captured_with_http_exchange(db_session):
 
 @pytest.mark.asyncio
 async def test_qualys_submit_connection_error_no_capture(db_session):
-    """QualysClientError with response=None (connection error) → http_request/http_response are None."""
+    """QualysAdapterError with no http dicts (connection error) → http_request/http_response are None."""
     connector = _seed_connector(db_session)
     _seed_qualys_config(db_session)
     ep = _seed_endpoint(db_session, connector.id, path="/assets", display_order=0)
@@ -429,7 +427,7 @@ async def test_qualys_submit_connection_error_no_capture(db_session):
         new=AsyncMock(return_value=_make_source_result()),
     ), patch(
         "app.services.ingestion_service.submit_batch",
-        new=AsyncMock(side_effect=QualysClientError("timeout", error_type="qualys_timeout")),
+        new=AsyncMock(side_effect=QualysAdapterError("timeout", error_type="qualys_timeout")),
     ):
         await run_ingestion(run.id)
 
@@ -444,30 +442,32 @@ async def test_qualys_submit_connection_error_no_capture(db_session):
 
 @pytest.mark.asyncio
 async def test_qualys_capture_uses_body_override_with_record_count(db_session):
-    """Captured Qualys request body uses body_override with record count metadata."""
+    """Captured Qualys request body uses body_preview from package error context."""
     connector = _seed_connector(db_session)
     _seed_qualys_config(db_session)
     ep = _seed_endpoint(db_session, connector.id, path="/assets", display_order=0)
     _seed_mapping(db_session, ep.id)
     run = _seed_run(db_session, connector.id)
 
-    mock_response = httpx.Response(
-        500,
-        content=b'{"error": "server error"}',
-        request=httpx.Request(
-            "POST",
-            "https://qualys.example.com/rest/2.0/am/connector/asset/data/sync",
-            headers={"Authorization": "Basic abc123"},
-            content=b'{"assets": [{"name": "host1"}, {"name": "host2"}]}',
-        ),
-    )
+    error_context = {
+        "http_request": {
+            "method": "POST",
+            "url": "https://qualys.example.com/rest/2.0/am/connector/asset/data/sync",
+            "headers": {"authorization": "[REDACTED]"},
+            "body_preview": '{"assets": [2 asset records omitted]}',
+        },
+        "http_response": {
+            "status_code": 500,
+            "body": '{"error": "server error"}',
+        },
+    }
 
     with patch(
         "app.services.ingestion_service.fetch_all_pages",
         new=AsyncMock(return_value=_make_source_result()),
     ), patch(
         "app.services.ingestion_service.submit_batch",
-        new=AsyncMock(side_effect=QualysClientError("server error", status_code=500, response=mock_response)),
+        new=AsyncMock(side_effect=QualysAdapterError("server error", status_code=500, error_context=error_context)),
     ):
         await run_ingestion(run.id)
 
@@ -476,8 +476,8 @@ async def test_qualys_capture_uses_body_override_with_record_count(db_session):
     assert len(logs) == 1
     log = logs[0]
     assert log.http_request is not None
-    # Body should contain record count metadata, not the actual payload
-    assert "asset records omitted" in log.http_request["body"]
+    # Body preview comes from package error context
+    assert "asset records omitted" in log.http_request["body_preview"]
 
 
 @pytest.mark.asyncio
@@ -492,22 +492,23 @@ async def test_qualys_submit_failure_remaining_endpoints_continue(db_session):
     run = _seed_run(db_session, connector.id)
 
     call_count = 0
-    mock_response = httpx.Response(
-        403,
-        content=b'{"error": "forbidden"}',
-        request=httpx.Request(
-            "POST",
-            "https://qualys.example.com/api",
-            headers={"Authorization": "Basic abc123"},
-            content=b'{"assets": []}',
-        ),
-    )
+    error_context = {
+        "http_request": {
+            "method": "POST",
+            "url": "https://qualys.example.com/api",
+            "headers": {"authorization": "[REDACTED]"},
+        },
+        "http_response": {
+            "status_code": 403,
+            "body": '{"error": "forbidden"}',
+        },
+    }
 
     async def submit_side_effect(batch, *args, **kwargs):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            raise QualysClientError("forbidden", status_code=403, response=mock_response)
+            raise QualysAdapterError("forbidden", status_code=403, error_context=error_context)
         return _make_submit_result(count=len(batch))
 
     with patch(
@@ -533,12 +534,11 @@ async def test_qualys_submit_failure_remaining_endpoints_continue(db_session):
 async def test_preflight_validation_fails_run_before_endpoint_loop(db_session):
     """Pre-flight validation (missing credentials) fails entire run before any endpoint executes."""
     connector = _seed_connector(db_session)
-    # Create config with NO credentials (no password, no token)
+    # Create config with NO credentials (no password)
     config = QualysConfig(
-        api_url="https://qualys.example.com",
-        username="qualys-user",
+        username="quays2user1",
         encrypted_password=None,
-        encrypted_token=None,
+        connector_uuid="test-connector-uuid",
     )
     db_session.add(config)
     db_session.commit()

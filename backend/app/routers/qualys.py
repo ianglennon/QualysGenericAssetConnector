@@ -8,7 +8,7 @@ from app.schemas.field_mapping import QualysSchemaField, QualysSchemaResponse
 from app.services.credential_crypto import get_crypto
 from app.core.security import require_role
 from app.core.errors import make_error
-from qualys_client.platform import detect_platform
+from qualys_client.platform import detect_platform, derive_urls
 
 router = APIRouter(prefix="/qualys", tags=["qualys"])
 
@@ -32,11 +32,16 @@ _CORE_ONLY_FIELDS = frozenset({
 
 
 def _to_response(config: QualysConfig) -> QualysConfigResponse:
+    platform = detect_platform(config.username)
+    api_server, api_gateway = derive_urls(platform)
     return QualysConfigResponse(
         id=config.id,
         username=config.username,
         connector_uuid=config.connector_uuid,
         has_password=bool(config.encrypted_password),
+        platform_name=platform,
+        api_server_url=api_server,
+        api_gateway_url=api_gateway,
     )
 
 
@@ -69,7 +74,19 @@ def upsert_qualys_config(
 
     config.username = payload.username
     config.connector_uuid = payload.connector_uuid
-    config.encrypted_password = crypto.encrypt(payload.password)
+
+    # Password required on first save (new config), optional on update
+    if not config.encrypted_password and not payload.password:
+        raise HTTPException(
+            status_code=422,
+            detail=make_error(
+                "QUALYS_PASSWORD_REQUIRED",
+                "Password is required for initial configuration",
+            ),
+        )
+    if payload.password:
+        config.encrypted_password = crypto.encrypt(payload.password)
+    # else: keep existing encrypted_password
 
     db.commit()
     db.refresh(config)

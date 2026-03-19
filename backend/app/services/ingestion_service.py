@@ -17,9 +17,9 @@ from app.models.run_history import EndpointRunLog, RunFailure, RunHistory, RunSt
 from app.schemas.field_mapping import FieldMappingRule
 from app.services.source_client import SourceFetchResult, fetch_all_pages
 from app.services.transform_engine import apply_mappings
-from app.services.qualys_adapter import QualysClientError, QualysFailure, submit_batch, _decrypt_secret
+from app.services.qualys_adapter import QualysAdapterError, QualysFailure, submit_batch, _decrypt_secret
 from app.services.connector_service import HTTPX_TIMEOUT
-from app.services.payload_capture import capture_request, capture_response, cleanup_old_payloads
+from app.services.payload_capture import cleanup_old_payloads
 
 QUALYS_BATCH_SIZE = 100
 
@@ -134,7 +134,7 @@ async def _run_endpoint(
             if not batch:
                 continue
             current_batch_size = len(batch)
-            result = await submit_batch(batch, connector, qualys_config, client=client)
+            result = await submit_batch(batch, connector, qualys_config)
             records_submitted += result.submitted_count
             failures.extend(result.failures)
 
@@ -156,16 +156,9 @@ async def _run_endpoint(
         db.commit()
         return log
 
-    except QualysClientError as exc:
-        http_req = None
-        http_resp = None
-        if exc.response is not None:
-            http_req = capture_request(
-                exc.response.request,
-                auth_type="qualys",
-                body_override=f"[{current_batch_size} asset records omitted]",
-            )
-            http_resp = capture_response(exc.response)
+    except QualysAdapterError as exc:
+        http_req = exc.error_context.get("http_request")
+        http_resp = exc.error_context.get("http_response")
         log = EndpointRunLog(
             run_id=run.id,
             endpoint_id=endpoint.id,
@@ -226,7 +219,7 @@ async def run_ingestion(run_id: str) -> None:
 
         qualys_config = db.query(QualysConfig).first()
         if not qualys_config:
-            raise QualysClientError(
+            raise QualysAdapterError(
                 "Qualys configuration not found",
                 error_type="qualys_not_configured",
             )
@@ -279,7 +272,7 @@ async def run_ingestion(run_id: str) -> None:
         )
         db.commit()
 
-    except QualysClientError as exc:
+    except QualysAdapterError as exc:
         _mark_failed(
             db,
             run,

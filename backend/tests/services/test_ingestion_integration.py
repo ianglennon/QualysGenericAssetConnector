@@ -95,10 +95,9 @@ def _seed_run(db, connector_id: str) -> RunHistory:
 def _seed_qualys_config(db) -> QualysConfig:
     crypto = get_crypto()
     config = QualysConfig(
-        api_url="https://qualys.example.com",
-        username="qualys-user",
+        username="quays2user1",
         encrypted_password=crypto.encrypt("secret"),
-        encrypted_token=None,
+        connector_uuid="test-connector-uuid",
     )
     db.add(config)
     db.commit()

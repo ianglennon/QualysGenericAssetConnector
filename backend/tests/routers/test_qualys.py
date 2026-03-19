@@ -20,18 +20,18 @@ def client():
 @pytest.fixture(scope="module")
 def admin_token(client):
     db = SessionLocal()
-    create_user(db, "qualys_admin@test.com", "AdminPass1!", UserRole.admin)
+    create_user(db, "qualys_admin@test.com", "AdminPass12!!", UserRole.admin)
     db.close()
-    resp = client.post("/api/v1/auth/login", json={"email": "qualys_admin@test.com", "password": "AdminPass1!"})
+    resp = client.post("/api/v1/auth/login", json={"email": "qualys_admin@test.com", "password": "AdminPass12!!"})
     return resp.json()["access_token"]
 
 
 @pytest.fixture(scope="module")
 def operator_token(client):
     db = SessionLocal()
-    create_user(db, "qualys_op@test.com", "OperatorPass1!", UserRole.operator)
+    create_user(db, "qualys_op@test.com", "OperatorPass12!!", UserRole.operator)
     db.close()
-    resp = client.post("/api/v1/auth/login", json={"email": "qualys_op@test.com", "password": "OperatorPass1!"})
+    resp = client.post("/api/v1/auth/login", json={"email": "qualys_op@test.com", "password": "OperatorPass12!!"})
     return resp.json()["access_token"]
 
 
@@ -39,22 +39,57 @@ def test_put_qualys_config_as_admin(client, admin_token):
     resp = client.put(
         "/api/v1/qualys/config",
         headers={"Authorization": f"Bearer {admin_token}"},
-        json={"api_url": "https://qualysapi.qg2.apps.qualys.com", "username": "testuser", "password": "testpass123"},
+        json={"username": "quays2ab1", "password": "testpass123", "connector_uuid": "abc-123"},
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["api_url"] == "https://qualysapi.qg2.apps.qualys.com"
+    assert data["username"] == "quays2ab1"
+    assert data["connector_uuid"] == "abc-123"
     assert data["has_password"] is True
     assert "password" not in data
     assert "encrypted_password" not in data
+    assert "api_url" not in data
+    assert "has_token" not in data
+
+
+def test_put_qualys_config_invalid_username(client, admin_token):
+    resp = client.put(
+        "/api/v1/qualys/config",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"username": "invaliduser", "password": "testpass123", "connector_uuid": "abc-123"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "QUALYS_INVALID_USERNAME"
+
+
+def test_put_qualys_config_missing_fields(client, admin_token):
+    # Missing password and connector_uuid
+    resp = client.put(
+        "/api/v1/qualys/config",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"username": "quays2ab1"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "VALIDATION_ERROR"
 
 
 def test_get_qualys_config_never_returns_secrets(client, admin_token):
+    # Ensure config exists first
+    client.put(
+        "/api/v1/qualys/config",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"username": "quays2ab1", "password": "testpass123", "connector_uuid": "abc-123"},
+    )
     resp = client.get("/api/v1/qualys/config", headers={"Authorization": f"Bearer {admin_token}"})
     assert resp.status_code == 200
     data = resp.json()
-    # Verify no raw secret fields in response
-    for forbidden_key in ("password", "token", "encrypted_password", "encrypted_token"):
+    # Verify correct fields present
+    assert "id" in data
+    assert "username" in data
+    assert "connector_uuid" in data
+    assert "has_password" in data
+    # Verify removed/secret fields absent
+    for forbidden_key in ("password", "token", "encrypted_password", "encrypted_token", "api_url", "has_token"):
         assert forbidden_key not in data
 
 

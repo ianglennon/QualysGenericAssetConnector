@@ -17,7 +17,7 @@ from app.models.qualys_config import QualysConfig
 from app.models.run_history import EndpointRunLog, RunHistory, RunStatus
 from app.services.credential_crypto import get_crypto
 from app.services.ingestion_service import run_ingestion
-from app.services.qualys_client import QualysClientError, QualysFailure, QualysSubmitResult
+from app.services.qualys_adapter import QualysClientError, QualysFailure, QualysSubmitResult
 from app.services.source_client import SourceFetchResult
 
 

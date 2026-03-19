@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
 from app.services.credential_crypto import get_crypto
-from app.services.qualys_client import QualysClientError, _post_with_retries, submit_batch
+from app.services.qualys_adapter import QualysClientError, _post_with_retries, submit_batch
 
 
 def _make_connector(qualys_retry_limit=None):

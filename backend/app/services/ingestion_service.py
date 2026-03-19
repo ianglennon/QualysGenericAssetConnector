@@ -17,7 +17,7 @@ from app.models.run_history import EndpointRunLog, RunFailure, RunHistory, RunSt
 from app.schemas.field_mapping import FieldMappingRule
 from app.services.source_client import SourceFetchResult, fetch_all_pages
 from app.services.transform_engine import apply_mappings
-from app.services.qualys_client import QualysClientError, QualysFailure, submit_batch, _decrypt_secret
+from app.services.qualys_adapter import QualysClientError, QualysFailure, submit_batch, _decrypt_secret
 from app.services.connector_service import HTTPX_TIMEOUT
 from app.services.payload_capture import capture_request, capture_response, cleanup_old_payloads
 

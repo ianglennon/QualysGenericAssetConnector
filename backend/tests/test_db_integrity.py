@@ -36,6 +36,8 @@ class TestExpectedTablesConstant:
             "run_failures",
             "endpoint_run_logs",
             "users",
+            "canvases",
+            "canvas_endpoints",
         }
         assert EXPECTED_TABLES == expected
 

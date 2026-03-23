@@ -48,6 +48,8 @@ class RunHistory(Base):
     error_type: Mapped[str | None] = mapped_column(String, nullable=True)
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)
     error_context: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    source_api_calls: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    qualys_api_calls: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -92,4 +94,6 @@ class EndpointRunLog(Base):
     failure_stage: Mapped[str | None] = mapped_column(String, nullable=True)
     http_request: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     http_response: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    canvas_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_api_calls: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

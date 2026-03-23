@@ -18,10 +18,15 @@ class FieldMapping(Base):
     __tablename__ = "field_mappings"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    endpoint_id: Mapped[str] = mapped_column(
+    endpoint_id: Mapped[str | None] = mapped_column(
         String,
         ForeignKey("connector_endpoints.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+    )
+    canvas_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("canvases.id", ondelete="CASCADE"),
+        nullable=True,
     )
     target_field: Mapped[str] = mapped_column(String, nullable=False)
     mapping_type: Mapped[str] = mapped_column(String, nullable=False)

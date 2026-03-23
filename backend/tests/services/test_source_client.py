@@ -1,4 +1,5 @@
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+from datetime import datetime, timezone, timedelta
 import httpx
 import pytest
 
@@ -8,7 +9,14 @@ from app.schemas.pagination import (
     OffsetLimitPagination,
     PageNumberPagination,
 )
-from app.services.source_client import FetchResult, SourceFetchResult, fetch_all_pages
+from app.services.source_client import (
+    FetchResult,
+    SourceFetchResult,
+    fetch_all_pages,
+    _parse_retry_after,
+    _fetch_with_retries,
+    RETRY_AFTER_CAP_SECONDS,
+)
 
 
 def _make_connector(
@@ -295,3 +303,109 @@ async def test_successful_fetch_no_capture():
     assert result.records_fetched == 1
     assert result.http_request is None
     assert result.http_response is None
+
+
+# --- 429 Retry-After tests (Phase 41, Plan 01) ---
+
+
+class TestParseRetryAfter:
+    """Tests for _parse_retry_after header parsing."""
+
+    def test_parse_retry_after_integer(self):
+        """Integer Retry-After header '30' returns 30.0."""
+        response = httpx.Response(429, headers={"retry-after": "30"}, request=httpx.Request("GET", "https://example.com"))
+        result = _parse_retry_after(response)
+        assert result == 30.0
+
+    def test_parse_retry_after_http_date(self):
+        """HTTP-date Retry-After returns positive float seconds delta."""
+        future = datetime.now(timezone.utc) + timedelta(seconds=45)
+        http_date = future.strftime("%a, %d %b %Y %H:%M:%S GMT")
+        response = httpx.Response(429, headers={"retry-after": http_date}, request=httpx.Request("GET", "https://example.com"))
+        result = _parse_retry_after(response)
+        assert result is not None
+        # Should be roughly 45 seconds (allow some tolerance for test execution time)
+        assert 40.0 <= result <= 50.0
+
+    def test_parse_retry_after_missing(self):
+        """Missing Retry-After header returns None."""
+        response = httpx.Response(429, headers={}, request=httpx.Request("GET", "https://example.com"))
+        result = _parse_retry_after(response)
+        assert result is None
+
+    def test_parse_retry_after_invalid(self):
+        """Invalid/garbage Retry-After header returns None."""
+        response = httpx.Response(429, headers={"retry-after": "not-a-number-or-date"}, request=httpx.Request("GET", "https://example.com"))
+        result = _parse_retry_after(response)
+        assert result is None
+
+    def test_parse_retry_after_past_date(self):
+        """Past HTTP-date returns 0.0 (clamped to non-negative)."""
+        past = datetime.now(timezone.utc) - timedelta(seconds=60)
+        http_date = past.strftime("%a, %d %b %Y %H:%M:%S GMT")
+        response = httpx.Response(429, headers={"retry-after": http_date}, request=httpx.Request("GET", "https://example.com"))
+        result = _parse_retry_after(response)
+        assert result == 0.0
+
+
+class TestFetchWithRetries429:
+    """Tests for 429 handling in _fetch_with_retries."""
+
+    @pytest.mark.asyncio
+    async def test_429_with_retry_after_sleeps_and_retries(self):
+        """429 with Retry-After '5' sleeps 5 seconds then retries."""
+        call_count = 0
+
+        def handler(request):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return httpx.Response(429, headers={"retry-after": "5"}, request=request)
+            return httpx.Response(200, json={"ok": True}, request=request)
+
+        transport = httpx.MockTransport(handler)
+        with patch("app.services.source_client.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            async with httpx.AsyncClient(transport=transport) as client:
+                result = await _fetch_with_retries(client, "https://example.com/api", {}, None, 3)
+
+        assert result.response is not None
+        assert result.response.status_code == 200
+        # Should have slept with the Retry-After value (5 seconds)
+        mock_sleep.assert_any_call(5.0)
+
+    @pytest.mark.asyncio
+    async def test_429_with_retry_after_exceeding_cap_returns_immediately(self):
+        """429 with Retry-After '120' (>60s cap) returns failure without sleeping."""
+        def handler(request):
+            return httpx.Response(429, headers={"retry-after": "120"}, request=request)
+
+        transport = httpx.MockTransport(handler)
+        with patch("app.services.source_client.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            async with httpx.AsyncClient(transport=transport) as client:
+                result = await _fetch_with_retries(client, "https://example.com/api", {}, None, 3)
+
+        assert result.response is None
+        # Should NOT have slept at all (returned immediately)
+        mock_sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_429_without_retry_after_falls_back_to_exponential(self):
+        """429 without Retry-After falls back to exponential backoff."""
+        call_count = 0
+
+        def handler(request):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return httpx.Response(429, headers={}, request=request)
+            return httpx.Response(200, json={"ok": True}, request=request)
+
+        transport = httpx.MockTransport(handler)
+        with patch("app.services.source_client.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            async with httpx.AsyncClient(transport=transport) as client:
+                result = await _fetch_with_retries(client, "https://example.com/api", {}, None, 3)
+
+        assert result.response is not None
+        assert result.response.status_code == 200
+        # Should have used exponential backoff (0.1 * 2^0 = 0.1 for first attempt)
+        mock_sleep.assert_called_once_with(0.1)

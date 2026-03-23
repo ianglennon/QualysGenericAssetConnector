@@ -72,3 +72,13 @@ def _get_or_create_stats(result: FanOutResult, endpoint_id: str) -> LevelStats:
     stats = LevelStats(endpoint_id=endpoint_id)
     result.level_stats.append(stats)
     return stats
+
+
+async def execute_tree(
+    canvas_endpoints: list,
+    root_records: list[dict],
+    connector,
+    client,
+) -> FanOutResult:
+    """Stub -- returns empty result. Will be implemented in GREEN phase."""
+    return FanOutResult()

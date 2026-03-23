@@ -1,11 +1,13 @@
-"""CanvasEndpoint CRUD router with tree validation.
+"""CanvasEndpoint CRUD router with tree validation and canvas-aware field discovery.
 
 Routes mounted at /api/v1/connectors/{connector_id}/canvases/{canvas_id}/endpoints.
-Provides cycle detection (D-11) and orphan detection (D-12).
+Provides cycle detection (D-11), orphan detection (D-12), and canvas-aware field
+discovery that walks the endpoint tree and returns merged parent+child fields.
 """
 
 import uuid as _uuid
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
@@ -14,16 +16,25 @@ from app.core.security import require_role
 from app.core.errors import make_error
 from app.models.canvas import Canvas
 from app.models.canvas_endpoint import CanvasEndpoint
+from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
 from app.schemas.canvas_endpoint import (
     CanvasEndpointCreate,
     CanvasEndpointUpdate,
     CanvasEndpointResponse,
 )
+from app.schemas.field_mapping import DiscoverResponse
+from app.services import source_client as _source_client
+from app.services.template_resolver import resolve_path, TemplateResolutionError
+from app.services.fan_out_executor import _merge_parent_context
+from app.services.field_discovery import merge_fields_across_records
+from app.services.connector_service import HTTPX_TIMEOUT, _build_headers
 
 router = APIRouter(tags=["canvas-endpoints"])
 
 BASE = "/connectors/{connector_id}/canvases/{canvas_id}/endpoints"
+
+DISCOVERY_SAMPLE_SIZE = 3  # D-11: 3 parent records sampled for discovery
 
 
 def detect_cycle(
@@ -123,6 +134,179 @@ def validate_canvas_tree(
         "orphaned_refs": orphans,
         "root_count": len(roots),
     }
+
+
+@router.get(BASE + "/{ref_id}/fields/discover", response_model=DiscoverResponse)
+async def discover_canvas_endpoint_fields(
+    connector_id: str,
+    canvas_id: str,
+    ref_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(require_role("admin")),
+):
+    """Discover fields for a canvas endpoint, including merged _parent.* fields.
+
+    Per D-08/D-09/D-10: Walks up the canvas tree to find ancestors,
+    fetches root records, traverses down sampling DISCOVERY_SAMPLE_SIZE
+    parent records per level, merges child records with _parent.* prefix,
+    and returns the unified field list.
+    """
+    canvas = _get_canvas_or_404(db, connector_id, canvas_id)
+
+    # Load connector
+    connector = db.query(Connector).filter_by(id=connector_id).first()
+    if not connector:
+        raise HTTPException(
+            status_code=404,
+            detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {}),
+        )
+
+    # Load target canvas-endpoint
+    target_ce = (
+        db.query(CanvasEndpoint)
+        .filter_by(id=ref_id, canvas_id=canvas_id)
+        .first()
+    )
+    if not target_ce:
+        raise HTTPException(
+            status_code=404,
+            detail=make_error(
+                "CANVAS_ENDPOINT_NOT_FOUND",
+                "Canvas endpoint reference not found",
+                {"ref_id": ref_id},
+            ),
+        )
+
+    # Load ALL canvas-endpoints for this canvas
+    all_ces = db.query(CanvasEndpoint).filter_by(canvas_id=canvas_id).all()
+    ce_map = {ce.id: ce for ce in all_ces}
+
+    # Load connector endpoints for path and variable_extractions
+    endpoint_ids = list({ce.endpoint_id for ce in all_ces})
+    conn_endpoints = db.query(ConnectorEndpoint).filter(ConnectorEndpoint.id.in_(endpoint_ids)).all()
+    ep_map = {ep.id: ep for ep in conn_endpoints}
+
+    # Walk UP from target to find ancestor chain (ordered root -> ... -> target)
+    chain: list[CanvasEndpoint] = []
+    current = target_ce
+    while current is not None:
+        chain.append(current)
+        if current.parent_ref_id is None:
+            break
+        current = ce_map.get(current.parent_ref_id)
+    chain.reverse()  # Now ordered: root -> ... -> target
+
+    if not chain:
+        return DiscoverResponse(fields=[], record_count=0)
+
+    # If target is the root (no parent), use flat discovery
+    root_ce = chain[0]
+    root_ep = ep_map.get(root_ce.endpoint_id)
+    if not root_ep:
+        raise HTTPException(
+            status_code=404,
+            detail=make_error("ENDPOINT_NOT_FOUND", "Root connector endpoint not found", {}),
+        )
+
+    headers = _build_headers(connector)
+    root_url = connector.base_url.rstrip("/") + "/" + root_ep.path.lstrip("/")
+
+    async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+        # Fetch root records
+        root_fetch = await _source_client._fetch_with_retries(
+            client, root_url, headers, None, retry_limit=1,
+        )
+        if root_fetch.response is None:
+            raise HTTPException(
+                status_code=502,
+                detail=make_error("SOURCE_UNREACHABLE", "Root endpoint did not respond", {}),
+            )
+
+        root_payload = root_fetch.response.json()
+        root_records = _source_client._extract_records(root_payload)
+        if not root_records and isinstance(root_payload, dict):
+            root_records = [root_payload]
+
+        if not root_records:
+            return DiscoverResponse(fields=[], record_count=0)
+
+        # If target IS the root, return flat discovery
+        if len(chain) == 1:
+            raw_fields = merge_fields_across_records(root_records)
+            fields = [{"path": f["path"], "type": f["type"], "sample_value": f["sample_value"]} for f in raw_fields]
+            return DiscoverResponse(fields=fields, record_count=len(root_records))
+
+        # Traverse DOWN through chain, sampling DISCOVERY_SAMPLE_SIZE records per level
+        # Start with root records as parent records
+        sampled_parents = root_records[:DISCOVERY_SAMPLE_SIZE]  # D-11
+        parent_context: dict = {}
+        all_merged_child_records: list[dict] = []
+
+        for level_idx in range(1, len(chain)):
+            current_ce = chain[level_idx]
+            current_ep = ep_map.get(current_ce.endpoint_id)
+            if not current_ep:
+                break
+
+            child_records_this_level: list[dict] = []
+
+            for parent_record in sampled_parents:
+                # Build ancestor context for merging
+                current_ancestor = _merge_parent_context(parent_record, parent_context)
+
+                # Resolve child URL template
+                try:
+                    resolved_path = resolve_path(
+                        current_ep.path,
+                        parent_record,
+                        current_ce.variable_extractions or {},
+                    )
+                except TemplateResolutionError:
+                    continue  # Skip this parent sample, try others
+
+                child_url = connector.base_url.rstrip("/") + "/" + resolved_path.lstrip("/")
+
+                # Fetch child records
+                try:
+                    child_fetch = await _source_client._fetch_with_retries(
+                        client, child_url, headers, None, retry_limit=1,
+                    )
+                except Exception:
+                    continue  # Skip this parent sample
+
+                if child_fetch.response is None:
+                    continue
+
+                child_payload = child_fetch.response.json()
+                child_recs = _source_client._extract_records(child_payload)
+                if not child_recs and isinstance(child_payload, dict):
+                    child_recs = [child_payload]
+
+                # Merge with _parent.* prefix (D-09)
+                for child_rec in child_recs:
+                    merged = _merge_parent_context(child_rec, current_ancestor)
+                    child_records_this_level.append(merged)
+
+            if not child_records_this_level:
+                # All parent samples failed at this level
+                return DiscoverResponse(fields=[], record_count=0)
+
+            # If this is the target level, collect for field discovery
+            if level_idx == len(chain) - 1:
+                all_merged_child_records = child_records_this_level
+            else:
+                # Intermediate level: these become the next level's parents
+                sampled_parents = child_records_this_level[:DISCOVERY_SAMPLE_SIZE]
+                # Update parent_context for next level
+                parent_context = _merge_parent_context(sampled_parents[0], parent_context) if sampled_parents else {}
+
+    # Run merge_fields_across_records on all collected merged child records
+    if not all_merged_child_records:
+        return DiscoverResponse(fields=[], record_count=0)
+
+    raw_fields = merge_fields_across_records(all_merged_child_records)
+    fields = [{"path": f["path"], "type": f["type"], "sample_value": f["sample_value"]} for f in raw_fields]
+    return DiscoverResponse(fields=fields, record_count=len(all_merged_child_records))
 
 
 @router.get(BASE, response_model=list[CanvasEndpointResponse])

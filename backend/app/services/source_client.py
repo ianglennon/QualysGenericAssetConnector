@@ -1,7 +1,9 @@
 import asyncio
+import email.utils
 import logging
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urljoin
 
@@ -21,6 +23,7 @@ from app.services.connector_service import HTTPX_TIMEOUT, _build_headers
 
 DEFAULT_RETRY_LIMIT = 3
 DEFAULT_BACKOFF_SECONDS = 0.1
+RETRY_AFTER_CAP_SECONDS = 60
 
 
 @dataclass
@@ -71,6 +74,26 @@ def _backoff_seconds(attempt: int) -> float:
     return DEFAULT_BACKOFF_SECONDS * (2 ** (attempt - 1))
 
 
+def _parse_retry_after(response: httpx.Response) -> float | None:
+    """Parse Retry-After header, return seconds to wait or None."""
+    header = response.headers.get("retry-after")
+    if not header:
+        return None
+    # Try integer seconds first
+    try:
+        seconds = int(header)
+        return float(seconds)
+    except ValueError:
+        pass
+    # Try HTTP-date format (RFC 7231)
+    try:
+        parsed = email.utils.parsedate_to_datetime(header)
+        delta = (parsed - datetime.now(timezone.utc)).total_seconds()
+        return max(0.0, delta)
+    except (ValueError, TypeError):
+        return None
+
+
 async def _fetch_with_retries(
     client: httpx.AsyncClient,
     url: str,
@@ -106,6 +129,20 @@ async def _fetch_with_retries(
             )
             if attempts > retry_limit:
                 return FetchResult(response=None, last_failed_response=last_failed_response)
+            # 429 Retry-After handling
+            if (isinstance(exc, httpx.HTTPStatusError)
+                    and exc.response.status_code == 429):
+                retry_seconds = _parse_retry_after(exc.response)
+                if retry_seconds is not None:
+                    if retry_seconds > RETRY_AFTER_CAP_SECONDS:
+                        logger.debug(
+                            "Retry-After %ss exceeds cap %ss, exhausting retries",
+                            retry_seconds, RETRY_AFTER_CAP_SECONDS,
+                        )
+                        return FetchResult(response=None, last_failed_response=last_failed_response)
+                    logger.debug("429 with Retry-After: sleeping %ss", retry_seconds)
+                    await asyncio.sleep(retry_seconds)
+                    continue
             await asyncio.sleep(_backoff_seconds(attempts))
 
 

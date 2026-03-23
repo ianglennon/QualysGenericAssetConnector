@@ -9,12 +9,15 @@ logger = logging.getLogger(__name__)
 from pydantic import TypeAdapter
 
 from app.db.session import SessionLocal
+from app.models.canvas import Canvas
+from app.models.canvas_endpoint import CanvasEndpoint
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
 from app.models.field_mapping import FieldMapping
 from app.models.qualys_config import QualysConfig
 from app.models.run_history import EndpointRunLog, RunFailure, RunHistory, RunStatus
 from app.schemas.field_mapping import FieldMappingRule
+from app.services.fan_out_executor import execute_tree, FanOutResult, _build_tree
 from app.services.source_client import SourceFetchResult, fetch_all_pages
 from app.services.transform_engine import apply_mappings
 from app.services.qualys_adapter import QualysAdapterError, QualysFailure, submit_batch, _decrypt_secret
@@ -196,6 +199,214 @@ async def _run_endpoint(
         return log
 
 
+async def _run_canvas(
+    db,
+    run: RunHistory,
+    connector: Connector,
+    canvas: Canvas,
+    qualys_config,
+    client: httpx.AsyncClient,
+    execution_offset: int,
+) -> list[EndpointRunLog]:
+    """Execute a canvas endpoint tree and create EndpointRunLogs.
+
+    Per D-01/D-03: executes tree via fan_out_executor, writes one
+    EndpointRunLog per canvas-endpoint. Per D-14: parent endpoints
+    skip Qualys submission (data source only).
+
+    Args:
+        execution_offset: Starting execution_order for EndpointRunLogs.
+
+    Returns:
+        List of EndpointRunLog records created for this canvas.
+    """
+    logs: list[EndpointRunLog] = []
+
+    # Load canvas endpoints with their connector endpoint paths
+    canvas_endpoints = (
+        db.query(CanvasEndpoint)
+        .filter(CanvasEndpoint.canvas_id == canvas.id)
+        .all()
+    )
+    if not canvas_endpoints:
+        return logs
+
+    # Build mapping: canvas_endpoint.id -> CanvasEndpoint (for FK resolution)
+    ce_map = {ce.id: ce for ce in canvas_endpoints}
+
+    # Load connector endpoints for path resolution
+    endpoint_ids = [ce.endpoint_id for ce in canvas_endpoints]
+    connector_endpoints = (
+        db.query(ConnectorEndpoint)
+        .filter(ConnectorEndpoint.id.in_(endpoint_ids))
+        .all()
+    )
+    ep_map = {ep.id: ep for ep in connector_endpoints}
+
+    # Attach .path to each canvas_endpoint for execute_tree compatibility
+    for ce in canvas_endpoints:
+        ep = ep_map.get(ce.endpoint_id)
+        ce.path = ep.path if ep else ""
+
+    # Find root canvas endpoints (parent_ref_id is None)
+    roots = [ce for ce in canvas_endpoints if ce.parent_ref_id is None]
+    if not roots:
+        logger.warning("Canvas %s has no root endpoints", canvas.id)
+        return logs
+
+    # Identify leaf endpoints (no children in tree)
+    children_map = _build_tree(canvas_endpoints)
+    leaf_ids = {ce.id for ce in canvas_endpoints if ce.id not in children_map}
+
+    # Fetch root endpoint records
+    root_ce = roots[0]  # Single root per canvas (v1.5 constraint)
+    root_ep = ep_map.get(root_ce.endpoint_id)
+    if not root_ep:
+        logger.error("Canvas %s root endpoint %s not found", canvas.id, root_ce.endpoint_id)
+        return logs
+
+    root_url = connector.base_url.rstrip("/") + "/" + root_ep.path.lstrip("/")
+    try:
+        source_result = await fetch_all_pages(connector, url=root_url, client=client)
+    except Exception as exc:
+        # Root fetch failed -- log and return
+        log = EndpointRunLog(
+            run_id=run.id,
+            endpoint_id=root_ep.id,
+            canvas_id=canvas.id,
+            execution_order=execution_offset,
+            records_fetched=0,
+            records_submitted=0,
+            records_failed=0,
+            status="failed",
+            error_message=str(exc),
+            failure_stage="source_fetch",
+        )
+        db.add(log)
+        db.commit()
+        return [log]
+
+    if source_result.partial:
+        log = EndpointRunLog(
+            run_id=run.id,
+            endpoint_id=root_ep.id,
+            canvas_id=canvas.id,
+            execution_order=execution_offset,
+            records_fetched=0,
+            records_submitted=0,
+            records_failed=0,
+            status="failed",
+            error_message="Source API fetch failed after retries",
+            failure_stage="source_fetch",
+            http_request=source_result.http_request,
+            http_response=source_result.http_response,
+        )
+        db.add(log)
+        db.commit()
+        return [log]
+
+    # Create root EndpointRunLog (D-14: records_submitted=0, data source only)
+    root_log = EndpointRunLog(
+        run_id=run.id,
+        endpoint_id=root_ep.id,
+        canvas_id=canvas.id,
+        execution_order=execution_offset,
+        records_fetched=source_result.records_fetched,
+        records_submitted=0,
+        records_failed=0,
+        status="success",
+        http_request=source_result.http_request,
+        http_response=source_result.http_response,
+    )
+    db.add(root_log)
+    logs.append(root_log)
+
+    # Execute tree (fan-out children)
+    fan_out_result = await execute_tree(
+        canvas_endpoints=canvas_endpoints,
+        root_records=source_result.records,
+        connector=connector,
+        client=client,
+    )
+
+    # Create EndpointRunLog per child canvas-endpoint from LevelStats
+    # PITFALL 1: LevelStats.endpoint_id is canvas_endpoint.id, not connector_endpoint.id
+    for idx, stats in enumerate(fan_out_result.level_stats):
+        ce = ce_map.get(stats.endpoint_id)
+        if not ce:
+            continue
+        child_log = EndpointRunLog(
+            run_id=run.id,
+            endpoint_id=ce.endpoint_id,  # FK to connector_endpoints
+            canvas_id=canvas.id,
+            execution_order=execution_offset + idx + 1,
+            records_fetched=0,
+            records_submitted=0,
+            records_failed=0,
+            child_requests_total=stats.children_attempted,
+            child_requests_failed=stats.children_failed,
+            child_requests_skipped=stats.children_skipped,
+            status="success" if stats.children_failed == 0 else "partial_success",
+        )
+        db.add(child_log)
+        logs.append(child_log)
+
+    # Apply leaf endpoint field mappings to merged records and submit to Qualys (D-04)
+    for leaf_ce_id in leaf_ids:
+        leaf_ce = ce_map.get(leaf_ce_id)
+        if not leaf_ce:
+            continue
+
+        # Skip root if it's also a leaf (no children = single endpoint canvas)
+        # In that case the root_log already exists and we submit its records directly
+        leaf_ep = ep_map.get(leaf_ce.endpoint_id)
+        if not leaf_ep:
+            continue
+
+        mappings = (
+            db.query(FieldMapping)
+            .filter(FieldMapping.endpoint_id == leaf_ep.id)
+            .order_by(FieldMapping.created_at.asc())
+            .all()
+        )
+        mapping_rules = _build_mapping_rules(mappings)
+        transformed = [apply_mappings(rec, mapping_rules) for rec in fan_out_result.merged_records]
+
+        # Submit to Qualys in batches
+        failures: list[QualysFailure] = []
+        batches = _chunk_records(transformed, QUALYS_BATCH_SIZE)
+        submitted_count = 0
+        try:
+            for batch in batches:
+                if not batch:
+                    continue
+                result = await submit_batch(batch, connector, qualys_config)
+                submitted_count += result.submitted_count
+                failures.extend(result.failures)
+        except QualysAdapterError as exc:
+            # Find the leaf's log (it's in the child logs from LevelStats)
+            for log in logs:
+                if log.endpoint_id == leaf_ep.id and log != root_log:
+                    log.records_submitted = submitted_count
+                    log.records_failed = len(failures)
+                    log.status = "failed"
+                    log.error_message = str(exc)
+                    log.failure_stage = "qualys_submit"
+                    break
+            db.commit()
+            continue
+
+        # Update leaf log with submission counts
+        for log in logs:
+            if log.endpoint_id == leaf_ep.id and log != root_log:
+                log.records_submitted = submitted_count
+                log.records_failed = len(failures)
+                break
+
+    db.commit()
+    return logs
+
+
 async def run_ingestion(run_id: str) -> None:
     db = SessionLocal()
     run: RunHistory | None = None
@@ -254,8 +465,46 @@ async def run_ingestion(run_id: str) -> None:
         total_failed = 0
 
         async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
-            for idx, endpoint in enumerate(enabled_endpoints):
-                log = await _run_endpoint(db, run, connector, endpoint, qualys_config, client, idx)
+            # === CANVAS PATH (D-01/D-03): Execute canvas trees first ===
+            canvases = (
+                db.query(Canvas)
+                .filter(
+                    Canvas.connector_id == connector.id,
+                    Canvas.is_enabled == True,
+                )
+                .all()
+            )
+
+            execution_idx = 0
+            for canvas in canvases:
+                canvas_logs = await _run_canvas(
+                    db, run, connector, canvas, qualys_config, client, execution_idx,
+                )
+                logs.extend(canvas_logs)
+                for cl in canvas_logs:
+                    total_fetched += cl.records_fetched
+                    total_submitted += cl.records_submitted
+                    total_failed += cl.records_failed
+                execution_idx += len(canvas_logs)
+
+            # === ORPHAN PATH (D-02): Run endpoints NOT in any enabled canvas ===
+            canvas_endpoint_ids = (
+                db.query(CanvasEndpoint.endpoint_id)
+                .join(Canvas, CanvasEndpoint.canvas_id == Canvas.id)
+                .filter(
+                    Canvas.connector_id == connector.id,
+                    Canvas.is_enabled == True,
+                )
+                .distinct()
+                .all()
+            )
+            referenced_ids = {row[0] for row in canvas_endpoint_ids}
+            orphan_endpoints = [ep for ep in enabled_endpoints if ep.id not in referenced_ids]
+
+            for idx, endpoint in enumerate(orphan_endpoints):
+                log = await _run_endpoint(
+                    db, run, connector, endpoint, qualys_config, client, execution_idx + idx,
+                )
                 logs.append(log)
                 total_fetched += log.records_fetched
                 total_submitted += log.records_submitted

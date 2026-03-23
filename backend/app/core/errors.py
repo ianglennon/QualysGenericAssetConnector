@@ -29,8 +29,23 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
     )
 
 
+def _sanitize_errors(errors: list[dict]) -> list[dict]:
+    """Ensure validation error details are JSON-serializable.
+
+    Pydantic V2 may include non-serializable objects (e.g. ValueError)
+    in the ``ctx`` field. Convert them to strings.
+    """
+    sanitized = []
+    for err in errors:
+        clean = dict(err)
+        if "ctx" in clean and isinstance(clean["ctx"], dict):
+            clean["ctx"] = {k: str(v) for k, v in clean["ctx"].items()}
+        sanitized.append(clean)
+    return sanitized
+
+
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content=make_error("VALIDATION_ERROR", "Request validation failed", {"errors": exc.errors()}),
+        content=make_error("VALIDATION_ERROR", "Request validation failed", {"errors": _sanitize_errors(exc.errors())}),
     )

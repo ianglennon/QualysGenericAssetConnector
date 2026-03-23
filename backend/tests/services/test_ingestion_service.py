@@ -9,13 +9,16 @@ from sqlalchemy.orm import sessionmaker
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 from app.db.base import Base
+from app.models.canvas import Canvas
+from app.models.canvas_endpoint import CanvasEndpoint
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
 from app.models.field_mapping import FieldMapping
 from app.models.qualys_config import QualysConfig
 from app.models.run_history import EndpointRunLog, RunHistory, RunStatus
 from app.services.credential_crypto import get_crypto
-from app.services.ingestion_service import run_ingestion
+from app.services.fan_out_executor import FanOutResult, LevelStats
+from app.services.ingestion_service import _run_canvas, run_ingestion
 from app.services.qualys_adapter import QualysAdapterError, QualysFailure, QualysSubmitResult
 from app.services.source_client import SourceFetchResult
 
@@ -652,3 +655,254 @@ async def test_successful_run_has_no_failure_stage(db_session):
     assert len(logs) == 1
     assert logs[0].status == "success"
     assert logs[0].failure_stage is None
+
+
+# --------------- Canvas Execution Path Tests ---------------
+
+
+def _seed_canvas(db, connector_id: str, name: str = "Test Canvas", is_enabled: bool = True) -> Canvas:
+    canvas = Canvas(
+        connector_id=connector_id,
+        name=name,
+        is_enabled=is_enabled,
+    )
+    db.add(canvas)
+    db.commit()
+    db.refresh(canvas)
+    return canvas
+
+
+def _seed_canvas_endpoint(
+    db,
+    canvas_id: str,
+    endpoint_id: str,
+    parent_ref_id: str | None = None,
+    tree_order: int = 0,
+    max_concurrency: int = 5,
+) -> CanvasEndpoint:
+    ce = CanvasEndpoint(
+        canvas_id=canvas_id,
+        endpoint_id=endpoint_id,
+        parent_ref_id=parent_ref_id,
+        tree_order=tree_order,
+        max_concurrency=max_concurrency,
+    )
+    db.add(ce)
+    db.commit()
+    db.refresh(ce)
+    return ce
+
+
+@pytest.mark.asyncio
+async def test_run_ingestion_no_canvases_uses_legacy_path(db_session):
+    """Connector with no canvases executes all endpoints via legacy _run_endpoint path."""
+    connector = _seed_connector(db_session)
+    _seed_qualys_config(db_session)
+    ep1 = _seed_endpoint(db_session, connector.id, path="/assets", display_order=0)
+    ep2 = _seed_endpoint(db_session, connector.id, path="/servers", display_order=1)
+    _seed_mapping(db_session, ep1.id)
+    _seed_mapping(db_session, ep2.id)
+    run = _seed_run(db_session, connector.id)
+
+    with patch(
+        "app.services.ingestion_service.fetch_all_pages",
+        new=AsyncMock(return_value=_make_source_result()),
+    ), patch(
+        "app.services.ingestion_service.submit_batch",
+        new=AsyncMock(return_value=_make_submit_result(count=2)),
+    ):
+        await run_ingestion(run.id)
+
+    db_session.expire_all()
+    updated_run = db_session.query(RunHistory).filter(RunHistory.id == run.id).first()
+    assert updated_run.status == RunStatus.success
+
+    logs = db_session.query(EndpointRunLog).filter(EndpointRunLog.run_id == run.id).all()
+    assert len(logs) == 2
+    # No canvas_id should be set -- these went through orphan/legacy path
+    assert all(log.canvas_id is None for log in logs)
+
+
+@pytest.mark.asyncio
+async def test_run_canvas_creates_root_log_with_records_fetched(db_session):
+    """Canvas with single root endpoint creates EndpointRunLog with records_fetched, records_submitted=0."""
+    connector = _seed_connector(db_session)
+    _seed_qualys_config(db_session)
+    ep = _seed_endpoint(db_session, connector.id, path="/nodes", display_order=0)
+    _seed_mapping(db_session, ep.id)
+    canvas = _seed_canvas(db_session, connector.id)
+    root_ce = _seed_canvas_endpoint(db_session, canvas.id, ep.id, parent_ref_id=None, tree_order=0)
+    run = _seed_run(db_session, connector.id)
+
+    source_result = _make_source_result(
+        records=[{"node": f"pve{i}"} for i in range(10)],
+        fetched=10,
+    )
+
+    # Single root with no children -> execute_tree returns merged_records directly
+    fan_out_result = FanOutResult(
+        merged_records=[{"node": f"pve{i}"} for i in range(10)],
+        level_stats=[],
+    )
+
+    with patch(
+        "app.services.ingestion_service.fetch_all_pages",
+        new=AsyncMock(return_value=source_result),
+    ), patch(
+        "app.services.ingestion_service.execute_tree",
+        new=AsyncMock(return_value=fan_out_result),
+    ), patch(
+        "app.services.ingestion_service.submit_batch",
+        new=AsyncMock(return_value=_make_submit_result(count=10)),
+    ):
+        import httpx
+        async with httpx.AsyncClient() as client:
+            logs = await _run_canvas(db_session, run, connector, canvas, None, client, 0)
+
+    assert len(logs) >= 1
+    root_log = logs[0]
+    assert root_log.records_fetched == 10
+    assert root_log.records_submitted == 0  # D-14: root is data source only
+    assert root_log.canvas_id == canvas.id
+    assert root_log.status == "success"
+
+
+@pytest.mark.asyncio
+async def test_run_canvas_creates_child_log_from_level_stats(db_session):
+    """Canvas with root + child: child EndpointRunLog has child_requests_* from LevelStats."""
+    connector = _seed_connector(db_session)
+    _seed_qualys_config(db_session)
+    root_ep = _seed_endpoint(db_session, connector.id, path="/nodes", display_order=0)
+    child_ep = _seed_endpoint(db_session, connector.id, path="/nodes/{node}/vms", display_order=1)
+    _seed_mapping(db_session, child_ep.id)
+    canvas = _seed_canvas(db_session, connector.id)
+    root_ce = _seed_canvas_endpoint(db_session, canvas.id, root_ep.id, parent_ref_id=None, tree_order=0)
+    child_ce = _seed_canvas_endpoint(db_session, canvas.id, child_ep.id, parent_ref_id=root_ce.id, tree_order=1)
+    run = _seed_run(db_session, connector.id)
+
+    source_result = _make_source_result(
+        records=[{"node": "pve1"}, {"node": "pve2"}],
+        fetched=2,
+    )
+
+    fan_out_result = FanOutResult(
+        merged_records=[{"vmid": 100, "_parent.node": "pve1"}, {"vmid": 200, "_parent.node": "pve2"}],
+        level_stats=[
+            LevelStats(
+                endpoint_id=child_ce.id,  # canvas_endpoint.id, not connector_endpoint.id
+                children_attempted=5,
+                children_succeeded=4,
+                children_failed=1,
+                children_skipped=0,
+            ),
+        ],
+    )
+
+    with patch(
+        "app.services.ingestion_service.fetch_all_pages",
+        new=AsyncMock(return_value=source_result),
+    ), patch(
+        "app.services.ingestion_service.execute_tree",
+        new=AsyncMock(return_value=fan_out_result),
+    ), patch(
+        "app.services.ingestion_service.submit_batch",
+        new=AsyncMock(return_value=_make_submit_result(count=2)),
+    ):
+        import httpx
+        async with httpx.AsyncClient() as client:
+            logs = await _run_canvas(db_session, run, connector, canvas, None, client, 0)
+
+    # Root log + child log
+    assert len(logs) >= 2
+    child_log = [l for l in logs if l.endpoint_id == child_ep.id][0]
+    assert child_log.child_requests_total == 5
+    assert child_log.child_requests_failed == 1
+    assert child_log.child_requests_skipped == 0
+    assert child_log.canvas_id == canvas.id
+    assert child_log.status == "partial_success"  # has failures
+
+
+@pytest.mark.asyncio
+async def test_orphan_detection_excludes_canvas_endpoints(db_session):
+    """Endpoints referenced in a canvas are excluded from orphan path; only unreferenced run via legacy."""
+    connector = _seed_connector(db_session)
+    _seed_qualys_config(db_session)
+    ep1 = _seed_endpoint(db_session, connector.id, path="/nodes", display_order=0)
+    ep2 = _seed_endpoint(db_session, connector.id, path="/nodes/{node}/vms", display_order=1)
+    ep3 = _seed_endpoint(db_session, connector.id, path="/standalone", display_order=2)
+    _seed_mapping(db_session, ep1.id)
+    _seed_mapping(db_session, ep2.id)
+    _seed_mapping(db_session, ep3.id)
+
+    canvas = _seed_canvas(db_session, connector.id)
+    root_ce = _seed_canvas_endpoint(db_session, canvas.id, ep1.id, parent_ref_id=None, tree_order=0)
+    child_ce = _seed_canvas_endpoint(db_session, canvas.id, ep2.id, parent_ref_id=root_ce.id, tree_order=1)
+    # ep3 is NOT in the canvas -- it's an orphan
+
+    run = _seed_run(db_session, connector.id)
+
+    source_result = _make_source_result(records=[{"node": "pve1"}], fetched=1)
+    fan_out_result = FanOutResult(
+        merged_records=[{"vmid": 100, "_parent.node": "pve1"}],
+        level_stats=[
+            LevelStats(
+                endpoint_id=child_ce.id,
+                children_attempted=1,
+                children_succeeded=1,
+            ),
+        ],
+    )
+
+    with patch(
+        "app.services.ingestion_service.fetch_all_pages",
+        new=AsyncMock(return_value=source_result),
+    ), patch(
+        "app.services.ingestion_service.execute_tree",
+        new=AsyncMock(return_value=fan_out_result),
+    ), patch(
+        "app.services.ingestion_service.submit_batch",
+        new=AsyncMock(return_value=_make_submit_result(count=1)),
+    ):
+        await run_ingestion(run.id)
+
+    db_session.expire_all()
+    logs = db_session.query(EndpointRunLog).filter(EndpointRunLog.run_id == run.id).order_by(EndpointRunLog.execution_order).all()
+
+    # Canvas logs (root + child) + orphan log (ep3) = 3
+    assert len(logs) == 3
+
+    # Canvas logs have canvas_id set
+    canvas_logs = [l for l in logs if l.canvas_id is not None]
+    assert len(canvas_logs) == 2
+
+    # Orphan log (ep3) has no canvas_id
+    orphan_logs = [l for l in logs if l.canvas_id is None]
+    assert len(orphan_logs) == 1
+    assert orphan_logs[0].endpoint_id == ep3.id
+
+
+@pytest.mark.asyncio
+async def test_run_canvas_root_fetch_failure(db_session):
+    """Root endpoint fetch failure creates EndpointRunLog with status=failed, failure_stage=source_fetch."""
+    connector = _seed_connector(db_session)
+    _seed_qualys_config(db_session)
+    ep = _seed_endpoint(db_session, connector.id, path="/nodes", display_order=0)
+    canvas = _seed_canvas(db_session, connector.id)
+    root_ce = _seed_canvas_endpoint(db_session, canvas.id, ep.id, parent_ref_id=None, tree_order=0)
+    run = _seed_run(db_session, connector.id)
+
+    with patch(
+        "app.services.ingestion_service.fetch_all_pages",
+        new=AsyncMock(side_effect=RuntimeError("connection refused")),
+    ):
+        import httpx
+        async with httpx.AsyncClient() as client:
+            logs = await _run_canvas(db_session, run, connector, canvas, None, client, 0)
+
+    assert len(logs) == 1
+    log = logs[0]
+    assert log.status == "failed"
+    assert log.failure_stage == "source_fetch"
+    assert log.canvas_id == canvas.id
+    assert log.records_fetched == 0
+    assert "connection refused" in log.error_message

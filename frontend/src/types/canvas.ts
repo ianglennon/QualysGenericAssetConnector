@@ -80,3 +80,68 @@ export interface MappingEdgeData extends Record<string, unknown> {
   conditions?: CanvasConditionRule[]
   fallback?: string
 }
+
+// --- Chain Canvas types (Phase 42) ---
+
+// Canvas API response (mirrors backend CanvasResponse)
+export interface CanvasResponse {
+  id: string
+  connector_id: string
+  name: string
+  description: string | null
+  is_enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+// Canvas-endpoint API response (mirrors backend CanvasEndpointResponse)
+export interface CanvasEndpointResponse {
+  id: string
+  canvas_id: string
+  endpoint_id: string
+  parent_ref_id: string | null
+  field_role: string
+  variable_extractions: Record<string, string> | null
+  max_concurrency: number
+  tree_order: number
+  created_at: string
+  updated_at: string
+}
+
+// Canvas-endpoint create payload (mirrors backend CanvasEndpointCreate)
+export interface CanvasEndpointCreate {
+  endpoint_id: string
+  parent_ref_id?: string | null
+  field_role?: string
+  variable_extractions?: Record<string, string> | null
+  max_concurrency?: number
+  tree_order?: number
+}
+
+// Canvas-endpoint update payload (mirrors backend CanvasEndpointUpdate)
+export interface CanvasEndpointUpdate {
+  parent_ref_id?: string | null
+  field_role?: string | null
+  variable_extractions?: Record<string, string> | null
+  max_concurrency?: number | null
+  tree_order?: number | null
+}
+
+// React Flow node data for EndpointNode custom node (per D-02, D-03, D-14)
+export interface EndpointNodeData extends Record<string, unknown> {
+  endpointId: string | null        // null for unsaved new endpoints
+  canvasEndpointId: string | null   // null for unsaved
+  name: string
+  path: string
+  fields: FieldDiscoveryItem[]
+  parentRefId: string | null
+  variableExtractions: Record<string, string> | null
+  maxConcurrency: number
+  isDiscovering: boolean
+  discoveryError: string | null
+}
+
+// React Flow edge data for ChainEdge custom edge
+export interface ChainEdgeData extends Record<string, unknown> {
+  sourceField: string  // The parent field path that provides the variable
+}

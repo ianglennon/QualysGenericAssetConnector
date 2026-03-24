@@ -26,6 +26,10 @@ export const ROUTES = {
   connectorMappings: (connectorId: string | number, endpointId: string | number): string =>
     `/connectors/${connectorId}/endpoints/${endpointId}/mappings`,
 
+  /** Returns the absolute path to a connector's chain canvas page. */
+  connectorCanvas: (connectorId: string | number): string =>
+    `/connectors/${connectorId}/canvas`,
+
   /** Returns the absolute path to a run's detail page. */
   runDetail: (id: string | number): string => `/runs/${id}`,
 } as const

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { PageContainer } from '@/components/layout/PageContainer'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { useConnector } from '@/hooks/queries/useConnectors'
 import { useTriggerRun } from '@/hooks/queries/useRuns'
 import { useToast } from '@/hooks/use-toast'
+import { ROUTES } from '@/routes/constants'
 import { EndpointList } from '@/components/connectors/EndpointList'
 
 export function ConnectorDetailPage() {
@@ -57,6 +58,9 @@ export function ConnectorDetailPage() {
       title={connector.name}
       actions={
         <div className="flex gap-2">
+          <Button variant="outline" asChild>
+            <Link to={ROUTES.connectorCanvas(id!)}>Chain Canvas</Link>
+          </Button>
           <Button variant="outline">Edit</Button>
           <Button variant="outline">Test</Button>
           <Button

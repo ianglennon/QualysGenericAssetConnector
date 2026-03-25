@@ -150,62 +150,95 @@ export default function RunDetailPage() {
             </CardContent>
           </Card>
 
-          {run.endpoint_logs && run.endpoint_logs.length > 0 && (
+          {run.endpoint_logs && run.endpoint_logs.length > 0 ? (
             <div className="space-y-3">
               <h3 className="text-lg font-semibold">Endpoint Breakdown</h3>
-              {[...run.endpoint_logs]
-                .sort((a: EndpointRunLog, b: EndpointRunLog) => a.execution_order - b.execution_order)
-                .map((log: EndpointRunLog) => (
-                  <Card key={log.id}>
-                    <CardHeader className="pb-2">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-base">
-                          {log.endpoint_name || log.endpoint_id}
-                        </CardTitle>
-                        <div className="flex items-center gap-2">
-                          {getStatusBadge(log.status)}
-                          {log.failure_stage && (
-                            <Badge variant="destructive">
-                              {STAGE_LABELS[log.failure_stage] ?? log.failure_stage}
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <CardDescription>
-                        {log.endpoint_path || 'Unknown path'}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <div className="grid grid-cols-3 gap-4 p-3 border rounded-lg bg-muted/50">
-                        <div className="text-center">
-                          <div className="text-xl font-bold">{log.records_fetched}</div>
-                          <div className="text-xs text-muted-foreground">Records Fetched</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-xl font-bold text-green-600">{log.records_submitted}</div>
-                          <div className="text-xs text-muted-foreground">Records Submitted</div>
-                        </div>
-                        <div className="text-center">
-                          <div className={`text-xl font-bold ${log.records_failed > 0 ? 'text-destructive' : ''}`}>
-                            {log.records_failed}
+              {(() => {
+                const sorted = [...run.endpoint_logs].sort(
+                  (a: EndpointRunLog, b: EndpointRunLog) => a.execution_order - b.execution_order
+                )
+                // D-01: Split into chain logs (have canvas_id) and flat logs (no canvas_id)
+                const chainLogs = sorted.filter((l: EndpointRunLog) => l.canvas_id != null)
+                const flatLogs = sorted.filter((l: EndpointRunLog) => !l.canvas_id)
+
+                const renderLogCard = (log: EndpointRunLog, indent: boolean) => (
+                  <div
+                    key={log.id}
+                    style={indent ? { marginLeft: (log.depth ?? 0) * 32 } : undefined}
+                  >
+                    <Card>
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-base">
+                            {log.endpoint_name || log.endpoint_id}
+                          </CardTitle>
+                          <div className="flex items-center gap-2">
+                            {getStatusBadge(log.status)}
+                            {log.failure_stage && (
+                              <Badge variant="destructive">
+                                {STAGE_LABELS[log.failure_stage] ?? log.failure_stage}
+                              </Badge>
+                            )}
                           </div>
-                          <div className="text-xs text-muted-foreground">Records Failed</div>
                         </div>
-                      </div>
-                      {log.error_message && (
-                        <Alert variant="destructive">
-                          <AlertCircle className="h-4 w-4" />
-                          <AlertDescription>{log.error_message}</AlertDescription>
-                        </Alert>
-                      )}
-                      <HttpDetailPanel
-                        httpRequest={log.http_request}
-                        httpResponse={log.http_response}
-                      />
-                    </CardContent>
-                  </Card>
-                ))}
+                        <CardDescription>
+                          {log.endpoint_path || 'Unknown path'}
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-3">
+                        <div className="grid grid-cols-3 gap-4 p-3 border rounded-lg bg-muted/50">
+                          <div className="text-center">
+                            <div className="text-xl font-bold">{log.records_fetched}</div>
+                            <div className="text-xs text-muted-foreground">Records Fetched</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="text-xl font-bold text-green-600">{log.records_submitted}</div>
+                            <div className="text-xs text-muted-foreground">Records Submitted</div>
+                          </div>
+                          <div className="text-center">
+                            <div className={`text-xl font-bold ${log.records_failed > 0 ? 'text-destructive' : ''}`}>
+                              {log.records_failed}
+                            </div>
+                            <div className="text-xs text-muted-foreground">Records Failed</div>
+                          </div>
+                        </div>
+                        {/* D-02: Fan-out summary line */}
+                        {log.child_requests_total != null && log.child_requests_total > 0 && (
+                          <p className="text-sm text-muted-foreground">
+                            {log.child_requests_total - (log.child_requests_failed ?? 0)}/
+                            {log.child_requests_total} children succeeded
+                            {(log.child_requests_failed ?? 0) > 0 && (
+                              <span className="text-destructive font-medium">
+                                , {log.child_requests_failed} failed
+                              </span>
+                            )}
+                          </p>
+                        )}
+                        {log.error_message && (
+                          <Alert variant="destructive">
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertDescription>{log.error_message}</AlertDescription>
+                          </Alert>
+                        )}
+                        <HttpDetailPanel
+                          httpRequest={log.http_request}
+                          httpResponse={log.http_response}
+                        />
+                      </CardContent>
+                    </Card>
+                  </div>
+                )
+
+                return (
+                  <>
+                    {chainLogs.map((log: EndpointRunLog) => renderLogCard(log, true))}
+                    {flatLogs.map((log: EndpointRunLog) => renderLogCard(log, false))}
+                  </>
+                )
+              })()}
             </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No endpoint logs recorded for this run.</p>
           )}
       </div>
     </div>

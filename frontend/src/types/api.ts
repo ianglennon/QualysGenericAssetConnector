@@ -222,13 +222,6 @@ export interface RunStats {
   recent_runs_24h: number
 }
 
-// Dry Run Types
-export interface DryRunResult {
-  records: Record<string, unknown>[]
-  total_records: number
-  capped: boolean
-}
-
 // Qualys Configuration Types
 export interface QualysConfig {
   id: string

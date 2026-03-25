@@ -30,6 +30,10 @@ export const ROUTES = {
   connectorCanvas: (connectorId: string | number): string =>
     `/connectors/${connectorId}/canvas`,
 
+  /** Returns the absolute path to a canvas dry-run results page. */
+  dryRunResults: (connectorId: string | number, canvasId: string | number): string =>
+    `/connectors/${connectorId}/canvases/${canvasId}/dry-run-results`,
+
   /** Returns the absolute path to a run's detail page. */
   runDetail: (id: string | number): string => `/runs/${id}`,
 } as const

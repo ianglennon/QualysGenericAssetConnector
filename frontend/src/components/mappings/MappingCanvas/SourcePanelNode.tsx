@@ -3,6 +3,21 @@ import { useUpdateNodeInternals, useNodeId, Handle, Position } from '@xyflow/rea
 import type { NodeProps } from '@xyflow/react'
 import type { SourcePanelData } from '@/types/canvas'
 
+function getAncestorDepth(path: string): number {
+  let depth = 0
+  let p = path
+  while (p.startsWith('_parent.')) {
+    depth++
+    p = p.slice('_parent.'.length)
+  }
+  return depth
+}
+
+const DEPTH_LABELS: Record<number, string> = {
+  1: 'Parent Fields',
+  2: 'Grandparent Fields',
+}
+
 const TYPE_BADGE: Record<string, string> = {
   string: 'bg-blue-100 text-blue-700',
   number: 'bg-green-100 text-green-700',
@@ -43,19 +58,31 @@ export function SourcePanelNode({ data }: NodeProps & { data: SourcePanelData })
   const nodeId = useNodeId() ?? 'source-panel'
   const updateNodeInternals = useUpdateNodeInternals()
 
-  // Sort linked fields by target panel position (eliminates line crossing)
-  const linked = [...data.fields]
-    .filter(f => data.linkedSourceFields.has(f.path))
-    .sort((a, b) => {
-      const posA = data.linkedFieldOrder?.get(a.path) ?? Infinity
-      const posB = data.linkedFieldOrder?.get(b.path) ?? Infinity
-      if (posA !== posB) return posA - posB
-      return a.path.localeCompare(b.path)
-    })
+  // Group fields by ancestor depth, then split linked/unlinked within each group
+  const fieldsByDepth = new Map<number, typeof data.fields>()
+  for (const field of data.fields) {
+    const depth = getAncestorDepth(field.path)
+    if (!fieldsByDepth.has(depth)) fieldsByDepth.set(depth, [])
+    fieldsByDepth.get(depth)!.push(field)
+  }
+  const depths = [...fieldsByDepth.keys()].sort((a, b) => a - b)
 
-  const unlinked = [...data.fields]
-    .filter(f => !data.linkedSourceFields.has(f.path))
-    .sort((a, b) => a.path.localeCompare(b.path))
+  function getLinkedForDepth(depthFields: typeof data.fields) {
+    return [...depthFields]
+      .filter(f => data.linkedSourceFields.has(f.path))
+      .sort((a, b) => {
+        const posA = data.linkedFieldOrder?.get(a.path) ?? Infinity
+        const posB = data.linkedFieldOrder?.get(b.path) ?? Infinity
+        if (posA !== posB) return posA - posB
+        return a.path.localeCompare(b.path)
+      })
+  }
+
+  function getUnlinkedForDepth(depthFields: typeof data.fields) {
+    return [...depthFields]
+      .filter(f => !data.linkedSourceFields.has(f.path))
+      .sort((a, b) => a.path.localeCompare(b.path))
+  }
 
   // Re-register handle positions when fields change (initial load, discovery, seeding)
   useEffect(() => {
@@ -79,55 +106,77 @@ export function SourcePanelNode({ data }: NodeProps & { data: SourcePanelData })
         style={{ pointerEvents: 'auto' }}
         onScroll={handleScroll}
       >
-        <Separator label={`——— Linked (${linked.length}) ———`} />
+        {depths.map(depth => {
+          const depthFields = fieldsByDepth.get(depth)!
+          const linked = getLinkedForDepth(depthFields)
+          const unlinked = getUnlinkedForDepth(depthFields)
+          const isAncestor = depth > 0
+          const depthLabel = DEPTH_LABELS[depth] ?? `Ancestor (depth ${depth}) Fields`
 
-        <div className="transition-all duration-200">
-          {linked.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic px-3 py-1">
-              (no connections yet)
-            </p>
-          ) : (
-            linked.map(field => (
-              <div
-                key={field.path}
-                className="relative flex items-center gap-2 px-3 py-2 text-xs border-l-2 border-primary/40 bg-primary/5"
-              >
-                <span className="flex-1 font-mono truncate">{field.path}</span>
-                <span className={`px-1 rounded text-[10px] font-medium ${typeBadgeClass(field.type)}`}>
-                  {field.type}
-                </span>
-                <Handle
-                  type="source"
-                  position={Position.Right}
-                  id={field.path}
-                  isConnectable={false}
-                  style={SOURCE_HANDLE_STYLE}
-                />
+          const content = (
+            <>
+              <Separator label={isAncestor ? `——— ${depthLabel}: Linked (${linked.length}) ———` : `——— Linked (${linked.length}) ———`} />
+
+              <div className="transition-all duration-200">
+                {linked.length === 0 ? (
+                  <p className="text-xs text-muted-foreground italic px-3 py-1">
+                    (no connections yet)
+                  </p>
+                ) : (
+                  linked.map(field => (
+                    <div
+                      key={field.path}
+                      className="relative flex items-center gap-2 px-3 py-2 text-xs border-l-2 border-primary/40 bg-primary/5"
+                    >
+                      <span className="flex-1 font-mono truncate">{field.path}</span>
+                      <span className={`px-1 rounded text-[10px] font-medium ${typeBadgeClass(field.type)}`}>
+                        {field.type}
+                      </span>
+                      <Handle
+                        type="source"
+                        position={Position.Right}
+                        id={field.path}
+                        isConnectable={false}
+                        style={SOURCE_HANDLE_STYLE}
+                      />
+                    </div>
+                  ))
+                )}
               </div>
-            ))
-          )}
-        </div>
 
-        <Separator label={`——— Unlinked (${unlinked.length}) ———`} />
+              <Separator label={isAncestor ? `——— ${depthLabel}: Unlinked (${unlinked.length}) ———` : `——— Unlinked (${unlinked.length}) ———`} />
 
-        {unlinked.map(field => (
-          <div
-            key={field.path}
-            className="relative flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted/30"
-          >
-            <span className="flex-1 font-mono truncate">{field.path}</span>
-            <span className={`px-1 rounded text-[10px] font-medium ${typeBadgeClass(field.type)}`}>
-              {field.type}
-            </span>
-            <Handle
-              type="source"
-              position={Position.Right}
-              id={field.path}
-              isConnectable={true}
-              style={SOURCE_HANDLE_STYLE}
-            />
-          </div>
-        ))}
+              {unlinked.map(field => (
+                <div
+                  key={field.path}
+                  className="relative flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted/30"
+                >
+                  <span className="flex-1 font-mono truncate">{field.path}</span>
+                  <span className={`px-1 rounded text-[10px] font-medium ${typeBadgeClass(field.type)}`}>
+                    {field.type}
+                  </span>
+                  <Handle
+                    type="source"
+                    position={Position.Right}
+                    id={field.path}
+                    isConnectable={true}
+                    style={SOURCE_HANDLE_STYLE}
+                  />
+                </div>
+              ))}
+            </>
+          )
+
+          if (isAncestor) {
+            return (
+              <div key={depth} className="bg-blue-50 dark:bg-blue-950/20 border-l-2 border-blue-400 dark:border-blue-500">
+                {content}
+              </div>
+            )
+          }
+
+          return <div key={depth}>{content}</div>
+        })}
       </div>
     </div>
   )

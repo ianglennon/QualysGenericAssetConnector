@@ -1,14 +1,17 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ROUTES } from '@/routes/constants'
-import { ArrowLeft, Save, Trash2 } from 'lucide-react'
+import { ArrowLeft, Save, Trash2, Info } from 'lucide-react'
 import { useConnector } from '@/hooks/queries/useConnectors'
 import { useEndpoints } from '@/hooks/queries/useEndpoints'
 import { useQualysSchema } from '@/hooks/queries/useQualysSchema'
 import { useBatchReplaceEndpointMappings } from '@/hooks/queries/useEndpointMappings'
+import { useCanvases } from '@/hooks/queries/useCanvases'
+import { useCanvasEndpoints } from '@/hooks/queries/useCanvasEndpoints'
 import { MappingCanvas, ConfirmClearDialog } from '@/components/mappings/MappingCanvas'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'
 import { useToast } from '@/hooks/use-toast'
 import { canvasTypeToAPI } from '@/types/canvas'
 import type { MappingEdgeData } from '@/types/canvas'
@@ -26,6 +29,30 @@ export function EndpointMappingsPage() {
   const { data: schemaData } = useQualysSchema()
   const batchReplace = useBatchReplaceEndpointMappings()
   const { toast } = useToast()
+
+  // Parent gating detection (D-11)
+  const { data: canvases } = useCanvases(connectorId)
+  const firstCanvasId = canvases?.[0]?.id
+  const { data: canvasEndpoints } = useCanvasEndpoints(connectorId, firstCanvasId)
+
+  const isParentEndpoint = (() => {
+    if (!canvasEndpoints || !endpointId) return false
+    const thisCanvasEndpoint = canvasEndpoints.find(ce => ce.endpoint_id === endpointId)
+    if (!thisCanvasEndpoint) return false
+    return canvasEndpoints.some(ce => ce.parent_ref_id === thisCanvasEndpoint.id)
+  })()
+
+  const childEndpoints = (() => {
+    if (!canvasEndpoints || !endpointId || !endpoints) return []
+    const thisCanvasEndpoint = canvasEndpoints.find(ce => ce.endpoint_id === endpointId)
+    if (!thisCanvasEndpoint) return []
+    return canvasEndpoints
+      .filter(ce => ce.parent_ref_id === thisCanvasEndpoint.id)
+      .map(ce => {
+        const ep = endpoints.find(e => e.id === ce.endpoint_id)
+        return { id: ce.endpoint_id, name: ep?.name ?? 'Unknown endpoint' }
+      })
+  })()
 
   const endpoint = endpoints?.find(e => e.id === endpointId)
 
@@ -138,32 +165,59 @@ export function EndpointMappingsPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={removeAllDisabled}
-            onClick={() => setConfirmClearOpen(true)}
-            title={canvasEdges.length === 0 ? 'No mappings to remove' : undefined}
-          >
-            <Trash2 className="w-4 h-4 mr-1" />
-            Remove All
-          </Button>
-          <Button
-            onClick={handleSave}
-            disabled={saveDisabled}
-            size="sm"
-            title={!hasIdentityLinked ? 'Link at least one identity attribute (\u2605) to save' : undefined}
-          >
-            <Save className="w-4 h-4 mr-1" />
-            Save Mappings
-          </Button>
-        </div>
+        {!isParentEndpoint && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={removeAllDisabled}
+              onClick={() => setConfirmClearOpen(true)}
+              title={canvasEdges.length === 0 ? 'No mappings to remove' : undefined}
+            >
+              <Trash2 className="w-4 h-4 mr-1" />
+              Remove All
+            </Button>
+            <Button
+              onClick={handleSave}
+              disabled={saveDisabled}
+              size="sm"
+              title={!hasIdentityLinked ? 'Link at least one identity attribute (\u2605) to save' : undefined}
+            >
+              <Save className="w-4 h-4 mr-1" />
+              Save Mappings
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Canvas area */}
       <div className="flex-1 min-h-0">
-        {connectorId && endpointId ? (
+        {isParentEndpoint ? (
+          <div className="p-6">
+            <Alert className="bg-blue-50 dark:bg-blue-950/20 border-blue-400 dark:border-blue-500">
+              <Info className="h-4 w-4" />
+              <AlertTitle>Data Source Endpoint</AlertTitle>
+              <AlertDescription>
+                <p className="mb-2">
+                  This endpoint is a data source for child endpoints. Field mappings
+                  are configured on the child endpoint(s) that submit to Qualys.
+                </p>
+                <ul className="space-y-1">
+                  {childEndpoints.map(child => (
+                    <li key={child.id}>
+                      <Link
+                        to={ROUTES.connectorMappings(connectorId!, child.id)}
+                        className="text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {child.name}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          </div>
+        ) : connectorId && endpointId ? (
           <MappingCanvas
             key={clearKey}
             connectorId={connectorId}

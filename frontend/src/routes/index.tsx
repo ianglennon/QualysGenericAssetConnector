@@ -6,6 +6,7 @@ import { ConnectorListPage } from '@/pages/Connectors/ConnectorListPage'
 import { ConnectorDetailPage } from '@/pages/Connectors/ConnectorDetailPage'
 import { EndpointMappingsPage } from '@/pages/Connectors/EndpointMappingsPage'
 import { ChainCanvasPage } from '@/pages/Connectors/ChainCanvasPage'
+import { DryRunResultsPage } from '@/pages/Connectors/DryRunResultsPage'
 import { QualysConfig } from '@/pages/Settings/QualysConfig'
 import { TransformRules } from '@/pages/Settings/TransformRules'
 import { UserProfile } from '@/pages/Settings/UserProfile'
@@ -63,6 +64,10 @@ export const router = createBrowserRouter([
           {
             path: 'connectors/:connectorId/canvas',
             element: <ChainCanvasPage />,
+          },
+          {
+            path: 'connectors/:connectorId/canvases/:canvasId/dry-run-results',
+            element: <DryRunResultsPage />,
           },
           {
             path: 'runs',

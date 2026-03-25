@@ -131,7 +131,7 @@ export function EndpointMappingsPage() {
                   {endpoint?.name ?? 'Endpoint'} — Field Mappings
                 </h1>
                 <p className="text-sm text-muted-foreground mt-0.5">
-                  {connector?.name ?? 'Connector'} &rsaquo; /{endpoint?.path ?? ''}
+                  {connector?.name ?? 'Connector'} &rsaquo; {endpoint?.path?.startsWith('/') ? endpoint.path : `/${endpoint?.path ?? ''}`}
                 </p>
               </>
             )}

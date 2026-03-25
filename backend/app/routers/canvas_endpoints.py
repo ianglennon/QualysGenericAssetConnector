@@ -18,21 +18,28 @@ from app.models.canvas import Canvas
 from app.models.canvas_endpoint import CanvasEndpoint
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
+from app.models.field_mapping import FieldMapping
 from app.schemas.canvas_endpoint import (
     CanvasEndpointCreate,
     CanvasEndpointUpdate,
     CanvasEndpointResponse,
 )
 from app.schemas.field_mapping import DiscoverResponse
+from app.schemas.run_history import DryRunResponse
 from app.services import source_client as _source_client
 from app.services.template_resolver import resolve_path, TemplateResolutionError
-from app.services.fan_out_executor import _merge_parent_context
+from app.services.fan_out_executor import execute_tree, _build_tree, _merge_parent_context
+from app.services.ingestion_service import _build_mapping_rules
+from app.services.transform_engine import apply_mappings
+from app.services.source_client import fetch_all_pages
 from app.services.field_discovery import merge_fields_across_records
 from app.services.connector_service import HTTPX_TIMEOUT, _build_headers
 
 router = APIRouter(tags=["canvas-endpoints"])
 
 BASE = "/connectors/{connector_id}/canvases/{canvas_id}/endpoints"
+BASE_CANVAS = "/connectors/{connector_id}/canvases/{canvas_id}"
+DRY_RUN_CAP = 50
 
 DISCOVERY_SAMPLE_SIZE = 3  # D-11: 3 parent records sampled for discovery
 
@@ -307,6 +314,84 @@ async def discover_canvas_endpoint_fields(
     raw_fields = merge_fields_across_records(all_merged_child_records)
     fields = [{"path": f["path"], "type": f["type"], "sample_value": f["sample_value"]} for f in raw_fields]
     return DiscoverResponse(fields=fields, record_count=len(all_merged_child_records))
+
+
+@router.post(BASE_CANVAS + "/dry-run", response_model=DryRunResponse)
+async def dry_run_canvas(
+    connector_id: str,
+    canvas_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(require_role("admin", "operator")),
+):
+    """Execute canvas chain without Qualys submission. Returns mapped records capped at 50.
+
+    Per D-10: Reuses execute_tree() and apply_mappings(). Does NOT create RunHistory.
+    Does NOT require Qualys configuration.
+    """
+    canvas = _get_canvas_or_404(db, connector_id, canvas_id)
+    connector = db.query(Connector).filter_by(id=connector_id).first()
+    if not connector:
+        raise HTTPException(
+            status_code=404,
+            detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {}),
+        )
+
+    # Load canvas endpoints
+    canvas_endpoints = db.query(CanvasEndpoint).filter_by(canvas_id=canvas_id).all()
+    if not canvas_endpoints:
+        return DryRunResponse(records=[], total_records=0, capped=False)
+
+    # Load connector endpoints for path resolution
+    endpoint_ids = [ce.endpoint_id for ce in canvas_endpoints]
+    conn_eps = db.query(ConnectorEndpoint).filter(ConnectorEndpoint.id.in_(endpoint_ids)).all()
+    ep_map = {ep.id: ep for ep in conn_eps}
+    for ce in canvas_endpoints:
+        ep = ep_map.get(ce.endpoint_id)
+        ce.path = ep.path if ep else ""
+
+    # Find root
+    roots = [ce for ce in canvas_endpoints if ce.parent_ref_id is None]
+    root_ep = ep_map.get(roots[0].endpoint_id) if roots else None
+    if not root_ep:
+        return DryRunResponse(records=[], total_records=0, capped=False)
+
+    root_url = connector.base_url.rstrip("/") + "/" + root_ep.path.lstrip("/")
+
+    async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+        source_result = await fetch_all_pages(connector, url=root_url, client=client)
+        fan_out_result = await execute_tree(canvas_endpoints, source_result.records, connector, client)
+
+    # Cap, then apply mappings (D-09: cap at 50)
+    total = len(fan_out_result.merged_records)
+    capped_records = fan_out_result.merged_records[:DRY_RUN_CAP]
+
+    # Determine leaf endpoints (those with no children)
+    children_map = _build_tree(canvas_endpoints)
+    leaf_ids = {ce.id for ce in canvas_endpoints if ce.id not in children_map}
+
+    # Collect mappings from all leaf endpoints
+    all_mapping_rules = []
+    for leaf_ce_id in leaf_ids:
+        leaf_ce = {ce.id: ce for ce in canvas_endpoints}.get(leaf_ce_id)
+        if not leaf_ce:
+            continue
+        leaf_ep = ep_map.get(leaf_ce.endpoint_id)
+        if not leaf_ep:
+            continue
+        mappings = (
+            db.query(FieldMapping)
+            .filter(FieldMapping.endpoint_id == leaf_ep.id)
+            .order_by(FieldMapping.created_at.asc())
+            .all()
+        )
+        all_mapping_rules.extend(_build_mapping_rules(mappings))
+
+    if not all_mapping_rules:
+        return DryRunResponse(records=[], total_records=total, capped=total > DRY_RUN_CAP)
+
+    transformed = [apply_mappings(rec, all_mapping_rules) for rec in capped_records]
+    return DryRunResponse(records=transformed, total_records=total, capped=total > DRY_RUN_CAP)
+
 
 
 @router.get(BASE, response_model=list[CanvasEndpointResponse])

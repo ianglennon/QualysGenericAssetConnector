@@ -99,4 +99,5 @@ class EndpointRunLog(Base):
     child_requests_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
     child_requests_failed: Mapped[int | None] = mapped_column(Integer, nullable=True)
     child_requests_skipped: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    depth: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

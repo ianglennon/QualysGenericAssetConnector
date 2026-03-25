@@ -187,7 +187,7 @@ async def _discover_fields_from_url(connector: Connector, url: str) -> DiscoverR
     headers = _build_headers(connector)
 
     async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
-        response = await _source_client._fetch_with_retries(
+        fetch_result = await _source_client._fetch_with_retries(
             client,
             url,
             headers,
@@ -195,26 +195,15 @@ async def _discover_fields_from_url(connector: Connector, url: str) -> DiscoverR
             retry_limit=1,
         )
 
-    # Handle None (real connection failure) and error responses.
-    # In production _fetch_with_retries returns httpx.Response | None.
-    # In tests the mock returns (status_code, body_dict, headers_dict).
-    if response is None:
+    # _fetch_with_retries returns a FetchResult dataclass.
+    # A None .response means the source API was unreachable / all retries failed.
+    if fetch_result.response is None:
         raise HTTPException(
             status_code=502,
             detail=make_error("SOURCE_UNREACHABLE", "Source API did not respond", {}),
         )
 
-    # Normalize: detect tuple (test mock) vs real httpx.Response
-    if isinstance(response, tuple):
-        status_code, body, _ = response
-        if not (200 <= status_code < 300):
-            raise HTTPException(
-                status_code=502,
-                detail=make_error("SOURCE_UNREACHABLE", "Source API returned an error", {}),
-            )
-        payload = body
-    else:
-        payload = response.json()
+    payload = fetch_result.response.json()
 
     records = _source_client._extract_records(payload)
     if not records and isinstance(payload, dict):

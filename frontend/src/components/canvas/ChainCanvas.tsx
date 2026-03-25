@@ -69,11 +69,12 @@ const edgeTypes = {
 interface ChainCanvasProps {
   connectorId: string
   connectorName: string
+  initialCanvasId?: string
 }
 
 const TARGET_PANEL_ID = 'target-panel'
 
-function ChainCanvasInner({ connectorId, connectorName }: ChainCanvasProps) {
+function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: ChainCanvasProps) {
   const { toast } = useToast()
   const navigate = useNavigate()
   const { screenToFlowPosition, getNode, fitView } = useReactFlow()
@@ -83,10 +84,14 @@ function ChainCanvasInner({ connectorId, connectorName }: ChainCanvasProps) {
   const createCanvas = useCreateCanvas()
   const { data: qualysSchema } = useQualysSchema()
 
-  // Determine or auto-create canvas
-  const [canvasId, setCanvasId] = useState<string | null>(null)
+  // Determine or auto-create canvas — prefer URL-provided canvasId
+  const [canvasId, setCanvasId] = useState<string | null>(initialCanvasId ?? null)
 
   useEffect(() => {
+    if (initialCanvasId) {
+      setCanvasId(initialCanvasId)
+      return
+    }
     if (canvasesData && canvasesData.length > 0 && !canvasId) {
       setCanvasId(canvasesData[0].id)
     } else if (canvasesData && canvasesData.length === 0 && !canvasId && !createCanvas.isPending) {
@@ -95,7 +100,7 @@ function ChainCanvasInner({ connectorId, connectorName }: ChainCanvasProps) {
         { onSuccess: (data) => setCanvasId(data.id) },
       )
     }
-  }, [canvasesData, canvasId, connectorId, createCanvas])
+  }, [canvasesData, canvasId, connectorId, createCanvas, initialCanvasId])
 
   const { data: canvasEndpointsData } = useCanvasEndpoints(connectorId, canvasId ?? undefined)
   const { data: endpointsData } = useEndpoints(connectorId)

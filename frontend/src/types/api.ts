@@ -106,8 +106,8 @@ export interface EndpointRunLog {
   http_request?: HttpRequestDetail | null
   http_response?: HttpResponseDetail | null
   created_at: string
-  // Chain fields (Phase 43 — CUI-04)
   canvas_id?: string | null
+  canvas_name?: string | null
   child_requests_total?: number | null
   child_requests_failed?: number | null
   child_requests_skipped?: number | null

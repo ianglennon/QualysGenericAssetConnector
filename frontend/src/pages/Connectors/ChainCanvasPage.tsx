@@ -4,7 +4,7 @@ import { useConnector } from '@/hooks/queries/useConnectors'
 import { ChainCanvas } from '@/components/canvas/ChainCanvas'
 
 export function ChainCanvasPage() {
-  const { connectorId } = useParams<{ connectorId: string }>()
+  const { connectorId, canvasId } = useParams<{ connectorId: string; canvasId: string }>()
   const { data: connector, isLoading } = useConnector(connectorId)
 
   if (isLoading) {
@@ -31,6 +31,7 @@ export function ChainCanvasPage() {
       <ChainCanvas
         connectorId={connectorId}
         connectorName={connector.name}
+        initialCanvasId={canvasId}
       />
     </div>
   )

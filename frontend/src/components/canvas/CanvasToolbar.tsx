@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Plus, LayoutGrid, Save, Loader2 } from 'lucide-react'
+import { ArrowLeft, Plus, LayoutGrid, Save, Loader2, Play } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ROUTES } from '@/routes/constants'
 
@@ -11,6 +11,10 @@ interface CanvasToolbarProps {
   canSave: boolean
   connectorName: string
   connectorId: string
+  // Phase 43: dry-run support (D-06)
+  hasChain?: boolean
+  onDryRun?: () => void
+  isDryRunning?: boolean
 }
 
 export function CanvasToolbar({
@@ -21,6 +25,9 @@ export function CanvasToolbar({
   canSave,
   connectorName,
   connectorId,
+  hasChain,
+  onDryRun,
+  isDryRunning,
 }: CanvasToolbarProps) {
   const saveDisabled = !canSave || isSaving
 
@@ -62,6 +69,21 @@ export function CanvasToolbar({
           <Button variant="default" size="sm" onClick={onSave}>
             <Save className="h-4 w-4" />
             Save Canvas
+          </Button>
+        )}
+        {hasChain && onDryRun && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onDryRun}
+            disabled={isDryRunning}
+          >
+            {isDryRunning ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="h-4 w-4" />
+            )}
+            Run Dry Test
           </Button>
         )}
       </div>

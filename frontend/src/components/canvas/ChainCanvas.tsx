@@ -1,5 +1,6 @@
 import '@xyflow/react/dist/style.css'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   ReactFlow,
   Background,
@@ -33,7 +34,9 @@ import {
 import { useEndpoints, useCreateEndpoint } from '@/hooks/queries/useEndpoints'
 import { useEndpointDiscoverFields } from '@/hooks/queries/useEndpointDiscover'
 import { useBatchReplaceEndpointMappings } from '@/hooks/queries/useEndpointMappings'
+import { useDryRun } from '@/hooks/queries/useDryRun'
 import { apiClient } from '@/lib/api-client'
+import { ROUTES } from '@/routes/constants'
 import type { FieldMapping } from '@/types/api'
 import { EndpointNode } from './EndpointNode'
 import { ChainEdge } from './ChainEdge'
@@ -72,6 +75,7 @@ const TARGET_PANEL_ID = 'target-panel'
 
 function ChainCanvasInner({ connectorId, connectorName }: ChainCanvasProps) {
   const { toast } = useToast()
+  const navigate = useNavigate()
   const { screenToFlowPosition, getNode, fitView } = useReactFlow()
 
   // Data fetching
@@ -102,6 +106,7 @@ function ChainCanvasInner({ connectorId, connectorName }: ChainCanvasProps) {
   const createEndpoint = useCreateEndpoint()
   const discoverFields = useEndpointDiscoverFields()
   const batchReplaceMappings = useBatchReplaceEndpointMappings()
+  const dryRun = useDryRun()
 
   // React Flow state
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
@@ -735,6 +740,26 @@ function ChainCanvasInner({ connectorId, connectorName }: ChainCanvasProps) {
   // Endpoint nodes for empty state check
   const endpointNodes = nodes.filter((n) => n.type === 'endpointNode')
 
+  // Dry-run support (D-06): detect chains and wire dry-run button
+  const hasChain = endpointNodes.some((n) => (n.data as EndpointNodeData).parentRefId != null)
+
+  const handleDryRun = useCallback(async () => {
+    if (!canvasId) return
+    try {
+      const result = await dryRun.mutateAsync({ connectorId, canvasId })
+      navigate(ROUTES.dryRunResults(connectorId, canvasId), {
+        state: { dryRunResults: result },
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error'
+      toast({
+        title: 'Dry run failed',
+        description: `${message}. Check connector credentials and endpoint configuration.`,
+        variant: 'destructive',
+      })
+    }
+  }, [canvasId, connectorId, dryRun, navigate, toast])
+
   return (
     <div className="flex flex-col h-full">
       <CanvasToolbar
@@ -745,6 +770,9 @@ function ChainCanvasInner({ connectorId, connectorName }: ChainCanvasProps) {
         onSave={handleSave}
         isSaving={isSaving}
         canSave={canSave}
+        hasChain={hasChain}
+        onDryRun={handleDryRun}
+        isDryRunning={dryRun.isPending}
       />
       <div className="flex-1 relative">
         {endpointNodes.length === 0 && (

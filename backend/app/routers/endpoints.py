@@ -5,7 +5,7 @@ Routes mounted at /api/v1/connectors/{connector_id}/endpoints.
 
 import uuid as _uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -13,6 +13,7 @@ from app.core.security import require_role
 from app.core.errors import make_error
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
+from app.models.canvas_endpoint import CanvasEndpoint
 from app.schemas.endpoints import (
     EndpointCreate,
     EndpointUpdate,
@@ -29,16 +30,26 @@ router = APIRouter(tags=["endpoints"])
 )
 def list_endpoints(
     connector_id: str,
+    unassigned_only: bool = Query(False, description="If true, exclude endpoints referenced by any canvas"),
     db: Session = Depends(get_db),
     _=Depends(require_role("admin", "operator")),
 ):
     """List all endpoints for a connector ordered by display_order asc."""
-    return (
+    query = (
         db.query(ConnectorEndpoint)
         .filter_by(connector_id=connector_id)
-        .order_by(ConnectorEndpoint.display_order.asc())
-        .all()
     )
+    if unassigned_only:
+        # D-03: Exclude endpoints referenced by any canvas
+        referenced_ids = (
+            db.query(CanvasEndpoint.endpoint_id)
+            .distinct()
+            .subquery()
+        )
+        query = query.filter(~ConnectorEndpoint.id.in_(
+            db.query(referenced_ids.c.endpoint_id)
+        ))
+    return query.order_by(ConnectorEndpoint.display_order.asc()).all()
 
 
 @router.get(

@@ -2,13 +2,18 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api-client'
 import type { ConnectorEndpoint, EndpointCreate } from '@/types/api'
 
-export const useEndpoints = (connectorId: string | undefined) => {
+export const useEndpoints = (
+  connectorId: string | undefined,
+  options?: { unassignedOnly?: boolean }
+) => {
+  const unassignedOnly = options?.unassignedOnly ?? false
   return useQuery({
-    queryKey: ['endpoints', connectorId],
+    queryKey: ['endpoints', connectorId, { unassignedOnly }],
     queryFn: async () => {
       if (!connectorId) return []
+      const params = unassignedOnly ? '?unassigned_only=true' : ''
       const { data } = await apiClient.get<ConnectorEndpoint[]>(
-        `/connectors/${connectorId}/endpoints`
+        `/connectors/${connectorId}/endpoints${params}`
       )
       return data
     },

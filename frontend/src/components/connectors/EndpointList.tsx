@@ -23,10 +23,11 @@ import type { ConnectorEndpoint } from '@/types/api'
 
 interface EndpointListProps {
   connectorId: string
+  unassignedOnly?: boolean
 }
 
-export function EndpointList({ connectorId }: EndpointListProps) {
-  const { data: queryEndpoints, isLoading } = useEndpoints(connectorId)
+export function EndpointList({ connectorId, unassignedOnly }: EndpointListProps) {
+  const { data: queryEndpoints, isLoading } = useEndpoints(connectorId, { unassignedOnly })
   const reorderEndpoints = useReorderEndpoints()
 
   const [endpoints, setEndpoints] = useState<ConnectorEndpoint[]>([])

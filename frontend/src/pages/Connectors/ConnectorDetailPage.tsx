@@ -8,6 +8,7 @@ import { useConnector } from '@/hooks/queries/useConnectors'
 import { useTriggerRun } from '@/hooks/queries/useRuns'
 import { useToast } from '@/hooks/use-toast'
 import { EndpointList } from '@/components/connectors/EndpointList'
+import { CanvasGrid } from '@/components/connectors/CanvasGrid'
 
 export function ConnectorDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -108,7 +109,13 @@ export function ConnectorDetailPage() {
           </div>
         </div>
 
-        <EndpointList connectorId={connector.id} />
+        <CanvasGrid connectorId={connector.id} />
+
+        {/* D-03: Only show endpoints not referenced by any canvas */}
+        <div className="space-y-4">
+          <h2 className="text-xl font-semibold">Unassigned Endpoints</h2>
+          <EndpointList connectorId={connector.id} unassignedOnly />
+        </div>
       </div>
     </PageContainer>
   )

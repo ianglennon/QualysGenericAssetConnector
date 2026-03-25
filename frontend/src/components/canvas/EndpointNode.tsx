@@ -170,19 +170,36 @@ export function EndpointNode({ data, selected }: NodeProps & { data: EndpointNod
       {/* Footer: Max Concurrency */}
       <div className="flex items-center gap-2 px-3 py-2 border-t">
         <label className="text-xs text-muted-foreground whitespace-nowrap">Max Concurrency</label>
-        <Input
-          type="number"
-          className="h-6 w-16 text-xs border-none bg-transparent shadow-none focus-visible:ring-0 p-0 text-right"
-          min={1}
-          placeholder="5"
-          value={data.maxConcurrency}
-          onChange={(e) => {
-            const val = parseInt(e.target.value, 10)
-            if (!isNaN(val) && val >= 1) {
-              data.onMaxConcurrencyChange?.(val)
-            }
-          }}
-        />
+        <div className="flex items-center gap-1">
+          <button
+            className="h-5 w-5 flex items-center justify-center rounded text-xs text-muted-foreground hover:bg-muted"
+            onClick={() => {
+              const val = (data.maxConcurrency ?? 5) - 1
+              if (val >= 1) data.onMaxConcurrencyChange?.(val)
+            }}
+          >
+            −
+          </button>
+          <Input
+            type="text"
+            inputMode="numeric"
+            className="h-6 w-10 text-xs border-none bg-transparent shadow-none focus-visible:ring-0 p-0 text-center [appearance:textfield]"
+            placeholder="5"
+            value={data.maxConcurrency}
+            onChange={(e) => {
+              const val = parseInt(e.target.value, 10)
+              if (!isNaN(val) && val >= 1) {
+                data.onMaxConcurrencyChange?.(val)
+              }
+            }}
+          />
+          <button
+            className="h-5 w-5 flex items-center justify-center rounded text-xs text-muted-foreground hover:bg-muted"
+            onClick={() => data.onMaxConcurrencyChange?.((data.maxConcurrency ?? 5) + 1)}
+          >
+            +
+          </button>
+        </div>
       </div>
     </div>
   )

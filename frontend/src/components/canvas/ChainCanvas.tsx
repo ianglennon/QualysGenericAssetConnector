@@ -1,5 +1,5 @@
 import '@xyflow/react/dist/style.css'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -30,9 +30,11 @@ import {
   useCreateCanvasEndpoint,
   useUpdateCanvasEndpoint,
 } from '@/hooks/queries/useCanvasEndpoints'
-import { useCreateEndpoint } from '@/hooks/queries/useEndpoints'
+import { useEndpoints, useCreateEndpoint } from '@/hooks/queries/useEndpoints'
 import { useEndpointDiscoverFields } from '@/hooks/queries/useEndpointDiscover'
 import { useBatchReplaceEndpointMappings } from '@/hooks/queries/useEndpointMappings'
+import { apiClient } from '@/lib/api-client'
+import type { FieldMapping } from '@/types/api'
 import { EndpointNode } from './EndpointNode'
 import { ChainEdge } from './ChainEdge'
 import { MappingEdge } from '@/components/mappings/MappingCanvas/MappingEdge'
@@ -46,7 +48,7 @@ import type {
   EndpointNodeData,
   ChainEdgeData,
   MappingEdgeData,
-  FieldDiscoveryItem,
+  DiscoverResponse,
   TargetPanelData,
 } from '@/types/canvas'
 
@@ -92,6 +94,7 @@ function ChainCanvasInner({ connectorId, connectorName }: ChainCanvasProps) {
   }, [canvasesData, canvasId, connectorId, createCanvas])
 
   const { data: canvasEndpointsData } = useCanvasEndpoints(connectorId, canvasId ?? undefined)
+  const { data: endpointsData } = useEndpoints(connectorId)
 
   // Mutations
   const createCanvasEndpoint = useCreateCanvasEndpoint()
@@ -103,6 +106,10 @@ function ChainCanvasInner({ connectorId, connectorName }: ChainCanvasProps) {
   // React Flow state
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
+
+  // Keep a ref to latest nodes so callbacks always see current endpointId
+  const nodesRef = useRef(nodes)
+  nodesRef.current = nodes
 
   // Context menu state
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
@@ -124,25 +131,33 @@ function ChainCanvasInner({ connectorId, connectorName }: ChainCanvasProps) {
 
   // Initialize canvas from backend data
   useEffect(() => {
-    if (!canvasEndpointsData || !qualysSchema || initialized) return
+    if (!canvasEndpointsData || !endpointsData || !qualysSchema || initialized) return
 
-    const endpointNodes: Node[] = canvasEndpointsData.map((ce, i) => ({
-      id: ce.id,
-      type: 'endpointNode',
-      position: { x: 50 + i * 350, y: 50 },
-      data: {
-        endpointId: ce.endpoint_id,
-        canvasEndpointId: ce.id,
-        name: '', // Will be populated from endpoint data if available
-        path: '',
-        fields: [],
-        parentRefId: ce.parent_ref_id,
-        variableExtractions: ce.variable_extractions,
-        maxConcurrency: ce.max_concurrency,
-        isDiscovering: false,
-        discoveryError: null,
-      } satisfies EndpointNodeData,
-    }))
+    // Build lookup from endpoint_id to endpoint details
+    const endpointLookup = new Map(
+      endpointsData.map((ep) => [String(ep.id), ep]),
+    )
+
+    const endpointNodes: Node[] = canvasEndpointsData.map((ce, i) => {
+      const ep = endpointLookup.get(ce.endpoint_id)
+      return {
+        id: ce.id,
+        type: 'endpointNode',
+        position: { x: 50 + i * 350, y: 50 },
+        data: {
+          endpointId: ce.endpoint_id,
+          canvasEndpointId: ce.id,
+          name: ep?.name ?? '',
+          path: ep?.path ?? '',
+          fields: [],
+          parentRefId: ce.parent_ref_id,
+          variableExtractions: ce.variable_extractions,
+          maxConcurrency: ce.max_concurrency,
+          isDiscovering: false,
+          discoveryError: null,
+        } satisfies EndpointNodeData,
+      }
+    })
 
     // Create chain edges from parent_ref_id relationships
     const chainEdges: Edge[] = canvasEndpointsData
@@ -176,9 +191,71 @@ function ChainCanvasInner({ connectorId, connectorName }: ChainCanvasProps) {
     setEdges(chainEdges)
     setInitialized(true)
 
+    // After init, auto-discover fields for root endpoints and restore mapping edges
+    const restoreFieldsAndMappings = async () => {
+      const updatedNodes = [...endpointNodes]
+      const mappingEdges: Edge[] = []
+
+      for (const node of updatedNodes) {
+        const d = node.data as EndpointNodeData
+        if (!d.endpointId) continue
+
+        // Discover fields for endpoints without template variables
+        const hasTemplateVars = /\{[^}]+\}/.test(d.path)
+        if (!hasTemplateVars) {
+          try {
+            const { data: discovered } = await apiClient.get<DiscoverResponse>(
+              `/connectors/${connectorId}/endpoints/${d.endpointId}/fields/discover`,
+            )
+            ;(node.data as EndpointNodeData).fields = discovered.fields
+          } catch {
+            // Non-critical — fields will be empty
+          }
+        }
+
+        // Load saved mappings and reconstruct mapping edges
+        try {
+          const { data: mappings } = await apiClient.get<FieldMapping[]>(
+            `/connectors/${connectorId}/endpoints/${d.endpointId}/mappings`,
+          )
+          for (const mapping of mappings) {
+            mappingEdges.push({
+              id: `mapping-${node.id}-${mapping.source_field}-${mapping.target_field}`,
+              source: node.id,
+              sourceHandle: mapping.source_field,
+              target: TARGET_PANEL_ID,
+              targetHandle: mapping.target_field,
+              type: 'mapping',
+              data: {
+                sourceField: mapping.source_field,
+                targetField: mapping.target_field,
+                mappingType: mapping.mapping_type === 'direct_copy' ? 'direct' : mapping.mapping_type === 'static_default' ? 'static' : 'conditional',
+              } satisfies MappingEdgeData,
+            })
+          }
+        } catch {
+          // Non-critical — mappings will be empty
+        }
+      }
+
+      setNodes((prev) =>
+        prev.map((n) => {
+          const updated = updatedNodes.find((u) => u.id === n.id)
+          return updated ? { ...n, data: { ...n.data, ...(updated.data as EndpointNodeData) } } : n
+        }),
+      )
+      if (mappingEdges.length > 0) {
+        setEdges((prev) => [...prev, ...mappingEdges])
+      }
+
+      setTimeout(() => fitView({ padding: 0.2 }), 100)
+    }
+
+    restoreFieldsAndMappings()
+
     // Auto-layout after a brief delay to let nodes render
     setTimeout(() => fitView({ padding: 0.2 }), 100)
-  }, [canvasEndpointsData, qualysSchema, initialized, setNodes, setEdges, fitView])
+  }, [canvasEndpointsData, endpointsData, qualysSchema, initialized, setNodes, setEdges, fitView, connectorId])
 
   // Update target panel data when qualys schema or edges change
   useEffect(() => {
@@ -232,12 +309,28 @@ function ChainCanvasInner({ connectorId, connectorName }: ChainCanvasProps) {
               )
             },
             onDiscoverFields: () => {
-              const nodeData = n.data as EndpointNodeData
-              if (!nodeData.endpointId) {
+              // Read current node data from ref to avoid stale closure after save
+              const currentNode = nodesRef.current.find((nd) => nd.id === n.id)
+              const currentEndpointId = currentNode
+                ? (currentNode.data as EndpointNodeData).endpointId
+                : null
+              if (!currentEndpointId) {
                 toast({
                   title: 'Save first',
                   description: 'Save the canvas before discovering fields.',
                   variant: 'destructive',
+                })
+                return
+              }
+              // Child endpoints with template variables can't be discovered directly
+              const currentPath = currentNode
+                ? (currentNode.data as EndpointNodeData).path
+                : ''
+              if (/\{[^}]+\}/.test(currentPath)) {
+                toast({
+                  title: 'Template variables detected',
+                  description:
+                    'This child endpoint has template variables in its path. Fields will be discovered during a connector sync using parent data.',
                 })
                 return
               }
@@ -249,7 +342,7 @@ function ChainCanvasInner({ connectorId, connectorName }: ChainCanvasProps) {
                 ),
               )
               discoverFields.mutate(
-                { connectorId, endpointId: nodeData.endpointId },
+                { connectorId, endpointId: currentEndpointId },
                 {
                   onSuccess: (data) => {
                     setNodes((prev) =>
@@ -409,11 +502,12 @@ function ChainCanvasInner({ connectorId, connectorName }: ChainCanvasProps) {
 
   // Cycle detection for isValidConnection (D-12)
   const isValidConnection = useCallback(
-    (connection: Connection) => {
+    (connection: Edge | Connection) => {
       if (connection.source === connection.target) return false
-      const targetNode = getNode(connection.target ?? '')
+      const target = connection.target ?? ''
+      const targetNode = getNode(target)
       if (targetNode?.type === 'endpointNode') {
-        return !wouldCreateCycle(connection.source ?? '', connection.target ?? '', edges)
+        return !wouldCreateCycle(connection.source ?? '', target, edges)
       }
       return true // mapping connections to target panel always valid
     },
@@ -474,21 +568,15 @@ function ChainCanvasInner({ connectorId, connectorName }: ChainCanvasProps) {
   // canSave computed (D-13)
   const canSave = useMemo(() => {
     const endpointNodes = nodes.filter((n) => n.type === 'endpointNode')
-    const hasFields = endpointNodes.some((n) => {
+    if (endpointNodes.length === 0) return false
+
+    // Allow save when there are any endpoint nodes with content
+    const hasContent = endpointNodes.some((n) => {
       const d = n.data as EndpointNodeData
-      return d.fields.length > 0
+      return d.name || d.path
     })
-    if (!hasFields) return false
-
-    // Check for at least one mapping edge to an identity field
-    const mappingEdges = edges.filter((e) => e.type === 'mapping')
-    if (mappingEdges.length === 0) return false
-
-    const identityFields = new Set(
-      (qualysSchema?.fields ?? []).filter((f) => f.is_identity).map((f) => f.field),
-    )
-    return mappingEdges.some((e) => e.targetHandle && identityFields.has(e.targetHandle))
-  }, [nodes, edges, qualysSchema])
+    return hasContent
+  }, [nodes])
 
   // Save Canvas (toolbar IC-06)
   const handleSave = useCallback(async () => {

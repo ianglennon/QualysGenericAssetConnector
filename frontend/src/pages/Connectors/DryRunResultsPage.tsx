@@ -14,14 +14,14 @@ import { ROUTES } from '@/routes/constants'
 import type { DryRunResult } from '@/types/api'
 
 export function DryRunResultsPage() {
-  const { connectorId } = useParams<{ connectorId: string }>()
+  const { connectorId, canvasId } = useParams<{ connectorId: string; canvasId: string }>()
   const location = useLocation()
   const result = (location.state as { dryRunResults?: DryRunResult } | null)?.dryRunResults
 
   if (!result) {
     return (
       <div className="container mx-auto p-6 space-y-4">
-        <Link to={ROUTES.connectorCanvas(connectorId ?? '')}>
+        <Link to={ROUTES.connectorCanvas(connectorId ?? '', canvasId ?? '')}>
           <Button variant="ghost" size="sm">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Canvas
@@ -42,7 +42,7 @@ export function DryRunResultsPage() {
   if (result.records.length === 0) {
     return (
       <div className="container mx-auto p-6 space-y-4">
-        <Link to={ROUTES.connectorCanvas(connectorId ?? '')}>
+        <Link to={ROUTES.connectorCanvas(connectorId ?? '', canvasId ?? '')}>
           <Button variant="ghost" size="sm">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Canvas
@@ -67,7 +67,7 @@ export function DryRunResultsPage() {
   return (
     <div className="container mx-auto p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <Link to={ROUTES.connectorCanvas(connectorId ?? '')}>
+        <Link to={ROUTES.connectorCanvas(connectorId ?? '', canvasId ?? '')}>
           <Button variant="ghost" size="sm">
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back to Canvas

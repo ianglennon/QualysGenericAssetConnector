@@ -62,7 +62,7 @@ export const router = createBrowserRouter([
             element: <EndpointMappingsPage />,
           },
           {
-            path: 'connectors/:connectorId/canvas',
+            path: 'connectors/:connectorId/canvases/:canvasId',
             element: <ChainCanvasPage />,
           },
           {

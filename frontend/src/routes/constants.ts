@@ -27,8 +27,8 @@ export const ROUTES = {
     `/connectors/${connectorId}/endpoints/${endpointId}/mappings`,
 
   /** Returns the absolute path to a connector's chain canvas page. */
-  connectorCanvas: (connectorId: string | number): string =>
-    `/connectors/${connectorId}/canvas`,
+  connectorCanvas: (connectorId: string | number, canvasId: string | number): string =>
+    `/connectors/${connectorId}/canvases/${canvasId}`,
 
   /** Returns the absolute path to a canvas dry-run results page. */
   dryRunResults: (connectorId: string | number, canvasId: string | number): string =>

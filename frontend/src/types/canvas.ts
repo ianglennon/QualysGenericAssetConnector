@@ -83,6 +83,28 @@ export interface MappingEdgeData extends Record<string, unknown> {
 
 // --- Chain Canvas types (Phase 42) ---
 
+/** Enriched canvas response with aggregation fields for card grid (from Plan 01 CanvasListResponse). */
+export interface CanvasListItem {
+  id: string
+  connector_id: string
+  name: string
+  description: string | null
+  is_enabled: boolean
+  endpoint_count: number
+  field_mapping_count: number
+  last_run_status: string | null
+  last_run_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** Payload for PATCH /connectors/{id}/canvases/{canvasId} */
+export interface CanvasUpdate {
+  name?: string
+  description?: string
+  is_enabled?: boolean
+}
+
 // Canvas API response (mirrors backend CanvasResponse)
 export interface CanvasResponse {
   id: string

@@ -19,3 +19,25 @@ export const useEndpointDiscoverFields = () => {
     },
   })
 }
+
+export const useCanvasDiscoverFields = () => {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (params: {
+      connectorId: string
+      canvasId: string
+      canvasEndpointRefId: string
+    }) => {
+      const { data } = await apiClient.get<DiscoverResponse>(
+        `/connectors/${params.connectorId}/canvases/${params.canvasId}/endpoints/${params.canvasEndpointRefId}/fields/discover`
+      )
+      return data
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: ['fields', 'discover', variables.connectorId, variables.canvasEndpointRefId],
+      })
+    },
+  })
+}

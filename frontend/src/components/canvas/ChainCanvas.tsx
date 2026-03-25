@@ -32,7 +32,7 @@ import {
   useUpdateCanvasEndpoint,
 } from '@/hooks/queries/useCanvasEndpoints'
 import { useEndpoints, useCreateEndpoint } from '@/hooks/queries/useEndpoints'
-import { useEndpointDiscoverFields } from '@/hooks/queries/useEndpointDiscover'
+import { useEndpointDiscoverFields, useCanvasDiscoverFields } from '@/hooks/queries/useEndpointDiscover'
 import { useBatchReplaceEndpointMappings } from '@/hooks/queries/useEndpointMappings'
 import { useDryRun } from '@/hooks/queries/useDryRun'
 import { apiClient } from '@/lib/api-client'
@@ -110,6 +110,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
   const updateCanvasEndpoint = useUpdateCanvasEndpoint()
   const createEndpoint = useCreateEndpoint()
   const discoverFields = useEndpointDiscoverFields()
+  const canvasDiscoverFields = useCanvasDiscoverFields()
   const batchReplaceMappings = useBatchReplaceEndpointMappings()
   const dryRun = useDryRun()
 
@@ -332,63 +333,129 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
                 })
                 return
               }
-              // Child endpoints with template variables can't be discovered directly
+              // Determine if this is a child endpoint needing canvas-aware discovery (D-01)
               const currentPath = currentNode
                 ? (currentNode.data as EndpointNodeData).path
                 : ''
-              if (/\{[^}]+\}/.test(currentPath)) {
-                toast({
-                  title: 'Template variables detected',
-                  description:
-                    'This child endpoint has template variables in its path. Fields will be discovered during a connector sync using parent data.',
-                })
-                return
+              const hasTemplateVars = /\{[^}]+\}/.test(currentPath)
+
+              if (hasTemplateVars) {
+                // Canvas-aware discovery for child endpoints (D-01, D-08)
+                const currentCanvasEndpointId = currentNode
+                  ? (currentNode.data as EndpointNodeData).canvasEndpointId
+                  : null
+                if (!currentCanvasEndpointId || !canvasId) {
+                  // Same "Save first" pattern (D-02)
+                  toast({
+                    title: 'Save first',
+                    description: 'Save the canvas before discovering fields.',
+                    variant: 'destructive',
+                  })
+                  return
+                }
+                setNodes((prev) =>
+                  prev.map((nd) =>
+                    nd.id === n.id
+                      ? { ...nd, data: { ...nd.data, isDiscovering: true, discoveryError: null } }
+                      : nd,
+                  ),
+                )
+                canvasDiscoverFields.mutate(
+                  {
+                    connectorId,
+                    canvasId,
+                    canvasEndpointRefId: currentCanvasEndpointId,
+                  },
+                  {
+                    onSuccess: (data) => {
+                      // Filter out _parent.* fields -- each node shows only its own fields (D-03)
+                      const ownFields = data.fields.filter(
+                        (f) => !f.path.startsWith('_parent.')
+                      )
+                      setNodes((prev) =>
+                        prev.map((nd) =>
+                          nd.id === n.id
+                            ? {
+                                ...nd,
+                                data: {
+                                  ...nd.data,
+                                  fields: ownFields,
+                                  isDiscovering: false,
+                                  discoveryError: null,
+                                },
+                              }
+                            : nd,
+                        ),
+                      )
+                    },
+                    onError: (err) => {
+                      setNodes((prev) =>
+                        prev.map((nd) =>
+                          nd.id === n.id
+                            ? {
+                                ...nd,
+                                data: {
+                                  ...nd.data,
+                                  isDiscovering: false,
+                                  discoveryError:
+                                    err instanceof Error ? err.message : 'Discovery failed',
+                                },
+                              }
+                            : nd,
+                        ),
+                      )
+                    },
+                  },
+                )
+              } else {
+                // Root endpoint -- existing flat discovery (unchanged behavior)
+                setNodes((prev) =>
+                  prev.map((nd) =>
+                    nd.id === n.id
+                      ? { ...nd, data: { ...nd.data, isDiscovering: true, discoveryError: null } }
+                      : nd,
+                  ),
+                )
+                discoverFields.mutate(
+                  { connectorId, endpointId: currentEndpointId },
+                  {
+                    onSuccess: (data) => {
+                      setNodes((prev) =>
+                        prev.map((nd) =>
+                          nd.id === n.id
+                            ? {
+                                ...nd,
+                                data: {
+                                  ...nd.data,
+                                  fields: data.fields,
+                                  isDiscovering: false,
+                                  discoveryError: null,
+                                },
+                              }
+                            : nd,
+                        ),
+                      )
+                    },
+                    onError: (err) => {
+                      setNodes((prev) =>
+                        prev.map((nd) =>
+                          nd.id === n.id
+                            ? {
+                                ...nd,
+                                data: {
+                                  ...nd.data,
+                                  isDiscovering: false,
+                                  discoveryError:
+                                    err instanceof Error ? err.message : 'Discovery failed',
+                                },
+                              }
+                            : nd,
+                        ),
+                      )
+                    },
+                  },
+                )
               }
-              setNodes((prev) =>
-                prev.map((nd) =>
-                  nd.id === n.id
-                    ? { ...nd, data: { ...nd.data, isDiscovering: true, discoveryError: null } }
-                    : nd,
-                ),
-              )
-              discoverFields.mutate(
-                { connectorId, endpointId: currentEndpointId },
-                {
-                  onSuccess: (data) => {
-                    setNodes((prev) =>
-                      prev.map((nd) =>
-                        nd.id === n.id
-                          ? {
-                              ...nd,
-                              data: {
-                                ...nd.data,
-                                fields: data.fields,
-                                isDiscovering: false,
-                                discoveryError: null,
-                              },
-                            }
-                          : nd,
-                      ),
-                    )
-                  },
-                  onError: (err) => {
-                    setNodes((prev) =>
-                      prev.map((nd) =>
-                        nd.id === n.id
-                          ? {
-                              ...nd,
-                              data: {
-                                ...nd.data,
-                                isDiscovering: false,
-                                discoveryError: err instanceof Error ? err.message : 'Discovery failed',
-                              },
-                            }
-                          : nd,
-                      ),
-                    )
-                  },
-                },
-              )
             },
             onDelete: () => {
               setDeleteTarget({ nodeId: n.id, name: (n.data as EndpointNodeData).name || 'Untitled' })

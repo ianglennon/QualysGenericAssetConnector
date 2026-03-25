@@ -6,6 +6,7 @@ Routes mounted at /api/v1/connectors/{connector_id}/canvases.
 import uuid as _uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -13,27 +14,78 @@ from app.core.security import require_role
 from app.core.errors import make_error
 from app.models.connector import Connector
 from app.models.canvas import Canvas
-from app.schemas.canvas import CanvasCreate, CanvasUpdate, CanvasResponse
+from app.models.canvas_endpoint import CanvasEndpoint
+from app.models.field_mapping import FieldMapping
+from app.models.run_history import EndpointRunLog
+from app.schemas.canvas import CanvasCreate, CanvasUpdate, CanvasResponse, CanvasListResponse
 
 router = APIRouter(tags=["canvases"])
 
 
 @router.get(
     "/connectors/{connector_id}/canvases",
-    response_model=list[CanvasResponse],
+    response_model=list[CanvasListResponse],
 )
 def list_canvases(
     connector_id: str,
     db: Session = Depends(get_db),
     _=Depends(require_role("admin", "operator")),
 ):
-    """List all canvases for a connector ordered by name asc."""
-    return (
+    """List all canvases for a connector with aggregation fields."""
+    canvases = (
         db.query(Canvas)
         .filter_by(connector_id=connector_id)
         .order_by(Canvas.name.asc())
         .all()
     )
+
+    canvas_ids = [c.id for c in canvases]
+
+    # Endpoint counts per canvas
+    ep_counts = dict(
+        db.query(CanvasEndpoint.canvas_id, func.count(CanvasEndpoint.id))
+        .filter(CanvasEndpoint.canvas_id.in_(canvas_ids))
+        .group_by(CanvasEndpoint.canvas_id)
+        .all()
+    ) if canvas_ids else {}
+
+    # Field mapping counts per canvas
+    fm_counts = dict(
+        db.query(FieldMapping.canvas_id, func.count(FieldMapping.id))
+        .filter(FieldMapping.canvas_id.in_(canvas_ids))
+        .group_by(FieldMapping.canvas_id)
+        .all()
+    ) if canvas_ids else {}
+
+    # Last run status per canvas (most recent EndpointRunLog)
+    last_runs: dict[str, tuple] = {}
+    if canvas_ids:
+        for cid in canvas_ids:
+            last_log = (
+                db.query(EndpointRunLog)
+                .filter(EndpointRunLog.canvas_id == cid)
+                .order_by(desc(EndpointRunLog.created_at))
+                .first()
+            )
+            if last_log:
+                last_runs[cid] = (last_log.status, last_log.created_at)
+
+    return [
+        CanvasListResponse(
+            id=c.id,
+            connector_id=c.connector_id,
+            name=c.name,
+            description=c.description,
+            is_enabled=c.is_enabled,
+            endpoint_count=ep_counts.get(c.id, 0),
+            field_mapping_count=fm_counts.get(c.id, 0),
+            last_run_status=last_runs.get(c.id, (None, None))[0],
+            last_run_at=last_runs.get(c.id, (None, None))[1],
+            created_at=c.created_at,
+            updated_at=c.updated_at,
+        )
+        for c in canvases
+    ]
 
 
 @router.get(

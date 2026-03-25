@@ -34,3 +34,20 @@ class CanvasResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class CanvasListResponse(BaseModel):
+    """Enriched canvas response with aggregation fields for card grid display."""
+    id: str
+    connector_id: str
+    name: str
+    description: Optional[str] = None
+    is_enabled: bool
+    endpoint_count: int = 0
+    field_mapping_count: int = 0
+    last_run_status: Optional[str] = None
+    last_run_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}

@@ -38,8 +38,10 @@ def _to_response(
     endpoint_logs: list[EndpointRunLog] | None = None,
     endpoint_lookup: dict[str, ConnectorEndpoint] | None = None,
     include_payloads: bool = False,
+    canvas_lookup: dict[str, str] | None = None,
 ) -> RunHistoryResponse:
     ep_lookup = endpoint_lookup or {}
+    c_lookup = canvas_lookup or {}
 
     def _map_endpoint_log(log: EndpointRunLog) -> EndpointRunLogResponse:
         ep = ep_lookup.get(log.endpoint_id)
@@ -60,6 +62,7 @@ def _to_response(
             http_response=log.http_response if include_payloads else None,
             created_at=log.created_at,
             canvas_id=log.canvas_id,
+            canvas_name=c_lookup.get(log.canvas_id) if log.canvas_id else None,
             child_requests_total=log.child_requests_total,
             child_requests_failed=log.child_requests_failed,
             child_requests_skipped=log.child_requests_skipped,
@@ -259,7 +262,17 @@ def get_run(
     ) if endpoint_ids else []
     endpoint_lookup = {ep.id: ep for ep in endpoints}
 
-    response = _to_response(run, failures, endpoint_logs, endpoint_lookup, include_payloads=True)
+    # Build canvas lookup for canvas_name enrichment
+    from app.models.canvas import Canvas
+    canvas_ids_in_logs = list({log.canvas_id for log in endpoint_logs if log.canvas_id})
+    canvases = (
+        db.query(Canvas)
+        .filter(Canvas.id.in_(canvas_ids_in_logs))
+        .all()
+    ) if canvas_ids_in_logs else []
+    canvas_lookup = {c.id: c.name for c in canvases}
+
+    response = _to_response(run, failures, endpoint_logs, endpoint_lookup, include_payloads=True, canvas_lookup=canvas_lookup)
     response.connector_name = connector_name
     return response
 

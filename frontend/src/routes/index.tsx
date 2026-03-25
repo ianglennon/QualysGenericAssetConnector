@@ -5,6 +5,7 @@ import Dashboard from '@/pages/Dashboard'
 import { ConnectorListPage } from '@/pages/Connectors/ConnectorListPage'
 import { ConnectorDetailPage } from '@/pages/Connectors/ConnectorDetailPage'
 import { EndpointMappingsPage } from '@/pages/Connectors/EndpointMappingsPage'
+import { ChainCanvasPage } from '@/pages/Connectors/ChainCanvasPage'
 import { QualysConfig } from '@/pages/Settings/QualysConfig'
 import { TransformRules } from '@/pages/Settings/TransformRules'
 import { UserProfile } from '@/pages/Settings/UserProfile'
@@ -58,6 +59,10 @@ export const router = createBrowserRouter([
           {
             path: 'connectors/:connectorId/endpoints/:endpointId/mappings',
             element: <EndpointMappingsPage />,
+          },
+          {
+            path: 'connectors/:connectorId/canvases/:canvasId',
+            element: <ChainCanvasPage />,
           },
           {
             path: 'runs',

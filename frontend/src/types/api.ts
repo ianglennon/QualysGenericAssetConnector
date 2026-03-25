@@ -106,6 +106,12 @@ export interface EndpointRunLog {
   http_request?: HttpRequestDetail | null
   http_response?: HttpResponseDetail | null
   created_at: string
+  canvas_id?: string | null
+  canvas_name?: string | null
+  child_requests_total?: number | null
+  child_requests_failed?: number | null
+  child_requests_skipped?: number | null
+  depth?: number | null
 }
 
 // Connector Types

@@ -150,63 +150,97 @@ export default function RunDetailPage() {
             </CardContent>
           </Card>
 
-          {run.endpoint_logs && run.endpoint_logs.length > 0 && (
-            <div className="space-y-3">
-              <h3 className="text-lg font-semibold">Endpoint Breakdown</h3>
-              {[...run.endpoint_logs]
-                .sort((a: EndpointRunLog, b: EndpointRunLog) => a.execution_order - b.execution_order)
-                .map((log: EndpointRunLog) => (
-                  <Card key={log.id}>
-                    <CardHeader className="pb-2">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-base">
-                          {log.endpoint_name || log.endpoint_id}
-                        </CardTitle>
-                        <div className="flex items-center gap-2">
-                          {getStatusBadge(log.status)}
-                          {log.failure_stage && (
-                            <Badge variant="destructive">
-                              {STAGE_LABELS[log.failure_stage] ?? log.failure_stage}
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <CardDescription>
-                        {log.endpoint_path || 'Unknown path'}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      <div className="grid grid-cols-3 gap-4 p-3 border rounded-lg bg-muted/50">
-                        <div className="text-center">
-                          <div className="text-xl font-bold">{log.records_fetched}</div>
-                          <div className="text-xs text-muted-foreground">Records Fetched</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-xl font-bold text-green-600">{log.records_submitted}</div>
-                          <div className="text-xs text-muted-foreground">Records Submitted</div>
-                        </div>
-                        <div className="text-center">
-                          <div className={`text-xl font-bold ${log.records_failed > 0 ? 'text-destructive' : ''}`}>
-                            {log.records_failed}
-                          </div>
-                          <div className="text-xs text-muted-foreground">Records Failed</div>
-                        </div>
-                      </div>
-                      {log.error_message && (
-                        <Alert variant="destructive">
-                          <AlertCircle className="h-4 w-4" />
-                          <AlertDescription>{log.error_message}</AlertDescription>
-                        </Alert>
+          {run.endpoint_logs && run.endpoint_logs.length > 0 && (() => {
+            const sorted = [...run.endpoint_logs].sort(
+              (a: EndpointRunLog, b: EndpointRunLog) => a.execution_order - b.execution_order
+            )
+
+            // D-10: Group chain logs by canvas_name for section headers
+            const chainLogs = sorted.filter((l: EndpointRunLog) => l.canvas_id != null)
+            const flatLogs = sorted.filter((l: EndpointRunLog) => !l.canvas_id)
+
+            const canvasGroups = new Map<string, { name: string; logs: EndpointRunLog[] }>()
+            for (const log of chainLogs) {
+              const key = log.canvas_id!
+              if (!canvasGroups.has(key)) {
+                canvasGroups.set(key, { name: log.canvas_name || 'Unknown Canvas', logs: [] })
+              }
+              canvasGroups.get(key)!.logs.push(log)
+            }
+
+            const renderLogCard = (log: EndpointRunLog) => (
+              <Card key={log.id}>
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base">
+                      {log.endpoint_name || log.endpoint_id}
+                    </CardTitle>
+                    <div className="flex items-center gap-2">
+                      {getStatusBadge(log.status)}
+                      {log.failure_stage && (
+                        <Badge variant="destructive">
+                          {STAGE_LABELS[log.failure_stage] ?? log.failure_stage}
+                        </Badge>
                       )}
-                      <HttpDetailPanel
-                        httpRequest={log.http_request}
-                        httpResponse={log.http_response}
-                      />
-                    </CardContent>
-                  </Card>
+                    </div>
+                  </div>
+                  <CardDescription>
+                    {log.endpoint_path || 'Unknown path'}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid grid-cols-3 gap-4 p-3 border rounded-lg bg-muted/50">
+                    <div className="text-center">
+                      <div className="text-xl font-bold">{log.records_fetched}</div>
+                      <div className="text-xs text-muted-foreground">Records Fetched</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-xl font-bold text-green-600">{log.records_submitted}</div>
+                      <div className="text-xs text-muted-foreground">Records Submitted</div>
+                    </div>
+                    <div className="text-center">
+                      <div className={`text-xl font-bold ${log.records_failed > 0 ? 'text-destructive' : ''}`}>
+                        {log.records_failed}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Records Failed</div>
+                    </div>
+                  </div>
+                  {log.error_message && (
+                    <Alert variant="destructive">
+                      <AlertCircle className="h-4 w-4" />
+                      <AlertDescription>{log.error_message}</AlertDescription>
+                    </Alert>
+                  )}
+                  <HttpDetailPanel
+                    httpRequest={log.http_request}
+                    httpResponse={log.http_response}
+                  />
+                </CardContent>
+              </Card>
+            )
+
+            return (
+              <div className="space-y-3">
+                <h3 className="text-lg font-semibold">Endpoint Breakdown</h3>
+                {/* Canvas-grouped logs with section headers */}
+                {Array.from(canvasGroups.entries()).map(([canvasId, group]) => (
+                  <div key={canvasId} className="space-y-3">
+                    <h4 className="text-base font-semibold border-b pb-2">{group.name}</h4>
+                    {group.logs.map((log: EndpointRunLog) => renderLogCard(log))}
+                  </div>
                 ))}
-            </div>
-          )}
+                {/* Flat logs (no canvas) without section headers */}
+                {flatLogs.length > 0 && (
+                  <div className="space-y-3">
+                    {canvasGroups.size > 0 && (
+                      <h4 className="text-base font-semibold border-b pb-2">Unassigned Endpoints</h4>
+                    )}
+                    {flatLogs.map((log: EndpointRunLog) => renderLogCard(log))}
+                  </div>
+                )}
+              </div>
+            )
+          })()}
       </div>
     </div>
   )

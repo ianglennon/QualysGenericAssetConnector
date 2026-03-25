@@ -59,6 +59,11 @@ def _to_response(
             http_request=log.http_request if include_payloads else None,
             http_response=log.http_response if include_payloads else None,
             created_at=log.created_at,
+            canvas_id=log.canvas_id,
+            child_requests_total=log.child_requests_total,
+            child_requests_failed=log.child_requests_failed,
+            child_requests_skipped=log.child_requests_skipped,
+            depth=getattr(log, 'depth', None),
         )
 
     return RunHistoryResponse(

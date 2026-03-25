@@ -36,9 +36,20 @@ class EndpointRunLogResponse(BaseModel):
     http_request: Optional[dict] = None
     http_response: Optional[dict] = None
     created_at: datetime
+    canvas_id: Optional[str] = None
+    child_requests_total: Optional[int] = None
+    child_requests_failed: Optional[int] = None
+    child_requests_skipped: Optional[int] = None
+    depth: Optional[int] = None
 
     class Config:
         from_attributes = True
+
+
+class DryRunResponse(BaseModel):
+    records: list[dict]
+    total_records: int
+    capped: bool
 
 
 class RunHistoryResponse(BaseModel):

@@ -407,7 +407,7 @@ async def _run_canvas(
     return logs
 
 
-async def run_ingestion(run_id: str) -> None:
+async def run_ingestion(run_id: str, canvas_id: str | None = None) -> None:
     db = SessionLocal()
     run: RunHistory | None = None
     try:
@@ -466,14 +466,21 @@ async def run_ingestion(run_id: str) -> None:
 
         async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
             # === CANVAS PATH (D-01/D-03): Execute canvas trees first ===
-            canvases = (
-                db.query(Canvas)
-                .filter(
-                    Canvas.connector_id == connector.id,
-                    Canvas.is_enabled == True,
+            if canvas_id:
+                canvases = (
+                    db.query(Canvas)
+                    .filter(Canvas.id == canvas_id, Canvas.is_enabled == True)
+                    .all()
                 )
-                .all()
-            )
+            else:
+                canvases = (
+                    db.query(Canvas)
+                    .filter(
+                        Canvas.connector_id == connector.id,
+                        Canvas.is_enabled == True,
+                    )
+                    .all()
+                )
 
             execution_idx = 0
             for canvas in canvases:
@@ -488,27 +495,29 @@ async def run_ingestion(run_id: str) -> None:
                 execution_idx += len(canvas_logs)
 
             # === ORPHAN PATH (D-02): Run endpoints NOT in any enabled canvas ===
-            canvas_endpoint_ids = (
-                db.query(CanvasEndpoint.endpoint_id)
-                .join(Canvas, CanvasEndpoint.canvas_id == Canvas.id)
-                .filter(
-                    Canvas.connector_id == connector.id,
-                    Canvas.is_enabled == True,
+            # Only run orphan endpoints if this is a full-connector sync
+            if not canvas_id:
+                canvas_endpoint_ids = (
+                    db.query(CanvasEndpoint.endpoint_id)
+                    .join(Canvas, CanvasEndpoint.canvas_id == Canvas.id)
+                    .filter(
+                        Canvas.connector_id == connector.id,
+                        Canvas.is_enabled == True,
+                    )
+                    .distinct()
+                    .all()
                 )
-                .distinct()
-                .all()
-            )
-            referenced_ids = {row[0] for row in canvas_endpoint_ids}
-            orphan_endpoints = [ep for ep in enabled_endpoints if ep.id not in referenced_ids]
+                referenced_ids = {row[0] for row in canvas_endpoint_ids}
+                orphan_endpoints = [ep for ep in enabled_endpoints if ep.id not in referenced_ids]
 
-            for idx, endpoint in enumerate(orphan_endpoints):
-                log = await _run_endpoint(
-                    db, run, connector, endpoint, qualys_config, client, execution_idx + idx,
-                )
-                logs.append(log)
-                total_fetched += log.records_fetched
-                total_submitted += log.records_submitted
-                total_failed += log.records_failed
+                for idx, endpoint in enumerate(orphan_endpoints):
+                    log = await _run_endpoint(
+                        db, run, connector, endpoint, qualys_config, client, execution_idx + idx,
+                    )
+                    logs.append(log)
+                    total_fetched += log.records_fetched
+                    total_submitted += log.records_submitted
+                    total_failed += log.records_failed
 
         run.records_fetched = total_fetched
         run.records_submitted = total_submitted

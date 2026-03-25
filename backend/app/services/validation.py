@@ -14,32 +14,79 @@ IDENTITY_ATTRIBUTES = {
 def validate_endpoint_mappings(
     connector_id: str,
     db: Session,
+    canvas_id: str | None = None,
 ) -> tuple[bool, list[dict]]:
-    """Validate that every enabled endpoint has at least one identity attribute mapped.
+    """Validate that every leaf endpoint has at least one identity attribute mapped.
+
+    When canvas_id is provided, only validates leaf endpoints within that canvas.
+    When canvas_id is None (full connector sync), validates all enabled canvases
+    plus orphan endpoints not in any canvas.
 
     Returns: (is_valid, invalid_endpoints)
-        is_valid — True if all enabled endpoints have an identity mapping.
-        invalid_endpoints — list of {id, name} dicts for each broken enabled endpoint.
+        is_valid -- True if all relevant endpoints have an identity mapping.
+        invalid_endpoints -- list of {id, name} dicts for each broken endpoint.
     """
-    enabled_endpoints = (
-        db.query(ConnectorEndpoint)
-        .filter(
-            ConnectorEndpoint.connector_id == connector_id,
-            ConnectorEndpoint.is_enabled == True,
-        )
-        .all()
-    )
+    from app.models.canvas import Canvas
+    from app.models.canvas_endpoint import CanvasEndpoint
 
-    invalid_endpoints = []
-    for endpoint in enabled_endpoints:
-        mappings = (
-            db.query(FieldMapping)
-            .filter(FieldMapping.endpoint_id == endpoint.id)
+    invalid_endpoints: list[dict] = []
+
+    def _validate_leaf_endpoints(canvas_id_val: str) -> list[dict]:
+        """Find leaf endpoints in a canvas and validate their identity mappings."""
+        ces = db.query(CanvasEndpoint).filter(CanvasEndpoint.canvas_id == canvas_id_val).all()
+        if not ces:
+            return []
+        # Build set of IDs that have children
+        parent_ids = {ce.id for ce in ces if any(c.parent_ref_id == ce.id for c in ces)}
+        leaf_ces = [ce for ce in ces if ce.id not in parent_ids]
+
+        invalid: list[dict] = []
+        for ce in leaf_ces:
+            ep = db.query(ConnectorEndpoint).filter_by(id=ce.endpoint_id).first()
+            if not ep:
+                continue
+            mappings = db.query(FieldMapping).filter(FieldMapping.endpoint_id == ep.id).all()
+            mapped_targets = {m.target_field for m in mappings}
+            if not (mapped_targets & IDENTITY_ATTRIBUTES):
+                invalid.append({"id": ep.id, "name": ep.name})
+        return invalid
+
+    if canvas_id:
+        # Single-canvas validation
+        invalid_endpoints = _validate_leaf_endpoints(canvas_id)
+    else:
+        # Full connector: validate all enabled canvases + orphan endpoints
+        canvases = (
+            db.query(Canvas)
+            .filter(Canvas.connector_id == connector_id, Canvas.is_enabled == True)
             .all()
         )
-        mapped_targets = {m.target_field for m in mappings}
-        if not (mapped_targets & IDENTITY_ATTRIBUTES):
-            invalid_endpoints.append({"id": endpoint.id, "name": endpoint.name})
+        for canvas in canvases:
+            invalid_endpoints.extend(_validate_leaf_endpoints(canvas.id))
+
+        # Also validate orphan endpoints (not in any canvas)
+        canvas_ep_ids_q = (
+            db.query(CanvasEndpoint.endpoint_id)
+            .join(Canvas, CanvasEndpoint.canvas_id == Canvas.id)
+            .filter(Canvas.connector_id == connector_id)
+            .distinct()
+        )
+        referenced_ids = {row[0] for row in canvas_ep_ids_q.all()}
+
+        orphan_endpoints = (
+            db.query(ConnectorEndpoint)
+            .filter(
+                ConnectorEndpoint.connector_id == connector_id,
+                ConnectorEndpoint.is_enabled == True,
+                ~ConnectorEndpoint.id.in_(referenced_ids) if referenced_ids else True,
+            )
+            .all()
+        )
+        for ep in orphan_endpoints:
+            mappings = db.query(FieldMapping).filter(FieldMapping.endpoint_id == ep.id).all()
+            mapped_targets = {m.target_field for m in mappings}
+            if not (mapped_targets & IDENTITY_ATTRIBUTES):
+                invalid_endpoints.append({"id": ep.id, "name": ep.name})
 
     is_valid = len(invalid_endpoints) == 0
     return is_valid, invalid_endpoints

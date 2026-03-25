@@ -322,6 +322,7 @@ def trigger_connector_run(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _user=Depends(require_role("admin", "operator")),
+    canvas_id: Optional[str] = Query(None, description="Optional canvas ID for single-canvas sync"),
 ):
     connector = db.query(Connector).filter(Connector.id == connector_id).first()
     if not connector:
@@ -329,6 +330,21 @@ def trigger_connector_run(
             status_code=404,
             detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
         )
+
+    # Guard: validate canvas if provided
+    if canvas_id:
+        from app.models.canvas import Canvas
+        canvas = db.query(Canvas).filter_by(id=canvas_id, connector_id=connector_id).first()
+        if not canvas:
+            raise HTTPException(
+                status_code=404,
+                detail=make_error("CANVAS_NOT_FOUND", "Canvas not found", {"canvas_id": canvas_id}),
+            )
+        if not canvas.is_enabled:
+            raise HTTPException(
+                status_code=400,
+                detail=make_error("CANVAS_DISABLED", "Canvas is disabled", {"canvas_id": canvas_id}),
+            )
 
     # Guard: no enabled endpoints
     enabled_count = (
@@ -349,8 +365,8 @@ def trigger_connector_run(
             ),
         )
 
-    # Guard: CONN-02 endpoint mapping validity
-    is_valid, invalid_endpoints = validate_endpoint_mappings(connector_id, db)
+    # Guard: CONN-02 endpoint mapping validity (canvas-aware)
+    is_valid, invalid_endpoints = validate_endpoint_mappings(connector_id, db, canvas_id=canvas_id)
     if not is_valid:
         connector.is_valid_mappings = False
         db.commit()
@@ -381,5 +397,5 @@ def trigger_connector_run(
         )
 
     run = create_run(connector_id)
-    background_tasks.add_task(run_ingestion, run.id)
+    background_tasks.add_task(run_ingestion, run.id, canvas_id)
     return {"run_id": run.id, "status": RunStatus.running.value}

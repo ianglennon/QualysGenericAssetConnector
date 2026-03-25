@@ -105,6 +105,124 @@ function renderPage() {
   )
 }
 
+// ---------------------------------------------------------------------------
+// MC-12: Canvas-grouped run detail logs with section headers
+// ---------------------------------------------------------------------------
+
+describe('RunDetailPage - MC-12: Canvas-grouped endpoint logs', () => {
+  it('groups endpoint logs by canvas_name with h4 section headers', () => {
+    const canvasLog1 = {
+      ...baseLog,
+      id: 'clog-1',
+      canvas_id: 'canvas-a',
+      canvas_name: 'Alpha Canvas',
+      endpoint_name: 'Alpha Endpoint',
+      failure_stage: null,
+      http_request: null,
+      http_response: null,
+    }
+    const canvasLog2 = {
+      ...baseLog,
+      id: 'clog-2',
+      canvas_id: 'canvas-b',
+      canvas_name: 'Beta Canvas',
+      endpoint_name: 'Beta Endpoint',
+      failure_stage: null,
+      http_request: null,
+      http_response: null,
+    }
+
+    mockUseRun.mockReturnValue({
+      data: makeMockRun([canvasLog1, canvasLog2]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    // Both canvas section headers should appear
+    expect(screen.getByText('Alpha Canvas')).toBeDefined()
+    expect(screen.getByText('Beta Canvas')).toBeDefined()
+  })
+
+  it('renders canvas section header as h4 element', () => {
+    const canvasLog = {
+      ...baseLog,
+      id: 'clog-h4',
+      canvas_id: 'canvas-x',
+      canvas_name: 'X Canvas',
+      failure_stage: null,
+      http_request: null,
+      http_response: null,
+    }
+
+    mockUseRun.mockReturnValue({
+      data: makeMockRun([canvasLog]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    const h4Elements = document.querySelectorAll('h4')
+    const canvasHeader = Array.from(h4Elements).find((el) => el.textContent === 'X Canvas')
+    expect(canvasHeader).toBeDefined()
+  })
+
+  it('renders flat logs without canvas group header when canvas_id is null', () => {
+    const flatLog = {
+      ...baseLog,
+      id: 'flat-log-1',
+      canvas_id: null,
+      canvas_name: null,
+      failure_stage: null,
+      http_request: null,
+      http_response: null,
+    }
+
+    mockUseRun.mockReturnValue({
+      data: makeMockRun([flatLog as any]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    // No canvas section headers — only the main "Endpoint Breakdown" heading
+    const h4Elements = document.querySelectorAll('h4')
+    // Should not have any canvas-name h4s (no canvasGroups)
+    expect(h4Elements.length).toBe(0)
+  })
+
+  it('shows Unassigned Endpoints header for flat logs when canvas logs also exist', () => {
+    const canvasLog = {
+      ...baseLog,
+      id: 'clog-mixed',
+      canvas_id: 'canvas-m',
+      canvas_name: 'My Canvas',
+      failure_stage: null,
+      http_request: null,
+      http_response: null,
+    }
+    const flatLog = {
+      ...baseLog,
+      id: 'flat-mixed',
+      canvas_id: null,
+      canvas_name: null,
+      failure_stage: null,
+      http_request: null,
+      http_response: null,
+    }
+
+    mockUseRun.mockReturnValue({
+      data: makeMockRun([canvasLog, flatLog as any]),
+      isLoading: false,
+    })
+
+    renderPage()
+
+    expect(screen.getByText('Unassigned Endpoints')).toBeDefined()
+    expect(screen.getByText('My Canvas')).toBeDefined()
+  })
+})
+
 describe('RunDetailPage - Stage Badge', () => {
   // Test 1 (UI-01): failure_stage="source_fetch" renders "Source Fetch" badge
   it('renders "Source Fetch" stage badge for source_fetch failure', () => {

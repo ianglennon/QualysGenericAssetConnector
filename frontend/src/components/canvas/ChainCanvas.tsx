@@ -11,6 +11,7 @@ import {
   ReactFlowProvider,
   type Connection,
   type Edge,
+  type EdgeChange,
   type Node,
   type OnConnectEnd,
 } from '@xyflow/react'
@@ -64,6 +65,21 @@ const nodeTypes = {
 const edgeTypes = {
   chain: ChainEdge,
   mapping: MappingEdge,
+}
+
+/** BFS to collect all descendant node IDs from chain edges */
+function getDescendantNodeIds(startNodeId: string, edges: Edge[]): string[] {
+  const descendants: string[] = []
+  const queue = [startNodeId]
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    const children = edges
+      .filter((e) => e.type === 'chain' && e.source === current)
+      .map((e) => e.target)
+    descendants.push(...children)
+    queue.push(...children)
+  }
+  return descendants
 }
 
 interface ChainCanvasProps {
@@ -122,6 +138,10 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
   const nodesRef = useRef(nodes)
   nodesRef.current = nodes
 
+  // Keep a ref to latest edges for cascade deletion lookups in callbacks
+  const edgesRef = useRef(edges)
+  edgesRef.current = edges
+
   // Context menu state
   const [contextMenuOpen, setContextMenuOpen] = useState(false)
   const [dropState, setDropState] = useState<{
@@ -134,8 +154,13 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
   // Save state
   const [isSaving, setIsSaving] = useState(false)
 
-  // Delete confirmation dialog state
-  const [deleteTarget, setDeleteTarget] = useState<{ nodeId: string; name: string } | null>(null)
+  // Delete confirmation dialog state (with cascade info)
+  const [deleteTarget, setDeleteTarget] = useState<{
+    nodeId: string
+    name: string
+    descendantIds: string[]
+    descendantNames: string[]
+  } | null>(null)
 
   // Track initialization
   const [initialized, setInitialized] = useState(false)
@@ -458,7 +483,17 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
               }
             },
             onDelete: () => {
-              setDeleteTarget({ nodeId: n.id, name: (n.data as EndpointNodeData).name || 'Untitled' })
+              const descendantIds = getDescendantNodeIds(n.id, edgesRef.current)
+              const descendantNames = descendantIds.map((did) => {
+                const dNode = nodesRef.current.find((nd) => nd.id === did)
+                return dNode ? (dNode.data as EndpointNodeData).name || 'Untitled' : 'Unknown'
+              })
+              setDeleteTarget({
+                nodeId: n.id,
+                name: (n.data as EndpointNodeData).name || 'Untitled',
+                descendantIds,
+                descendantNames,
+              })
             },
             onMaxConcurrencyChange: (value: number) => {
               setNodes((prev) =>
@@ -799,14 +834,64 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
     toast,
   ])
 
-  // Delete endpoint (IC-07)
+  // Delete endpoint with cascade (IC-07, D-05, D-06)
   const handleDeleteEndpoint = useCallback(
     (nodeId: string) => {
-      setNodes((nds) => nds.filter((n) => n.id !== nodeId))
-      setEdges((eds) => eds.filter((e) => e.source !== nodeId && e.target !== nodeId))
+      const descendantIds = deleteTarget?.descendantIds ?? getDescendantNodeIds(nodeId, edges)
+      const allIdsToRemove = new Set([nodeId, ...descendantIds])
+      setNodes((nds) => nds.filter((n) => !allIdsToRemove.has(n.id)))
+      setEdges((eds) => eds.filter((e) => !allIdsToRemove.has(e.source) && !allIdsToRemove.has(e.target)))
       setDeleteTarget(null)
     },
-    [setNodes, setEdges],
+    [setNodes, setEdges, edges, deleteTarget],
+  )
+
+  // Intercept edge changes to prevent silent chain edge removal (D-05, D-06)
+  const handleEdgesChange = useCallback(
+    (changes: EdgeChange<Edge>[]) => {
+      // Intercept removal of chain edges -- must cascade
+      const chainRemovals = changes.filter(
+        (c) => c.type === 'remove' && edges.find((e) => e.id === c.id && e.type === 'chain'),
+      )
+      if (chainRemovals.length > 0) {
+        // Find the child node (target of the chain edge) and trigger cascade confirmation
+        const removedEdge = edges.find(
+          (e) => e.id === (chainRemovals[0] as { type: 'remove'; id: string }).id,
+        )
+        if (removedEdge) {
+          const childNode = nodes.find((n) => n.id === removedEdge.target)
+          const childName = childNode
+            ? (childNode.data as EndpointNodeData).name || 'Untitled'
+            : 'Unknown'
+          const allDescendantIds = [
+            removedEdge.target,
+            ...getDescendantNodeIds(removedEdge.target, edges),
+          ]
+          const allDescendantNames = allDescendantIds.map((did) => {
+            const dNode = nodes.find((nd) => nd.id === did)
+            return dNode ? (dNode.data as EndpointNodeData).name || 'Untitled' : 'Unknown'
+          })
+          setDeleteTarget({
+            nodeId: removedEdge.target,
+            name: childName,
+            descendantIds: allDescendantIds.slice(1),
+            descendantNames: allDescendantNames.slice(1),
+          })
+        }
+        // Filter out chain edge removals -- they'll be applied after confirmation
+        const nonChainChanges = changes.filter(
+          (c) =>
+            !(c.type === 'remove' && edges.find((e) => e.id === c.id && e.type === 'chain')),
+        )
+        if (nonChainChanges.length > 0) {
+          onEdgesChange(nonChainChanges)
+        }
+        return
+      }
+      // Non-chain edge changes pass through normally
+      onEdgesChange(changes)
+    },
+    [edges, nodes, onEdgesChange],
   )
 
   // Endpoint nodes for empty state check
@@ -862,7 +947,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
           nodes={nodes}
           edges={edges}
           onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
+          onEdgesChange={handleEdgesChange}
           onConnect={onConnect}
           onConnectEnd={onConnectEnd}
           isValidConnection={isValidConnection}
@@ -884,25 +969,40 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
         />
       </div>
 
-      {/* Delete confirmation dialog (IC-07) */}
+      {/* Delete confirmation dialog with cascade support (IC-07, D-05, D-06) */}
       <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete endpoint</DialogTitle>
+            <DialogTitle>
+              {deleteTarget && deleteTarget.descendantIds.length > 0
+                ? 'Delete endpoint and descendants?'
+                : 'Delete endpoint'}
+            </DialogTitle>
             <DialogDescription>
-              Delete endpoint &apos;{deleteTarget?.name}&apos;? This removes it from the canvas and
-              any chain connections. The base endpoint definition is preserved.
+              {deleteTarget && deleteTarget.descendantIds.length > 0
+                ? `This will remove ${deleteTarget.name} and ${deleteTarget.descendantIds.length} descendant endpoint(s) from this canvas. Discovered fields and mappings for these endpoints will be lost.`
+                : `Delete endpoint '${deleteTarget?.name}'? This removes it from the canvas and any chain connections. The base endpoint definition is preserved.`}
             </DialogDescription>
           </DialogHeader>
+          {deleteTarget && deleteTarget.descendantNames.length > 0 && (
+            <div className="text-sm text-muted-foreground px-1">
+              <p className="font-medium mb-1">Affected endpoints:</p>
+              <ul className="list-disc pl-4 space-y-0.5">
+                {deleteTarget.descendantNames.map((name, i) => (
+                  <li key={i}>{name}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteTarget(null)}>
-              Cancel
+              {deleteTarget && deleteTarget.descendantIds.length > 0 ? 'Keep endpoints' : 'Cancel'}
             </Button>
             <Button
               variant="destructive"
               onClick={() => deleteTarget && handleDeleteEndpoint(deleteTarget.nodeId)}
             >
-              Delete
+              {deleteTarget && deleteTarget.descendantIds.length > 0 ? 'Delete all' : 'Delete'}
             </Button>
           </DialogFooter>
         </DialogContent>

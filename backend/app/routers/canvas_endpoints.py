@@ -27,7 +27,7 @@ from app.schemas.canvas_endpoint import (
 from app.schemas.field_mapping import DiscoverResponse
 from app.schemas.run_history import DryRunResponse
 from app.services import source_client as _source_client
-from app.services.template_resolver import resolve_path, resolve_path_with_values, TemplateResolutionError
+from app.services.template_resolver import resolve_path, TemplateResolutionError
 from app.services.fan_out_executor import execute_tree, _build_tree, _merge_parent_context
 from app.services.ingestion_service import _build_mapping_rules
 from app.services.transform_engine import apply_mappings
@@ -161,6 +161,9 @@ async def discover_canvas_endpoint_fields(
     parent records per level, merges child records with _parent.* prefix,
     and returns the unified field list.
     """
+    import logging
+    _log = logging.getLogger("canvas_discovery")
+    _log.setLevel(logging.DEBUG)
     canvas = _get_canvas_or_404(db, connector_id, canvas_id)
 
     # Load connector
@@ -206,6 +209,12 @@ async def discover_canvas_endpoint_fields(
         current = ce_map.get(current.parent_ref_id)
     chain.reverse()  # Now ordered: root -> ... -> target
 
+    _log.info("DISCOVERY chain: %d levels", len(chain))
+    for i, ce in enumerate(chain):
+        ep = ep_map.get(ce.endpoint_id)
+        _log.info("  Level %d: ce_id=%s ep_path=%s var_extractions=%s data_root=%s parent_ref=%s",
+                  i, ce.id, ep.path if ep else "N/A", ce.variable_extractions, ep.data_root if ep else "N/A", ce.parent_ref_id)
+
     if not chain:
         return DiscoverResponse(fields=[], record_count=0)
 
@@ -233,11 +242,16 @@ async def discover_canvas_endpoint_fields(
             )
 
         root_payload = root_fetch.response.json()
+        _log.info("ROOT fetch status=%s payload_type=%s payload_keys=%s",
+                  root_fetch.response.status_code, type(root_payload).__name__,
+                  list(root_payload.keys()) if isinstance(root_payload, dict) else "N/A")
         root_records = _source_client._extract_records_with_root(root_payload, root_ep.data_root)
+        _log.info("ROOT extracted %d records (data_root=%s)", len(root_records), root_ep.data_root)
         if not root_records and isinstance(root_payload, dict):
             root_records = [root_payload]
 
         if not root_records:
+            _log.info("ROOT: no records, returning empty")
             return DiscoverResponse(fields=[], record_count=0)
 
         # If target IS the root, return flat discovery
@@ -250,10 +264,6 @@ async def discover_canvas_endpoint_fields(
         # Start with root records as parent records
         sampled_parents = root_records[:DISCOVERY_SAMPLE_SIZE]  # D-11
         parent_context: dict = {}
-        # Accumulate resolved variable values across levels so grandchild paths
-        # can use variables resolved at ancestor levels (e.g. {node} resolved at
-        # level 1 is inherited by level 2 which also needs {node} + {vmid})
-        inherited_vars: dict[str, str] = {}
         all_merged_child_records: list[dict] = []
 
         for level_idx in range(1, len(chain)):
@@ -263,21 +273,25 @@ async def discover_canvas_endpoint_fields(
                 break
 
             child_records_this_level: list[dict] = []
-            level_resolved_vars: dict[str, str] = {}
 
-            for parent_record in sampled_parents:
+            _log.info("LEVEL %d: processing %d parent samples", level_idx, len(sampled_parents))
+
+            for pi, parent_record in enumerate(sampled_parents):
+                _log.info("  PARENT %d/%d keys=%s", pi, len(sampled_parents), list(parent_record.keys())[:10])
                 # Build ancestor context for merging
                 current_ancestor = _merge_parent_context(parent_record, parent_context)
 
-                # Resolve child URL template, passing inherited vars from ancestor levels
+                # Resolve child URL template — resolve_path auto-resolves
+                # ancestor variables via _parent.* keys in the merged record
                 try:
-                    resolved, level_resolved_vars = resolve_path_with_values(
+                    resolved = resolve_path(
                         current_ep.path,
                         parent_record,
                         current_ce.variable_extractions or {},
-                        inherited_values=inherited_vars,
                     )
-                except TemplateResolutionError:
+                    _log.info("  RESOLVED path=%s", resolved)
+                except TemplateResolutionError as te:
+                    _log.warning("  TEMPLATE ERROR: %s", te)
                     continue  # Skip this parent sample, try others
 
                 child_url = connector.base_url.rstrip("/") + "/" + resolved.lstrip("/")
@@ -287,28 +301,35 @@ async def discover_canvas_endpoint_fields(
                     child_fetch = await _source_client._fetch_with_retries(
                         client, child_url, headers, None, retry_limit=1,
                     )
-                except Exception:
+                except Exception as exc:
+                    _log.warning("  FETCH EXCEPTION: %s", exc)
                     continue  # Skip this parent sample
 
                 if child_fetch.response is None:
+                    _log.warning("  FETCH returned None (source unreachable)")
                     continue
 
+                _log.info("  FETCH status=%s", child_fetch.response.status_code)
                 child_payload = child_fetch.response.json()
+                _log.info("  CHILD payload_type=%s keys=%s",
+                          type(child_payload).__name__,
+                          list(child_payload.keys()) if isinstance(child_payload, dict) else "N/A")
                 child_recs = _source_client._extract_records_with_root(child_payload, current_ep.data_root)
+                _log.info("  CHILD extracted %d records (data_root=%s)", len(child_recs), current_ep.data_root)
                 if not child_recs and isinstance(child_payload, dict):
                     child_recs = [child_payload]
+                    _log.info("  CHILD fallback: using payload as single record")
 
                 # Merge with _parent.* prefix (D-09)
                 for child_rec in child_recs:
                     merged = _merge_parent_context(child_rec, current_ancestor)
                     child_records_this_level.append(merged)
 
+            _log.info("LEVEL %d: collected %d child records", level_idx, len(child_records_this_level))
             if not child_records_this_level:
                 # All parent samples failed at this level
+                _log.warning("LEVEL %d: ALL parent samples failed, returning empty", level_idx)
                 return DiscoverResponse(fields=[], record_count=0)
-
-            # Carry forward resolved variables for deeper levels
-            inherited_vars = level_resolved_vars
 
             # If this is the target level, collect for field discovery
             if level_idx == len(chain) - 1:

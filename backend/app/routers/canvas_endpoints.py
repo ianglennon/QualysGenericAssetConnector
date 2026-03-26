@@ -233,7 +233,7 @@ async def discover_canvas_endpoint_fields(
             )
 
         root_payload = root_fetch.response.json()
-        root_records = _source_client._extract_records(root_payload)
+        root_records = _source_client._extract_records_with_root(root_payload, root_ep.data_root)
         if not root_records and isinstance(root_payload, dict):
             root_records = [root_payload]
 
@@ -288,7 +288,7 @@ async def discover_canvas_endpoint_fields(
                     continue
 
                 child_payload = child_fetch.response.json()
-                child_recs = _source_client._extract_records(child_payload)
+                child_recs = _source_client._extract_records_with_root(child_payload, current_ep.data_root)
                 if not child_recs and isinstance(child_payload, dict):
                     child_recs = [child_payload]
 

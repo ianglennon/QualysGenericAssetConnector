@@ -35,9 +35,18 @@ def extract_variables(path: str) -> list[str]:
 def _resolve_dot_path(record: dict, dot_path: str) -> object:
     """Traverse nested dict using dot-separated path segments.
 
+    First checks for a literal flat key match (e.g. "_parent.node" as a single
+    key in the dict), then falls back to nested traversal. This supports merged
+    parent context records where _merge_parent_context creates flat keys with
+    dots like "_parent.node".
+
     Raises KeyError if a segment is not found.
     Raises TypeError if an intermediate value is not a dict.
     """
+    # Fast path: literal flat key match (supports _parent.* merged keys)
+    if dot_path in record:
+        return record[dot_path]
+
     current = record
     for segment in dot_path.split("."):
         if not isinstance(current, dict):

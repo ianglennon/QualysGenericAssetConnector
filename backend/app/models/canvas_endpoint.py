@@ -27,6 +27,7 @@ class CanvasEndpoint(Base):
     field_role: Mapped[str] = mapped_column(String, nullable=False, default="data")
     variable_extractions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     max_concurrency: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
+    exclusion_rules: Mapped[list | None] = mapped_column(JSON, nullable=True)
     tree_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

@@ -30,6 +30,7 @@ class EndpointRunLogResponse(BaseModel):
     records_fetched: int
     records_submitted: int
     records_failed: int
+    records_filtered: int = 0
     status: str
     error_message: Optional[str]
     failure_stage: Optional[str] = None

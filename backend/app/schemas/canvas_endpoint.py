@@ -1,7 +1,7 @@
 """Pydantic schemas for CanvasEndpoint CRUD API."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, field_validator
 
@@ -15,6 +15,7 @@ class CanvasEndpointCreate(BaseModel):
     variable_extractions: Optional[dict[str, str]] = None
     max_concurrency: int = 5
     tree_order: int = 0
+    exclusion_rules: Optional[list[dict[str, Any]]] = None
 
     @field_validator("field_role")
     @classmethod
@@ -42,6 +43,7 @@ class CanvasEndpointUpdate(BaseModel):
     variable_extractions: Optional[dict[str, str]] = None
     max_concurrency: Optional[int] = None
     tree_order: Optional[int] = None
+    exclusion_rules: Optional[list[dict[str, Any]]] = None
 
     @field_validator("field_role")
     @classmethod
@@ -69,6 +71,7 @@ class CanvasEndpointResponse(BaseModel):
     variable_extractions: Optional[dict[str, str]] = None
     max_concurrency: int
     tree_order: int
+    exclusion_rules: Optional[list[dict[str, Any]]] = None
     created_at: datetime
     updated_at: datetime
 

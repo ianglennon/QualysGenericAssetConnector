@@ -87,6 +87,11 @@ export function DryRunResultsPage() {
             {result.total_records} record{result.total_records !== 1 ? 's' : ''}
           </p>
         )}
+        {(result.records_filtered ?? 0) > 0 && (
+          <p className="text-sm text-muted-foreground mt-1">
+            {result.records_filtered} record{result.records_filtered !== 1 ? 's' : ''} filtered by exclusion rules
+          </p>
+        )}
       </div>
 
       <div className="border rounded-lg overflow-auto">

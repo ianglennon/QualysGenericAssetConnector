@@ -193,7 +193,7 @@ export default function RunDetailPage() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    <div className="grid grid-cols-3 gap-4 p-3 border rounded-lg bg-muted/50">
+                    <div className={`grid ${(log.records_filtered ?? 0) > 0 ? 'grid-cols-4' : 'grid-cols-3'} gap-4 p-3 border rounded-lg bg-muted/50`}>
                       <div className="text-center">
                         <div className="text-xl font-bold">{log.records_fetched}</div>
                         <div className="text-xs text-muted-foreground">Records Fetched</div>
@@ -208,6 +208,14 @@ export default function RunDetailPage() {
                         </div>
                         <div className="text-xs text-muted-foreground">Records Failed</div>
                       </div>
+                      {(log.records_filtered ?? 0) > 0 && (
+                        <div className="text-center">
+                          <div className="text-xl font-bold text-muted-foreground">
+                            {log.records_filtered}
+                          </div>
+                          <div className="text-xs text-muted-foreground">Filtered</div>
+                        </div>
+                      )}
                     </div>
                     {/* D-02: Fan-out summary line */}
                     {log.child_requests_total != null && log.child_requests_total > 0 && (

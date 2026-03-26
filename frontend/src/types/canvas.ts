@@ -27,6 +27,13 @@ export interface CanvasConditionRule {
   value: string         // output when condition matches
 }
 
+// Exclusion rule for canvas endpoint filtering (Phase 47)
+export interface ExclusionRule {
+  source_field: string
+  operator: 'equals' | 'not_equals' | 'contains' | 'starts_with' | 'ends_with' | 'regex' | 'in_list'
+  value: string
+}
+
 // GET /connectors/{id}/fields/discover response
 export interface FieldDiscoveryItem {
   path: string        // e.g. "address.city"
@@ -126,6 +133,7 @@ export interface CanvasEndpointResponse {
   variable_extractions: Record<string, string> | null
   max_concurrency: number
   tree_order: number
+  exclusion_rules: ExclusionRule[] | null
   created_at: string
   updated_at: string
 }
@@ -138,6 +146,7 @@ export interface CanvasEndpointCreate {
   variable_extractions?: Record<string, string> | null
   max_concurrency?: number
   tree_order?: number
+  exclusion_rules?: ExclusionRule[] | null
 }
 
 // Canvas-endpoint update payload (mirrors backend CanvasEndpointUpdate)
@@ -147,6 +156,7 @@ export interface CanvasEndpointUpdate {
   variable_extractions?: Record<string, string> | null
   max_concurrency?: number | null
   tree_order?: number | null
+  exclusion_rules?: ExclusionRule[] | null
 }
 
 // React Flow node data for EndpointNode custom node (per D-02, D-03, D-14)
@@ -161,6 +171,7 @@ export interface EndpointNodeData extends Record<string, unknown> {
   maxConcurrency: number
   isDiscovering: boolean
   discoveryError: string | null
+  exclusionRules: ExclusionRule[]
 }
 
 // React Flow edge data for ChainEdge custom edge

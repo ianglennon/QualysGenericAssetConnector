@@ -112,12 +112,14 @@ export interface EndpointRunLog {
   child_requests_failed?: number | null
   child_requests_skipped?: number | null
   depth?: number | null
+  records_filtered?: number
 }
 
 export interface DryRunResult {
   records: Record<string, unknown>[]
   total_records: number
   capped: boolean
+  records_filtered?: number
 }
 
 // Connector Types

@@ -1,11 +1,13 @@
-import { useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useUpdateNodeInternals, useNodeId, Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
-import { Trash2, Loader2 } from 'lucide-react'
+import { Trash2, Loader2, Filter } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { TemplateVariableHint } from './TemplateVariableHint'
-import type { EndpointNodeData, FieldDiscoveryItem } from '@/types/canvas'
+import { ExclusionRulesDialog } from './ExclusionRulesDialog'
+import type { EndpointNodeData, FieldDiscoveryItem, ExclusionRule } from '@/types/canvas'
 
 const TYPE_BADGE: Record<string, string> = {
   string: 'bg-blue-100 text-blue-700',
@@ -49,6 +51,7 @@ interface EndpointNodeCallbacks {
   onDiscoverFields?: () => void
   onDelete?: () => void
   onMaxConcurrencyChange?: (value: number) => void
+  onExclusionRulesChange?: (rules: ExclusionRule[]) => void
 }
 
 type EndpointNodeFullData = EndpointNodeData & EndpointNodeCallbacks
@@ -56,6 +59,7 @@ type EndpointNodeFullData = EndpointNodeData & EndpointNodeCallbacks
 export function EndpointNode({ data, selected }: NodeProps & { data: EndpointNodeFullData }) {
   const nodeId = useNodeId() ?? 'endpoint-node'
   const updateNodeInternals = useUpdateNodeInternals()
+  const [filterDialogOpen, setFilterDialogOpen] = useState(false)
 
   // Re-register handle positions when fields change
   useEffect(() => {
@@ -138,6 +142,30 @@ export function EndpointNode({ data, selected }: NodeProps & { data: EndpointNod
           <p className="text-xs text-destructive">{data.discoveryError}</p>
         </div>
       )}
+
+      {/* Filter section (D-07, D-09) */}
+      <div className="flex items-center gap-2 px-3 py-2">
+        <button
+          className="flex items-center justify-center h-8 w-8 min-h-[48px] min-w-[48px] rounded text-muted-foreground hover:text-foreground hover:bg-muted"
+          aria-label="Edit exclusion rules"
+          onClick={() => setFilterDialogOpen(true)}
+        >
+          <Filter className="h-4 w-4" />
+        </button>
+        {(data.exclusionRules?.length ?? 0) > 0 && (
+          <Badge variant="secondary">
+            {data.exclusionRules.length} {data.exclusionRules.length === 1 ? 'filter' : 'filters'}
+          </Badge>
+        )}
+      </div>
+
+      <ExclusionRulesDialog
+        open={filterDialogOpen}
+        onOpenChange={setFilterDialogOpen}
+        rules={data.exclusionRules ?? []}
+        onSave={(rules) => data.onExclusionRulesChange?.(rules)}
+        fieldSuggestions={data.fields.map((f: FieldDiscoveryItem) => f.path)}
+      />
 
       {/* Field list */}
       {data.fields.length > 0 && (

@@ -54,6 +54,7 @@ import type {
   MappingEdgeData,
   DiscoverResponse,
   TargetPanelData,
+  ExclusionRule,
 } from '@/types/canvas'
 
 // Module-level constants prevent React Flow re-render flickering (Pitfall 1)
@@ -191,6 +192,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
           maxConcurrency: ce.max_concurrency,
           isDiscovering: false,
           discoveryError: null,
+          exclusionRules: ce.exclusion_rules ?? [],
         } satisfies EndpointNodeData,
       }
     })
@@ -502,6 +504,13 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
                 ),
               )
             },
+            onExclusionRulesChange: (rules: ExclusionRule[]) => {
+              setNodes((prev) =>
+                prev.map((nd) =>
+                  nd.id === n.id ? { ...nd, data: { ...nd.data, exclusionRules: rules } } : nd,
+                ),
+              )
+            },
           },
         }
       }),
@@ -593,6 +602,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
         maxConcurrency: 5,
         isDiscovering: false,
         discoveryError: null,
+        exclusionRules: [],
       } satisfies EndpointNodeData,
     }
 
@@ -644,6 +654,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
         maxConcurrency: 5,
         isDiscovering: false,
         discoveryError: null,
+        exclusionRules: [],
       } satisfies EndpointNodeData,
     }
     setNodes((nds) => [...nds, newNode])
@@ -742,6 +753,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
               parent_ref_id: resolvedParentRefId,
               variable_extractions: d.variableExtractions,
               max_concurrency: d.maxConcurrency,
+              exclusion_rules: d.exclusionRules.length > 0 ? d.exclusionRules : null,
             },
           })
           setNodes((prev) =>
@@ -777,6 +789,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
               parent_ref_id: resolvedParentRefId,
               variable_extractions: d.variableExtractions,
               max_concurrency: d.maxConcurrency,
+              exclusion_rules: d.exclusionRules.length > 0 ? d.exclusionRules : null,
             },
           })
         }

@@ -173,25 +173,36 @@ export function EndpointNode({ data, selected }: NodeProps & { data: EndpointNod
           className="nowheel overflow-y-auto overflow-x-hidden flex-1 border-t"
           onScroll={handleScroll}
         >
-          {data.fields.map((field: FieldDiscoveryItem) => (
-            <div
-              key={field.path}
-              className="relative flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/30"
-            >
-              <span
-                className={`px-1 rounded text-[10px] font-medium ${typeBadgeClass(field.type)}`}
+          {data.fields.map((field: FieldDiscoveryItem) => {
+            const isArrayChild = field.is_array_child === true
+            const isArrayParent = field.is_array_parent === true
+            // For array children, show only the leaf after the last []
+            const displayPath = isArrayChild
+              ? '.' + field.path.split('[].').pop()
+              : field.path
+
+            return (
+              <div
+                key={field.path}
+                className={`relative flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted/30 ${
+                  isArrayChild ? 'pl-4 border-l-2 border-orange-300 dark:border-orange-500' : ''
+                }`}
               >
-                {field.type}
-              </span>
-              <span className="flex-1 font-mono truncate text-sm">{field.path}</span>
-              <Handle
-                type="source"
-                position={Position.Right}
-                id={field.path}
-                style={SOURCE_HANDLE_STYLE}
-              />
-            </div>
-          ))}
+                <span
+                  className={`px-1 rounded text-[10px] font-medium ${typeBadgeClass(isArrayParent ? 'array' : field.type)}`}
+                >
+                  {isArrayParent ? 'array' : field.type}
+                </span>
+                <span className="flex-1 font-mono truncate text-sm">{displayPath}</span>
+                <Handle
+                  type="source"
+                  position={Position.Right}
+                  id={field.path}
+                  style={SOURCE_HANDLE_STYLE}
+                />
+              </div>
+            )
+          })}
         </div>
       )}
 

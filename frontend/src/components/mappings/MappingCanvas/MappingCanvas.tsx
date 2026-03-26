@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { useQualysSchema } from '@/hooks/queries/useQualysSchema'
 import { useEndpointMappings } from '@/hooks/queries/useEndpointMappings'
 import { useEndpointDiscoverFields } from '@/hooks/queries/useEndpointDiscover'
+import { useToast } from '@/hooks/use-toast'
 import { SourcePanelNode } from './SourcePanelNode'
 import { TargetPanelNode } from './TargetPanelNode'
 import { MappingEdge } from './MappingEdge'
@@ -80,6 +81,7 @@ interface MappingCanvasProps {
 }
 
 export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: MappingCanvasProps) {
+  const { toast } = useToast()
   const { data: schemaData, isLoading: loadingSchema } = useQualysSchema()
   const { data: savedMappings, isLoading: loadingMappings, isError: mappingsError } = useEndpointMappings(connectorId, endpointId)
   const discoverFields = useEndpointDiscoverFields()
@@ -259,7 +261,15 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
   function handleDiscoverClick() {
     discoverFields.mutate(
       { connectorId, endpointId },
-      { onSuccess: (data) => setDiscoveredFields(data) }
+      {
+        onSuccess: (data) => {
+          setDiscoveredFields(data)
+          // D-04: Toast notification when auto-detect finds a data root
+          if (data.auto_detected_data_root) {
+            toast({ title: `Auto-detected data root: ${data.auto_detected_data_root}` })
+          }
+        }
+      }
     )
   }
 

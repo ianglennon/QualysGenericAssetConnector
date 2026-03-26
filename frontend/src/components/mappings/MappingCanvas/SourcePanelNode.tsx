@@ -123,47 +123,63 @@ export function SourcePanelNode({ data }: NodeProps & { data: SourcePanelData })
                     (no connections yet)
                   </p>
                 ) : (
-                  linked.map(field => (
-                    <div
-                      key={field.path}
-                      className="relative flex items-center gap-2 px-3 py-2 text-xs border-l-2 border-primary/40 bg-primary/5"
-                    >
-                      <span className="flex-1 font-mono truncate">{field.path}</span>
-                      <span className={`px-1 rounded text-[10px] font-medium ${typeBadgeClass(field.type)}`}>
-                        {field.type}
-                      </span>
-                      <Handle
-                        type="source"
-                        position={Position.Right}
-                        id={field.path}
-                        isConnectable={false}
-                        style={SOURCE_HANDLE_STYLE}
-                      />
-                    </div>
-                  ))
+                  linked.map(field => {
+                    const displayPath = field.is_array_child
+                      ? '.' + field.path.split('[].').pop()
+                      : field.path
+                    return (
+                      <div
+                        key={field.path}
+                        className={`relative flex items-center gap-2 px-3 py-2 text-xs border-l-2 ${
+                          field.is_array_child
+                            ? 'pl-4 border-orange-300 dark:border-orange-500 bg-primary/5'
+                            : 'border-primary/40 bg-primary/5'
+                        }`}
+                      >
+                        <span className="flex-1 font-mono truncate">{displayPath}</span>
+                        <span className={`px-1 rounded text-[10px] font-medium ${typeBadgeClass(field.type)}`}>
+                          {field.type}
+                        </span>
+                        <Handle
+                          type="source"
+                          position={Position.Right}
+                          id={field.path}
+                          isConnectable={false}
+                          style={SOURCE_HANDLE_STYLE}
+                        />
+                      </div>
+                    )
+                  })
                 )}
               </div>
 
               <Separator label={isAncestor ? `——— ${depthLabel}: Unlinked (${unlinked.length}) ———` : `——— Unlinked (${unlinked.length}) ———`} />
 
-              {unlinked.map(field => (
-                <div
-                  key={field.path}
-                  className="relative flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted/30"
-                >
-                  <span className="flex-1 font-mono truncate">{field.path}</span>
-                  <span className={`px-1 rounded text-[10px] font-medium ${typeBadgeClass(field.type)}`}>
-                    {field.type}
-                  </span>
-                  <Handle
-                    type="source"
-                    position={Position.Right}
-                    id={field.path}
-                    isConnectable={true}
-                    style={SOURCE_HANDLE_STYLE}
-                  />
-                </div>
-              ))}
+              {unlinked.map(field => {
+                const displayPath = field.is_array_child
+                  ? '.' + field.path.split('[].').pop()
+                  : field.path
+                return (
+                  <div
+                    key={field.path}
+                    className={`relative flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted/30 ${
+                      field.is_array_child ? 'pl-4 border-l-2 border-orange-300 dark:border-orange-500' : ''
+                    }`}
+                  >
+                    <span className="flex-1 font-mono truncate">{displayPath}</span>
+                    <span className={`px-1 rounded text-[10px] font-medium ${typeBadgeClass(field.type)}`}>
+                      {field.type}
+                    </span>
+                    <Handle
+                      type="source"
+                      position={Position.Right}
+                      id={field.path}
+                      isConnectable={true}
+                      style={SOURCE_HANDLE_STYLE}
+                    />
+                  </div>
+                )
+              })}
             </>
           )
 

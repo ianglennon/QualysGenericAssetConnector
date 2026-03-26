@@ -27,7 +27,7 @@ export function MappingEdge({
 }: EdgeProps<MappingEdgeType>) {
   const { deleteElements, setEdges, getEdge } = useReactFlow()
   const [hovered, setHovered] = useState(false)
-  const [editorOpen, setEditorOpen] = useState<'static' | 'conditional' | null>(null)
+  const [editorOpen, setEditorOpen] = useState<'static' | 'conditional' | 'collect' | null>(null)
   const badgeRef = useRef<HTMLSpanElement>(null)
 
   const [edgePath, labelX, labelY] = getSmoothStepPath({

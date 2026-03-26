@@ -5,8 +5,8 @@ export interface ApiError {
 }
 
 // Field Mapping Types
-export type MappingType = 'direct' | 'static' | 'conditional'         // canvas-side short names
-export type MappingTypeAPI = 'direct_copy' | 'static_default' | 'conditional'  // API-side type strings
+export type MappingType = 'direct' | 'static' | 'conditional' | 'collect'         // canvas-side short names
+export type MappingTypeAPI = 'direct_copy' | 'static_default' | 'conditional' | 'collect'  // API-side type strings
 
 export interface ConditionRule {
   operator: 'equals' | 'not_equals' | 'contains' | 'starts_with' | 'ends_with' | 'regex' | 'in_list'

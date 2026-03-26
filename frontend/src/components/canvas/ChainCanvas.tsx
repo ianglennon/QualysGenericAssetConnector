@@ -246,6 +246,10 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
               `/connectors/${connectorId}/endpoints/${d.endpointId}/fields/discover`,
             )
             ;(node.data as EndpointNodeData).fields = discovered.fields
+            // D-04: Toast for auto-detected data root during initial load
+            if (discovered.auto_detected_data_root) {
+              toast({ title: `Auto-detected data root: ${discovered.auto_detected_data_root}` })
+            }
           } catch {
             // Non-critical — fields will be empty
           }
@@ -462,6 +466,10 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
                             : nd,
                         ),
                       )
+                      // D-04: Toast notification when auto-detect finds a data root
+                      if (data.auto_detected_data_root) {
+                        toast({ title: `Auto-detected data root: ${data.auto_detected_data_root}` })
+                      }
                     },
                     onError: (err) => {
                       setNodes((prev) =>

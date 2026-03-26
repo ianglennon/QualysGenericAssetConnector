@@ -63,6 +63,7 @@ export interface ConnectorEndpoint {
   name: string
   path: string
   pagination_config: Record<string, unknown> | null
+  data_root: string | null
   is_enabled: boolean
   display_order: number
   created_at: string
@@ -73,6 +74,7 @@ export interface EndpointCreate {
   name: string
   path: string
   pagination_config?: Record<string, unknown>
+  data_root?: string
   is_enabled?: boolean
   display_order?: number
 }

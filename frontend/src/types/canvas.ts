@@ -1,7 +1,7 @@
 // Canvas-side type (short names for display)
-export type MappingTypeUI = 'direct' | 'static' | 'conditional'
+export type MappingTypeUI = 'direct' | 'static' | 'conditional' | 'collect'
 // API-side type (matches backend schema exactly)
-export type MappingTypeAPI = 'direct_copy' | 'static_default' | 'conditional'
+export type MappingTypeAPI = 'direct_copy' | 'static_default' | 'conditional' | 'collect'
 // StaticValue type selector
 export type StaticValueType = 'string' | 'number' | 'boolean'
 
@@ -9,6 +9,7 @@ export type StaticValueType = 'string' | 'number' | 'boolean'
 export function canvasTypeToAPI(t: MappingTypeUI): MappingTypeAPI {
   if (t === 'direct') return 'direct_copy'
   if (t === 'static') return 'static_default'
+  if (t === 'collect') return 'collect'
   return 'conditional'
 }
 
@@ -16,6 +17,7 @@ export function apiTypeToCanvas(t: MappingTypeAPI | string): MappingTypeUI {
   if (t === 'direct_copy') return 'direct'
   if (t === 'static_default') return 'static'
   if (t === 'conditional') return 'conditional'
+  if (t === 'collect') return 'collect'
   return 'direct'  // safe fallback for unknown values
 }
 
@@ -34,16 +36,28 @@ export interface ExclusionRule {
   value: string
 }
 
+// Collect mapping configuration (Phase 48 — nested JSON unpacking)
+export interface CollectConfig {
+  array_path: string
+  extract_field?: string
+  filter?: { field: string; operator: string; value: string }
+  separator?: string
+}
+
 // GET /connectors/{id}/fields/discover response
 export interface FieldDiscoveryItem {
   path: string        // e.g. "address.city"
   type: string        // "string" | "number" | "boolean" | "array" | "null" | "object"
   sample_value: unknown
+  is_array_child?: boolean
+  parent_array_path?: string
+  is_array_parent?: boolean
 }
 
 export interface DiscoverResponse {
   fields: FieldDiscoveryItem[]
   record_count: number
+  auto_detected_data_root?: string | null
 }
 
 // GET /qualys/schema response
@@ -86,6 +100,7 @@ export interface MappingEdgeData extends Record<string, unknown> {
   valueType?: StaticValueType
   conditions?: CanvasConditionRule[]
   fallback?: string
+  collectConfig?: CollectConfig
 }
 
 // --- Chain Canvas types (Phase 42) ---

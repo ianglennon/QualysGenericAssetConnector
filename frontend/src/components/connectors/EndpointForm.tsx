@@ -26,6 +26,7 @@ import type { ConnectorEndpoint } from '@/types/api'
 const endpointSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   path: z.string().min(1, 'Path is required').startsWith('/', 'Path must start with /'),
+  data_root: z.string().optional(),
   pagination_strategy: z.enum(['none', 'cursor', 'offset', 'page_number', 'link_header']).default('none'),
   // Cursor fields
   cursor_param: z.string().optional(),
@@ -138,6 +139,7 @@ export function EndpointForm({ connectorId, endpoint, open, onOpenChange }: Endp
       reset({
         name: endpoint.name,
         path: endpoint.path,
+        data_root: endpoint.data_root || '',
         pagination_strategy: strategy,
         cursor_param: config.cursor_param as string | undefined,
         next_cursor_path: config.next_cursor_path as string | undefined,
@@ -167,6 +169,7 @@ export function EndpointForm({ connectorId, endpoint, open, onOpenChange }: Endp
     const payload = {
       name: values.name,
       path: values.path,
+      data_root: values.data_root || undefined,
       pagination_config: pagination_config ?? undefined,
     }
 
@@ -227,6 +230,19 @@ export function EndpointForm({ connectorId, endpoint, open, onOpenChange }: Endp
             {errors.path && (
               <p className="text-xs text-destructive">{errors.path.message}</p>
             )}
+          </div>
+
+          {/* Data Root (D-03) */}
+          <div className="space-y-1">
+            <Label htmlFor="ep-data-root">Data Root</Label>
+            <Input
+              id="ep-data-root"
+              placeholder="e.g., result, data.items"
+              {...register('data_root')}
+            />
+            <p className="text-xs text-muted-foreground">
+              JSON path to the array of records in the API response. Auto-detected during field discovery.
+            </p>
           </div>
 
           {/* Pagination strategy */}

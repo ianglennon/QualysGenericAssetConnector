@@ -545,6 +545,7 @@ def create_canvas_endpoint(
         field_role=payload.field_role,
         variable_extractions=payload.variable_extractions,
         max_concurrency=payload.max_concurrency,
+        exclusion_rules=payload.exclusion_rules,
         tree_order=payload.tree_order,
     )
     db.add(ref)

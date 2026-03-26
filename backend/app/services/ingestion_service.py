@@ -23,6 +23,8 @@ from app.services.transform_engine import apply_mappings
 from app.services.qualys_adapter import QualysAdapterError, QualysFailure, submit_batch, _decrypt_secret
 from app.services.connector_service import HTTPX_TIMEOUT
 from app.services.payload_capture import cleanup_old_payloads
+from app.services.exclusion_filter import apply_exclusion_rules
+from app.schemas.exclusion_rule import ExclusionRule
 
 QUALYS_BATCH_SIZE = 100
 
@@ -321,10 +323,23 @@ async def _run_canvas(
     db.add(root_log)
     logs.append(root_log)
 
+    # --- D-03: Filter root records BEFORE fan-out ---
+    rule_adapter = TypeAdapter(list[ExclusionRule])
+    root_rules_raw = root_ce.exclusion_rules or []
+    root_filtered = 0
+    if root_rules_raw:
+        root_rules = rule_adapter.validate_python(root_rules_raw)
+        filtered_root_records, root_filtered = apply_exclusion_rules(
+            source_result.records, root_rules
+        )
+        root_log.records_filtered = root_filtered
+    else:
+        filtered_root_records = source_result.records
+
     # Execute tree (fan-out children)
     fan_out_result = await execute_tree(
         canvas_endpoints=canvas_endpoints,
-        root_records=source_result.records,
+        root_records=filtered_root_records,
         connector=connector,
         client=client,
     )
@@ -363,6 +378,22 @@ async def _run_canvas(
         if not leaf_ep:
             continue
 
+        # --- D-10: Apply leaf exclusion rules to merged records ---
+        leaf_rules_raw = leaf_ce.exclusion_rules or []
+        leaf_filtered = 0
+        if leaf_rules_raw:
+            leaf_rules = rule_adapter.validate_python(leaf_rules_raw)
+            records_to_map, leaf_filtered = apply_exclusion_rules(
+                fan_out_result.merged_records, leaf_rules
+            )
+            # Update the leaf's log with filtered count
+            for log in logs:
+                if log.endpoint_id == leaf_ce.endpoint_id and log != root_log:
+                    log.records_filtered = leaf_filtered
+                    break
+        else:
+            records_to_map = fan_out_result.merged_records
+
         mappings = (
             db.query(FieldMapping)
             .filter(FieldMapping.endpoint_id == leaf_ep.id)
@@ -370,7 +401,7 @@ async def _run_canvas(
             .all()
         )
         mapping_rules = _build_mapping_rules(mappings)
-        transformed = [apply_mappings(rec, mapping_rules) for rec in fan_out_result.merged_records]
+        transformed = [apply_mappings(rec, mapping_rules) for rec in records_to_map]
 
         # Submit to Qualys in batches
         failures: list[QualysFailure] = []

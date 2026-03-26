@@ -13,7 +13,10 @@ from app.core.security import require_role
 from app.core.errors import make_error
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
+from app.models.canvas import Canvas
 from app.models.canvas_endpoint import CanvasEndpoint
+from app.models.field_mapping import FieldMapping
+from app.models.run_history import EndpointRunLog
 from app.schemas.endpoints import (
     EndpointCreate,
     EndpointUpdate,
@@ -159,6 +162,25 @@ def delete_endpoint(
             status_code=404,
             detail=make_error("ENDPOINT_NOT_FOUND", "Endpoint not found", {"endpoint_id": endpoint_id}),
         )
+
+    # -- 409 guard: block deletion when endpoint is assigned to any canvas --
+    canvas_refs = db.query(CanvasEndpoint).filter_by(endpoint_id=endpoint_id).all()
+    if canvas_refs:
+        canvas_ids = [ref.canvas_id for ref in canvas_refs]
+        canvases = db.query(Canvas).filter(Canvas.id.in_(canvas_ids)).all()
+        canvas_names = [c.name for c in canvases]
+        raise HTTPException(
+            status_code=409,
+            detail=make_error(
+                "ENDPOINT_IN_USE",
+                f"Cannot delete — endpoint is used in canvases: {', '.join(canvas_names)}. Remove it from those canvases first.",
+                {"canvas_names": canvas_names},
+            ),
+        )
+
+    # -- Explicit cleanup (belt-and-suspenders over CASCADE) --
+    db.query(EndpointRunLog).filter_by(endpoint_id=endpoint_id).delete(synchronize_session="fetch")
+    db.query(FieldMapping).filter_by(endpoint_id=endpoint_id).delete(synchronize_session="fetch")
     db.delete(endpoint)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

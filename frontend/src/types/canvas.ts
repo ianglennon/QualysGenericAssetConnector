@@ -1,14 +1,23 @@
 // Canvas-side type (short names for display)
-export type MappingTypeUI = 'direct' | 'static' | 'conditional'
+export type MappingTypeUI = 'direct' | 'static' | 'conditional' | 'collect'
 // API-side type (matches backend schema exactly)
-export type MappingTypeAPI = 'direct_copy' | 'static_default' | 'conditional'
+export type MappingTypeAPI = 'direct_copy' | 'static_default' | 'conditional' | 'collect'
 // StaticValue type selector
 export type StaticValueType = 'string' | 'number' | 'boolean'
+
+// Collect mapping configuration
+export interface CollectConfig {
+  array_path: string
+  extract_field?: string
+  filter?: { field: string; operator: string; value: string }
+  separator?: string
+}
 
 // Type translation functions
 export function canvasTypeToAPI(t: MappingTypeUI): MappingTypeAPI {
   if (t === 'direct') return 'direct_copy'
   if (t === 'static') return 'static_default'
+  if (t === 'collect') return 'collect'
   return 'conditional'
 }
 
@@ -16,6 +25,7 @@ export function apiTypeToCanvas(t: MappingTypeAPI | string): MappingTypeUI {
   if (t === 'direct_copy') return 'direct'
   if (t === 'static_default') return 'static'
   if (t === 'conditional') return 'conditional'
+  if (t === 'collect') return 'collect'
   return 'direct'  // safe fallback for unknown values
 }
 
@@ -32,6 +42,9 @@ export interface FieldDiscoveryItem {
   path: string        // e.g. "address.city"
   type: string        // "string" | "number" | "boolean" | "array" | "null" | "object"
   sample_value: unknown
+  is_array_child?: boolean       // true for fields inside an array
+  parent_array_path?: string     // path to the parent array (for pre-filling collect mappings)
+  is_array_parent?: boolean      // true for array-type fields themselves
 }
 
 export interface DiscoverResponse {
@@ -79,4 +92,5 @@ export interface MappingEdgeData extends Record<string, unknown> {
   valueType?: StaticValueType
   conditions?: CanvasConditionRule[]
   fallback?: string
+  collectConfig?: CollectConfig
 }

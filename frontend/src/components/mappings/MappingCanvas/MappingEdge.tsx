@@ -7,13 +7,14 @@ import {
   type Edge,
   type EdgeProps,
 } from '@xyflow/react'
-import type { MappingEdgeData, MappingTypeUI, StaticValueType, CanvasConditionRule } from '@/types/canvas'
+import type { MappingEdgeData, MappingTypeUI, StaticValueType, CanvasConditionRule, CollectConfig } from '@/types/canvas'
 import { StaticValueEditor } from './StaticValueEditor'
 import { ConditionalEditor } from './ConditionalEditor'
+import { CollectEditor } from './CollectEditor'
 
 export type MappingEdgeType = Edge<MappingEdgeData, 'mapping'>
 
-const CYCLE: MappingTypeUI[] = ['direct', 'static', 'conditional']
+const CYCLE: MappingTypeUI[] = ['direct', 'static', 'conditional', 'collect']
 
 export function MappingEdge({
   id,
@@ -27,7 +28,7 @@ export function MappingEdge({
 }: EdgeProps<MappingEdgeType>) {
   const { deleteElements, setEdges, getEdge } = useReactFlow()
   const [hovered, setHovered] = useState(false)
-  const [editorOpen, setEditorOpen] = useState<'static' | 'conditional' | null>(null)
+  const [editorOpen, setEditorOpen] = useState<'static' | 'conditional' | 'collect' | null>(null)
   const badgeRef = useRef<HTMLSpanElement>(null)
 
   const [edgePath, labelX, labelY] = getSmoothStepPath({
@@ -44,7 +45,8 @@ export function MappingEdge({
   const isConfigured =
     mappingType === 'direct' ||
     (mappingType === 'static' && data?.staticValue !== undefined && data?.staticValue !== '') ||
-    (mappingType === 'conditional' && Array.isArray(data?.conditions) && (data.conditions as CanvasConditionRule[]).length > 0)
+    (mappingType === 'conditional' && Array.isArray(data?.conditions) && (data.conditions as CanvasConditionRule[]).length > 0) ||
+    (mappingType === 'collect' && !!(data?.collectConfig as CollectConfig | undefined)?.array_path)
 
   const cycleType = useCallback(() => {
     const current = (data?.mappingType ?? 'direct') as MappingTypeUI
@@ -52,7 +54,7 @@ export function MappingEdge({
     setEdges((eds) =>
       eds.map((e) =>
         e.id === id
-          ? { ...e, data: { ...e.data, mappingType: next, staticValue: undefined, conditions: [], fallback: undefined } }
+          ? { ...e, data: { ...e.data, mappingType: next, staticValue: undefined, conditions: [], fallback: undefined, collectConfig: undefined } }
           : e
       )
     )
@@ -62,7 +64,7 @@ export function MappingEdge({
     (e: React.MouseEvent) => {
       e.preventDefault()
       if (mappingType !== 'direct') {
-        setEditorOpen(mappingType)
+        setEditorOpen(mappingType as 'static' | 'conditional' | 'collect')
       }
     },
     [mappingType]
@@ -73,9 +75,11 @@ export function MappingEdge({
 
   const badgeClassName =
     `px-2 py-0.5 text-xs rounded-full border font-medium cursor-pointer select-none ` +
-    (isConfigured && mappingType !== 'direct'
-      ? 'bg-primary/10 text-primary border-primary/30 font-semibold'
-      : 'bg-muted text-muted-foreground border-border')
+    (mappingType === 'collect' && isConfigured
+      ? 'bg-amber-100 text-amber-700 border-amber-300 font-semibold'
+      : isConfigured && mappingType !== 'direct'
+        ? 'bg-primary/10 text-primary border-primary/30 font-semibold'
+        : 'bg-muted text-muted-foreground border-border')
 
   const badgeLabel = `${mappingType}${isConfigured && mappingType !== 'direct' ? ' ✓' : ''}`
 
@@ -166,6 +170,25 @@ export function MappingEdge({
           initialConditions={(data?.conditions as CanvasConditionRule[]) ?? []}
           initialFallback={data?.fallback as string | undefined}
           onSave={handleConditionalSave}
+          onCancel={() => setEditorOpen(null)}
+        />
+      )}
+
+      {/* CollectEditor */}
+      {editorOpen === 'collect' && (
+        <CollectEditor
+          open={true}
+          initialConfig={(data?.collectConfig as CollectConfig | undefined) || { array_path: '' }}
+          onSave={(config) => {
+            setEdges((eds) =>
+              eds.map((e) =>
+                e.id === id
+                  ? { ...e, data: { ...e.data, collectConfig: config } }
+                  : e
+              )
+            )
+            setEditorOpen(null)
+          }}
           onCancel={() => setEditorOpen(null)}
         />
       )}

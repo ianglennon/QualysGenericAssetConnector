@@ -15,6 +15,7 @@ from app.models.field_mapping import FieldMapping
 from app.models.qualys_config import QualysConfig
 from app.models.run_history import EndpointRunLog, RunFailure, RunHistory, RunStatus
 from app.schemas.field_mapping import FieldMappingRule
+from app.services.path_resolver import resolve_path
 from app.services.source_client import SourceFetchResult, fetch_all_pages
 from app.services.transform_engine import apply_mappings
 from app.services.qualys_adapter import QualysAdapterError, QualysFailure, submit_batch, _decrypt_secret
@@ -56,6 +57,16 @@ def _build_mapping_rules(mappings: list[FieldMapping]) -> list[FieldMappingRule]
             "source_field": mapping.source_field,
             "static_value": mapping.static_value,
         }
+        if mapping.mapping_type == "conditional" and mapping.conditions:
+            payload["conditional_config"] = {
+                "conditions": mapping.conditions,
+                "fallback": mapping.fallback,
+            }
+        if mapping.mapping_type == "collect":
+            payload["array_path"] = mapping.array_path
+            payload["extract_field"] = mapping.extract_field
+            payload["collect_filter"] = mapping.collect_filter
+            payload["separator"] = mapping.separator
         rules.append(adapter.validate_python(payload))
     return rules
 
@@ -108,7 +119,7 @@ async def _run_endpoint(
         logger.debug(
             "Endpoint %s: fetching from %s", endpoint.path, resolved_url,
         )
-        source_result = await fetch_all_pages(connector, url=resolved_url, client=client)
+        source_result = await fetch_all_pages(connector, url=resolved_url, client=client, data_root=endpoint.data_root)
         records_fetched = source_result.records_fetched
         logger.debug(
             "Endpoint %s: fetched %d records (partial=%s)",

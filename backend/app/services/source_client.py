@@ -51,6 +51,17 @@ def _extract_records(payload: Any) -> list[Any]:
     return []
 
 
+def _extract_records_with_root(payload: Any, data_root: str | None) -> list[Any]:
+    """Extract records, using data_root if configured, else fallback to heuristic."""
+    if data_root:
+        from app.services.path_resolver import resolve_path
+        unwrapped = resolve_path(payload, data_root) if isinstance(payload, dict) else None
+        if isinstance(unwrapped, list):
+            return unwrapped
+        # data_root didn't resolve -- fall back to standard extraction
+    return _extract_records(payload)
+
+
 def _parse_next_link(link_header: str | None) -> str | None:
     if not link_header:
         return None
@@ -138,6 +149,7 @@ async def fetch_all_pages(
     pagination_strategies: list[PaginationStrategy] | None = None,
     retry_limit: int | None = None,
     client: httpx.AsyncClient | None = None,
+    data_root: str | None = None,
 ) -> SourceFetchResult:
     headers = _build_headers(connector)
     effective_retry_limit = (
@@ -172,7 +184,7 @@ async def fetch_all_pages(
                 req_capture, resp_capture = _maybe_capture(fetch_result, connector.auth_method, connector.api_key_name)
                 return SourceFetchResult([], 0, 0, True, req_capture, resp_capture)
             payload = fetch_result.response.json()
-            records = _extract_records(payload)
+            records = _extract_records_with_root(payload, data_root)
             logger.debug("Source fetch complete: %d records in 1 page", len(records))
             return SourceFetchResult(records, len(records), 1, False)
 
@@ -185,6 +197,7 @@ async def fetch_all_pages(
                 effective_retry_limit,
                 connector.auth_method,
                 connector.api_key_name,
+                data_root,
             )
         if isinstance(strategy, OffsetLimitPagination):
             return await _fetch_offset_limit_pages(
@@ -195,6 +208,7 @@ async def fetch_all_pages(
                 effective_retry_limit,
                 connector.auth_method,
                 connector.api_key_name,
+                data_root,
             )
         if isinstance(strategy, LinkHeaderPagination):
             return await _fetch_link_header_pages(
@@ -204,6 +218,7 @@ async def fetch_all_pages(
                 effective_retry_limit,
                 connector.auth_method,
                 connector.api_key_name,
+                data_root,
             )
         if isinstance(strategy, PageNumberPagination):
             return await _fetch_page_number_pages(
@@ -214,6 +229,7 @@ async def fetch_all_pages(
                 effective_retry_limit,
                 connector.auth_method,
                 connector.api_key_name,
+                data_root,
             )
 
         return SourceFetchResult([], 0, 0, False)
@@ -230,6 +246,7 @@ async def _fetch_cursor_pages(
     retry_limit: int,
     auth_type: str,
     api_key_name: str | None,
+    data_root: str | None = None,
 ) -> SourceFetchResult:
     records: list[Any] = []
     pages_fetched = 0
@@ -250,7 +267,7 @@ async def _fetch_cursor_pages(
             return SourceFetchResult(records, len(records), pages_fetched, True, req_capture, resp_capture)
 
         payload = fetch_result.response.json()
-        page_records = _extract_records(payload)
+        page_records = _extract_records_with_root(payload, data_root)
         records.extend(page_records)
         pages_fetched += 1
 
@@ -268,6 +285,7 @@ async def _fetch_offset_limit_pages(
     retry_limit: int,
     auth_type: str,
     api_key_name: str | None,
+    data_root: str | None = None,
 ) -> SourceFetchResult:
     records: list[Any] = []
     pages_fetched = 0
@@ -287,7 +305,7 @@ async def _fetch_offset_limit_pages(
             return SourceFetchResult(records, len(records), pages_fetched, True, req_capture, resp_capture)
 
         payload = fetch_result.response.json()
-        page_records = _extract_records(payload)
+        page_records = _extract_records_with_root(payload, data_root)
         records.extend(page_records)
         pages_fetched += 1
 
@@ -306,6 +324,7 @@ async def _fetch_link_header_pages(
     retry_limit: int,
     auth_type: str,
     api_key_name: str | None,
+    data_root: str | None = None,
 ) -> SourceFetchResult:
     records: list[Any] = []
     pages_fetched = 0
@@ -320,7 +339,7 @@ async def _fetch_link_header_pages(
             return SourceFetchResult(records, len(records), pages_fetched, True, req_capture, resp_capture)
 
         payload = fetch_result.response.json()
-        page_records = _extract_records(payload)
+        page_records = _extract_records_with_root(payload, data_root)
         records.extend(page_records)
         pages_fetched += 1
 
@@ -338,6 +357,7 @@ async def _fetch_page_number_pages(
     retry_limit: int,
     auth_type: str,
     api_key_name: str | None,
+    data_root: str | None = None,
 ) -> SourceFetchResult:
     records: list[Any] = []
     pages_fetched = 0
@@ -356,7 +376,7 @@ async def _fetch_page_number_pages(
             return SourceFetchResult(records, len(records), pages_fetched, True, req_capture, resp_capture)
 
         payload = fetch_result.response.json()
-        page_records = _extract_records(payload)
+        page_records = _extract_records_with_root(payload, data_root)
         records.extend(page_records)
         pages_fetched += 1
 

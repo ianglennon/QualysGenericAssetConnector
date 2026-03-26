@@ -290,3 +290,53 @@ def test_canvas_delete_returns_404_for_nonexistent(setup_db):
 
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "CANVAS_NOT_FOUND"
+
+
+def test_canvas_delete_preserves_endpoint_run_logs_with_stale_canvas_id(setup_db):
+    """DEL-07: EndpointRunLog records that carry a canvas_id string referencing
+    a deleted canvas must survive because canvas_id is a plain String column
+    with NO foreign key — there is no CASCADE to fire on canvas deletion.
+
+    Scenario: endpoint is shared by two canvases.  A run log is recorded with
+    canvas_id = canvas_a.  When canvas_a is deleted the shared endpoint is
+    preserved (shared with canvas_b) and the run log must also be preserved as
+    an immutable historical audit record.
+    """
+    sf = setup_db
+    cid = _seed_connector(sf)
+    eid = _seed_endpoint(sf, cid, "shared-ep-for-runlog")
+    canvas_a = _seed_canvas(sf, cid, "Canvas A")
+    canvas_b = _seed_canvas(sf, cid, "Canvas B")
+    _seed_canvas_endpoint(sf, canvas_a, eid)
+    _seed_canvas_endpoint(sf, canvas_b, eid)
+
+    # Seed a run log that records activity for this endpoint under canvas_a
+    run_id = _seed_run(sf, cid)
+    log_id = _seed_endpoint_run_log(sf, eid, run_id)
+
+    # Manually set the canvas_id on the run log to simulate a real run record
+    db = sf()
+    log = db.query(EndpointRunLog).filter_by(id=log_id).first()
+    log.canvas_id = canvas_a
+    db.commit()
+    db.close()
+
+    # Delete canvas_a
+    with TestClient(fastapi_app) as client:
+        resp = client.delete(f"/api/v1/connectors/{cid}/canvases/{canvas_a}")
+
+    assert resp.status_code == 204
+
+    db = sf()
+    # The shared endpoint still exists (assigned to canvas_b)
+    assert db.query(ConnectorEndpoint).filter_by(id=eid).count() == 1
+
+    # The run log must NOT be deleted — canvas_id is a plain String with no FK
+    surviving_log = db.query(EndpointRunLog).filter_by(id=log_id).first()
+    assert surviving_log is not None, (
+        "EndpointRunLog with canvas_id referencing deleted canvas must be preserved "
+        "(canvas_id is a plain String column with no FK — no CASCADE applies)"
+    )
+    # The canvas_id field still holds the now-stale reference (expected — no cleanup)
+    assert surviving_log.canvas_id == canvas_a
+    db.close()

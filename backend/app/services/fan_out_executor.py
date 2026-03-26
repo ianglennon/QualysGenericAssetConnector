@@ -16,7 +16,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 
-from app.services.template_resolver import resolve_path, TemplateResolutionError
+from app.services.template_resolver import resolve_path_with_values, TemplateResolutionError
 from app.services.source_client import fetch_all_pages
 
 logger = logging.getLogger(__name__)
@@ -132,6 +132,7 @@ async def execute_tree(
                 await _fan_out_level(
                     parent_records=[root_record],
                     parent_context={},
+                    inherited_vars={},
                     child_endpoints=child_endpoints,
                     children_map=children_map,
                     connector=connector,
@@ -145,6 +146,7 @@ async def execute_tree(
 async def _fan_out_level(
     parent_records: list[dict],
     parent_context: dict,
+    inherited_vars: dict[str, str],
     child_endpoints: list,
     children_map: dict,
     connector,
@@ -155,7 +157,8 @@ async def _fan_out_level(
 
     For each child endpoint, creates an asyncio.Semaphore from its max_concurrency
     setting (D-05/D-06), then processes all parent records concurrently within
-    that bound.
+    that bound. inherited_vars carries resolved template variables from ancestor
+    levels so grandchild paths can reuse them.
     """
     for child_ep in child_endpoints:
         semaphore = asyncio.Semaphore(child_ep.max_concurrency)
@@ -175,12 +178,14 @@ async def _fan_out_level(
                 current_ancestor = _merge_parent_context(parent_record, parent_context)
                 st.children_attempted += 1
 
-                # Resolve template variables in child endpoint path
+                # Resolve template variables in child endpoint path,
+                # inheriting already-resolved values from ancestor levels
                 try:
-                    resolved_path = resolve_path(
+                    resolved_path, resolved_vars = resolve_path_with_values(
                         ep_path,
                         parent_record,
                         ep.variable_extractions or {},
+                        inherited_values=inherited_vars,
                     )
                 except TemplateResolutionError as exc:
                     st.record_skip()
@@ -228,10 +233,11 @@ async def _fan_out_level(
                         merged.append(_merge_parent_context(child_rec, current_ancestor))
                     return merged
                 else:
-                    # Intermediate -- recurse deeper
+                    # Intermediate -- recurse deeper, passing resolved vars
                     await _fan_out_level(
                         parent_records=fetch_result.records,
                         parent_context=current_ancestor,
+                        inherited_vars=resolved_vars,
                         child_endpoints=grandchild_endpoints,
                         children_map=children_map,
                         connector=connector,

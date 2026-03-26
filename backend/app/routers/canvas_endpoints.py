@@ -27,7 +27,7 @@ from app.schemas.canvas_endpoint import (
 from app.schemas.field_mapping import DiscoverResponse
 from app.schemas.run_history import DryRunResponse
 from app.services import source_client as _source_client
-from app.services.template_resolver import resolve_path, TemplateResolutionError
+from app.services.template_resolver import resolve_path, resolve_path_with_values, TemplateResolutionError
 from app.services.fan_out_executor import execute_tree, _build_tree, _merge_parent_context
 from app.services.ingestion_service import _build_mapping_rules
 from app.services.transform_engine import apply_mappings
@@ -250,6 +250,10 @@ async def discover_canvas_endpoint_fields(
         # Start with root records as parent records
         sampled_parents = root_records[:DISCOVERY_SAMPLE_SIZE]  # D-11
         parent_context: dict = {}
+        # Accumulate resolved variable values across levels so grandchild paths
+        # can use variables resolved at ancestor levels (e.g. {node} resolved at
+        # level 1 is inherited by level 2 which also needs {node} + {vmid})
+        inherited_vars: dict[str, str] = {}
         all_merged_child_records: list[dict] = []
 
         for level_idx in range(1, len(chain)):
@@ -259,22 +263,24 @@ async def discover_canvas_endpoint_fields(
                 break
 
             child_records_this_level: list[dict] = []
+            level_resolved_vars: dict[str, str] = {}
 
             for parent_record in sampled_parents:
                 # Build ancestor context for merging
                 current_ancestor = _merge_parent_context(parent_record, parent_context)
 
-                # Resolve child URL template
+                # Resolve child URL template, passing inherited vars from ancestor levels
                 try:
-                    resolved_path = resolve_path(
+                    resolved, level_resolved_vars = resolve_path_with_values(
                         current_ep.path,
                         parent_record,
                         current_ce.variable_extractions or {},
+                        inherited_values=inherited_vars,
                     )
                 except TemplateResolutionError:
                     continue  # Skip this parent sample, try others
 
-                child_url = connector.base_url.rstrip("/") + "/" + resolved_path.lstrip("/")
+                child_url = connector.base_url.rstrip("/") + "/" + resolved.lstrip("/")
 
                 # Fetch child records
                 try:
@@ -300,6 +306,9 @@ async def discover_canvas_endpoint_fields(
             if not child_records_this_level:
                 # All parent samples failed at this level
                 return DiscoverResponse(fields=[], record_count=0)
+
+            # Carry forward resolved variables for deeper levels
+            inherited_vars = level_resolved_vars
 
             # If this is the target level, collect for field discovery
             if level_idx == len(chain) - 1:

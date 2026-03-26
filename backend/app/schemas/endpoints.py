@@ -13,6 +13,7 @@ class EndpointCreate(BaseModel):
     pagination_config: Optional[dict] = None
     is_enabled: bool = True
     display_order: int = 0
+    data_root: Optional[str] = None
 
 
 class EndpointUpdate(BaseModel):
@@ -25,6 +26,7 @@ class EndpointUpdate(BaseModel):
     pagination_config: Optional[dict] = None
     is_enabled: Optional[bool] = None
     display_order: Optional[int] = None
+    data_root: Optional[str] = None
 
 
 class EndpointResponse(BaseModel):
@@ -36,6 +38,7 @@ class EndpointResponse(BaseModel):
     pagination_config: Optional[dict] = None
     is_enabled: bool
     display_order: int
+    data_root: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

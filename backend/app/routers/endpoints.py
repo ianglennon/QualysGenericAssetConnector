@@ -91,6 +91,7 @@ def create_endpoint(
         pagination_config=payload.pagination_config,
         is_enabled=payload.is_enabled,
         display_order=payload.display_order,
+        data_root=payload.data_root,
     )
     db.add(endpoint)
     db.commit()

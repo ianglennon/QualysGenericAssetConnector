@@ -8,7 +8,10 @@ Exports:
     _python_type(value) -> str
     flatten_fields(obj, prefix, depth, results) -> list[dict]
     merge_fields_across_records(records) -> list[dict]
+    auto_detect_data_root(payload) -> str | None
 """
+
+from typing import Any
 
 MAX_DEPTH = 5
 
@@ -63,8 +66,20 @@ def flatten_fields(
         elif isinstance(value, list):
             # Determine if it's a list of objects or a list of primitives
             if value and isinstance(value[0], dict):
-                # Array of objects — recurse into the first element with [0] notation
-                flatten_fields(value[0], f"{path}[0]", depth + 1, results)
+                # Array of objects — emit parent array entry, then recurse with [] notation
+                results.append({
+                    "path": path,
+                    "type": "array",
+                    "sample_value": f"[{len(value)} items]",
+                    "is_array_parent": True,
+                })
+                child_prefix = f"{path}[]"
+                before_count = len(results)
+                flatten_fields(value[0], child_prefix, depth + 1, results)
+                # Tag child fields with array metadata
+                for i in range(before_count, len(results)):
+                    results[i]["is_array_child"] = True
+                    results[i]["parent_array_path"] = path
             else:
                 # Array of primitives (or empty) — surface as a single "array" entry
                 results.append({
@@ -104,3 +119,29 @@ def merge_fields_across_records(records: list) -> list:
             if path not in seen:
                 seen[path] = field
     return list(seen.values())
+
+
+def auto_detect_data_root(payload: Any) -> str | None:
+    """Auto-detect a data root key in an API response.
+
+    If the payload is a dict with exactly one key whose value is a non-empty
+    list where the first element is a dict, return that key. This covers
+    common wrapper patterns like {"result": [...]}, {"data": [...]}, etc.
+
+    Args:
+        payload: The raw API response payload.
+
+    Returns:
+        The wrapper key name, or None if no single-key array wrapper detected.
+    """
+    if not isinstance(payload, dict):
+        return None
+    if len(payload) != 1:
+        return None
+    key = next(iter(payload))
+    value = payload[key]
+    if not isinstance(value, list) or not value:
+        return None
+    if not isinstance(value[0], dict):
+        return None
+    return key

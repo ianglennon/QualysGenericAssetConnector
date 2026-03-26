@@ -12,6 +12,7 @@ class MappingType(str, enum.Enum):
     direct_copy = "direct_copy"
     static_default = "static_default"
     conditional = "conditional"
+    collect = "collect"
 
 
 class FieldMapping(Base):
@@ -30,5 +31,10 @@ class FieldMapping(Base):
     # Conditional mapping fields
     conditions: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     fallback: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Collect mapping fields
+    array_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    extract_field: Mapped[str | None] = mapped_column(String, nullable=True)
+    collect_filter: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    separator: Mapped[str | None] = mapped_column(String, nullable=True)
     order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

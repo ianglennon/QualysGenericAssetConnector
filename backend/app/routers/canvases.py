@@ -15,6 +15,7 @@ from app.core.errors import make_error
 from app.models.connector import Connector
 from app.models.canvas import Canvas
 from app.models.canvas_endpoint import CanvasEndpoint
+from app.models.connector_endpoint import ConnectorEndpoint
 from app.models.field_mapping import FieldMapping
 from app.models.run_history import EndpointRunLog
 from app.schemas.canvas import CanvasCreate, CanvasUpdate, CanvasResponse, CanvasListResponse
@@ -193,6 +194,30 @@ def delete_canvas(
             status_code=404,
             detail=make_error("CANVAS_NOT_FOUND", "Canvas not found", {"canvas_id": canvas_id}),
         )
+
+    # -- Explicit cleanup (belt-and-suspenders over CASCADE) --
+
+    # 1. Collect endpoint IDs assigned to this canvas
+    canvas_eps = db.query(CanvasEndpoint).filter_by(canvas_id=canvas_id).all()
+    endpoint_ids = [ce.endpoint_id for ce in canvas_eps]
+
+    # 2. Delete field mappings scoped to this canvas
+    db.query(FieldMapping).filter_by(canvas_id=canvas_id).delete(synchronize_session="fetch")
+
+    # 3. Delete canvas_endpoint join records for this canvas
+    db.query(CanvasEndpoint).filter_by(canvas_id=canvas_id).delete(synchronize_session="fetch")
+
+    # 4. Delete unshared ConnectorEndpoints (not referenced by other canvases)
+    for ep_id in endpoint_ids:
+        remaining = db.query(CanvasEndpoint).filter_by(endpoint_id=ep_id).count()
+        if remaining == 0:
+            db.query(EndpointRunLog).filter_by(endpoint_id=ep_id).delete(synchronize_session="fetch")
+            db.query(FieldMapping).filter_by(endpoint_id=ep_id).delete(synchronize_session="fetch")
+            ep = db.query(ConnectorEndpoint).get(ep_id)
+            if ep:
+                db.delete(ep)
+
+    # 5. Delete the canvas itself
     db.delete(canvas)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

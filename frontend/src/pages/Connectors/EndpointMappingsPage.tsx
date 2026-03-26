@@ -40,6 +40,7 @@ export function EndpointMappingsPage() {
     const d = e.data as MappingEdgeData
     if (d.mappingType === 'static') return d.staticValue === undefined || d.staticValue === ''
     if (d.mappingType === 'conditional') return !d.conditions?.length
+    if (d.mappingType === 'collect') return !d.collectConfig?.array_path
     return false
   })
 
@@ -66,6 +67,15 @@ export function EndpointMappingsPage() {
       }
       if (d.mappingType === 'conditional') {
         return { ...base, conditions: d.conditions ?? [], fallback: d.fallback }
+      }
+      if (d.mappingType === 'collect' && d.collectConfig) {
+        return {
+          ...base,
+          array_path: d.collectConfig.array_path,
+          extract_field: d.collectConfig.extract_field || null,
+          collect_filter: d.collectConfig.filter || null,
+          separator: d.collectConfig.separator || null,
+        }
       }
       return base
     })

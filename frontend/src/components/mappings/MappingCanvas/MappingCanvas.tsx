@@ -20,7 +20,7 @@ import { SourcePanelNode } from './SourcePanelNode'
 import { TargetPanelNode } from './TargetPanelNode'
 import { MappingEdge } from './MappingEdge'
 import { DashedConnectionLine } from './DashedConnectionLine'
-import type { SourcePanelData, TargetPanelData, MappingEdgeData, CanvasConditionRule, StaticValueType, DiscoverResponse } from '@/types/canvas'
+import type { SourcePanelData, TargetPanelData, MappingEdgeData, CanvasConditionRule, StaticValueType, DiscoverResponse, CollectConfig, FieldDiscoveryItem, MappingTypeUI } from '@/types/canvas'
 import { apiTypeToCanvas } from '@/types/canvas'
 
 // Helper: infer StaticValueType from a string value
@@ -186,6 +186,14 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
         valueType: inferValueType(m.static_value),
         conditions: (m.conditions ?? []) as CanvasConditionRule[],
         fallback: m.fallback ?? undefined,
+        ...(m.mapping_type === 'collect' ? {
+          collectConfig: {
+            array_path: m.array_path ?? '',
+            extract_field: m.extract_field || undefined,
+            filter: m.collect_filter || undefined,
+            separator: m.separator || undefined,
+          } as CollectConfig,
+        } : {}),
       } satisfies MappingEdgeData,
     }))
 
@@ -234,11 +242,60 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
     onEdgesSnapshot?.(edges as Edge<MappingEdgeData>[])
   }, [edges, onEdgesSnapshot])
 
+  // Look up source field metadata from the source panel node
+  const getSourceFieldMeta = useCallback((fieldPath: string): FieldDiscoveryItem | undefined => {
+    const sourceNode = nodes.find(n => n.id === 'source-panel')
+    if (!sourceNode?.data) return undefined
+    return (sourceNode.data as unknown as SourcePanelData).fields.find(f => f.path === fieldPath)
+  }, [nodes])
+
   const onConnect = useCallback(
     (connection: Connection) => {
-      setEdges(eds => applyConnect(connection, eds))
+      const norm = normalizeConnection(connection)
+      const fieldMeta = getSourceFieldMeta(norm.sourceHandle || '')
+
+      let mappingType: MappingTypeUI = 'direct'
+      let collectConfig: CollectConfig | undefined
+
+      if (fieldMeta?.is_array_child && fieldMeta.parent_array_path) {
+        // D-13: Array child drag creates collect mapping pre-filled
+        mappingType = 'collect'
+        collectConfig = {
+          array_path: fieldMeta.parent_array_path,
+          extract_field: fieldMeta.path.split('[].').pop() || '',
+        }
+      } else if (fieldMeta?.is_array_parent) {
+        // D-13: Array parent drag creates collect with no extract_field
+        mappingType = 'collect'
+        collectConfig = {
+          array_path: fieldMeta.path.replace('[]', ''),
+        }
+      }
+      // D-14: Nested scalar fields (path contains dots but not []) create direct_copy
+      // with the full dot-path as source_field — this is the default behavior,
+      // resolve_path on the backend handles nested traversal.
+
+      setEdges((eds) => {
+        // Remove existing edges for same source or target handle (one-to-one)
+        const filtered = eds.filter(
+          e => e.sourceHandle !== norm.sourceHandle && e.targetHandle !== norm.targetHandle
+        )
+        const newEdge: Edge<MappingEdgeData> = {
+          id: `${norm.source}-${norm.sourceHandle}-${norm.target}-${norm.targetHandle}`,
+          source: norm.source!,
+          sourceHandle: norm.sourceHandle,
+          target: norm.target!,
+          targetHandle: norm.targetHandle,
+          type: 'mapping',
+          data: {
+            mappingType,
+            ...(collectConfig ? { collectConfig } : {}),
+          },
+        }
+        return addEdge(newEdge, filtered)
+      })
     },
-    [setEdges]
+    [getSourceFieldMeta, setEdges]
   )
 
   // Update node widths when container resizes

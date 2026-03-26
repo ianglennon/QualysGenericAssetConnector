@@ -54,16 +54,19 @@ def test_flatten_nested():
 
 
 def test_flatten_array_objects():
-    """Arrays of objects are expanded using bracket-index notation on the first element.
+    """Arrays of objects are expanded using bracket notation on the first element.
 
-    {"items": [{"ip": "1.2.3.4"}]} → path "items[0].ip", type "string"
+    {"items": [{"ip": "1.2.3.4"}]} → path "items[].ip", type "string"
+    Phase 48: Changed from [0] to [] notation for array child fields.
     """
     record = {"items": [{"ip": "1.2.3.4"}]}
     fields = flatten_fields(record)
     paths = {f["path"]: f for f in fields}
-    assert "items[0].ip" in paths
-    entry = paths["items[0].ip"]
+    assert "items[].ip" in paths
+    entry = paths["items[].ip"]
     assert entry["type"] == "string"
+    assert entry.get("is_array_child") is True
+    assert entry.get("parent_array_path") == "items"
 
 
 def test_flatten_array_primitives():

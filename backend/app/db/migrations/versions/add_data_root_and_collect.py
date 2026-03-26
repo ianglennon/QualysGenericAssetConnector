@@ -1,7 +1,7 @@
 """Add data_root column to connector_endpoints and collect mapping columns to field_mappings.
 
 Revision ID: b3c4d5e6f7a8
-Revises: a1b2c3d4e5f6
+Revises: a1b2c3d4e5f7
 Create Date: 2026-03-26 22:00:00.000000
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'b3c4d5e6f7a8'
-down_revision: str = 'a1b2c3d4e5f6'
+down_revision: str = 'a1b2c3d4e5f7'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

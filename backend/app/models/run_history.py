@@ -86,6 +86,7 @@ class EndpointRunLog(Base):
     records_fetched: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     records_submitted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     records_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    records_filtered: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     # String (not Enum) — consistent with project convention for new models
     status: Mapped[str] = mapped_column(String, nullable=False)
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)

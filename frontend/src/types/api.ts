@@ -24,6 +24,10 @@ export interface FieldMapping {
   static_value?: string
   conditions?: ConditionRule[]
   fallback?: string
+  array_path?: string
+  extract_field?: string
+  collect_filter?: { field: string; operator: string; value: string } | null
+  separator?: string
   order: number
   created_at: string
 }
@@ -36,6 +40,10 @@ export interface FieldMappingCreate {
   static_value?: string
   conditions?: ConditionRule[]
   fallback?: string              // optional fallback for conditional
+  array_path?: string            // collect mapping: path to array in source data
+  extract_field?: string | null  // collect mapping: field to extract from array items
+  collect_filter?: { field: string; operator: string; value: string } | null  // collect mapping: optional filter
+  separator?: string | null      // collect mapping: optional separator for joining values
   order?: number
 }
 

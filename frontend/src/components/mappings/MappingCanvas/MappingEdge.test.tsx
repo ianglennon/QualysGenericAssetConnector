@@ -96,13 +96,24 @@ describe('MappingEdge badge interactions', () => {
     expect(result[0].data?.mappingType).toBe('static')
   })
 
-  it('left-click from conditional wraps back to direct', async () => {
+  it('left-click from conditional advances to collect', async () => {
     const { MappingEdge } = await import('./MappingEdge')
     render(<MappingEdge {...makeEdgeProps({ mappingType: 'conditional' })} />)
     const badge = screen.getByText(/conditional/)
     fireEvent.click(badge)
     const updater = mockSetEdges.mock.calls[0][0]
     const fakeEdges: Edge[] = [{ id: 'edge-1', source: '', target: '', data: { mappingType: 'conditional' } }]
+    const result = updater(fakeEdges)
+    expect(result[0].data?.mappingType).toBe('collect')
+  })
+
+  it('left-click from collect wraps back to direct', async () => {
+    const { MappingEdge } = await import('./MappingEdge')
+    render(<MappingEdge {...makeEdgeProps({ mappingType: 'collect' })} />)
+    const badge = screen.getByText(/collect/)
+    fireEvent.click(badge)
+    const updater = mockSetEdges.mock.calls[0][0]
+    const fakeEdges: Edge[] = [{ id: 'edge-1', source: '', target: '', data: { mappingType: 'collect' } }]
     const result = updater(fakeEdges)
     expect(result[0].data?.mappingType).toBe('direct')
   })

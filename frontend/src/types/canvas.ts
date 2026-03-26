@@ -5,6 +5,14 @@ export type MappingTypeAPI = 'direct_copy' | 'static_default' | 'conditional' | 
 // StaticValue type selector
 export type StaticValueType = 'string' | 'number' | 'boolean'
 
+// Collect mapping configuration
+export interface CollectConfig {
+  array_path: string
+  extract_field?: string
+  filter?: { field: string; operator: string; value: string }
+  separator?: string
+}
+
 // Type translation functions
 export function canvasTypeToAPI(t: MappingTypeUI): MappingTypeAPI {
   if (t === 'direct') return 'direct_copy'
@@ -36,22 +44,14 @@ export interface ExclusionRule {
   value: string
 }
 
-// Collect mapping configuration (Phase 48 — nested JSON unpacking)
-export interface CollectConfig {
-  array_path: string
-  extract_field?: string
-  filter?: { field: string; operator: string; value: string }
-  separator?: string
-}
-
 // GET /connectors/{id}/fields/discover response
 export interface FieldDiscoveryItem {
   path: string        // e.g. "address.city"
   type: string        // "string" | "number" | "boolean" | "array" | "null" | "object"
   sample_value: unknown
-  is_array_child?: boolean
-  parent_array_path?: string
-  is_array_parent?: boolean
+  is_array_child?: boolean       // true for fields inside an array
+  parent_array_path?: string     // path to the parent array (for pre-filling collect mappings)
+  is_array_parent?: boolean      // true for array-type fields themselves
 }
 
 export interface DiscoverResponse {

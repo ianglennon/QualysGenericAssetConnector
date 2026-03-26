@@ -7,6 +7,7 @@ and child endpoint fan-out.
 import re
 
 from app.schemas.exclusion_rule import ExclusionRule
+from app.services.path_resolver import resolve_path
 
 
 def _match_exclusion(record: dict, rule: ExclusionRule) -> bool:
@@ -17,14 +18,19 @@ def _match_exclusion(record: dict, rule: ExclusionRule) -> bool:
 
     CRITICAL: equals/not_equals use str() coercion on both sides.
     Proxmox returns template=1 (int), rule value is "1" (str).
+
+    Uses flat key lookup first (backward compat), then falls back to
+    resolve_path for nested field access.
     """
     value = record.get(rule.source_field)
+    if value is None:
+        value = resolve_path(record, rule.source_field)
 
     if value is None:
         return False
 
     target = rule.value
-    operator = rule.operator.value
+    operator = rule.operator if isinstance(rule.operator, str) else rule.operator.value
 
     if operator == "equals":
         return str(value) == target

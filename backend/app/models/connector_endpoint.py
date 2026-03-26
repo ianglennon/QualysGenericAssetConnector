@@ -19,5 +19,6 @@ class ConnectorEndpoint(Base):
     pagination_config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     is_enabled: Mapped[bool] = mapped_column(Integer, nullable=False, default=True)
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    data_root: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

@@ -9,7 +9,8 @@ from app.schemas.field_mapping import DiscoverResponse
 from app.services import source_client as _source_client
 from app.services.connector_service import _build_headers, HTTPX_TIMEOUT, test_connector_connection
 from app.services.credential_crypto import get_crypto
-from app.services.field_discovery import merge_fields_across_records
+from app.services.field_discovery import auto_detect_data_root, merge_fields_across_records
+from app.services.path_resolver import resolve_path as path_resolve
 from app.core.security import require_role
 from app.core.errors import make_error
 
@@ -182,8 +183,16 @@ def run_test_connection(
     return test_connector_connection(connector)
 
 
-async def _discover_fields_from_url(connector: Connector, url: str) -> DiscoverResponse:
-    """Shared helper: fetch first page from url and return discovered fields."""
+async def _discover_fields_from_url(
+    connector: Connector,
+    url: str,
+    data_root: str | None = None,
+) -> DiscoverResponse:
+    """Shared helper: fetch first page from url and return discovered fields.
+
+    When data_root is set, uses it to unwrap the response before flattening.
+    When not set, auto-detects single-key wrapper objects containing arrays.
+    """
     headers = _build_headers(connector)
 
     async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
@@ -205,7 +214,21 @@ async def _discover_fields_from_url(connector: Connector, url: str) -> DiscoverR
 
     payload = fetch_result.response.json()
 
-    records = _source_client._extract_records(payload)
+    # Apply data_root unwrapping or auto-detection (D-01, D-02, D-03)
+    detected_data_root = None
+    if data_root:
+        unwrapped = path_resolve(payload, data_root) if isinstance(payload, dict) else None
+        if isinstance(unwrapped, list):
+            records = unwrapped
+        else:
+            records = _source_client._extract_records(payload)
+    else:
+        detected_data_root = auto_detect_data_root(payload)
+        if detected_data_root:
+            records = payload[detected_data_root]
+        else:
+            records = _source_client._extract_records(payload)
+
     if not records and isinstance(payload, dict):
         # Single-object response — treat the dict as one record
         records = [payload]
@@ -219,7 +242,11 @@ async def _discover_fields_from_url(connector: Connector, url: str) -> DiscoverR
         for f in raw_fields
     ]
 
-    return DiscoverResponse(fields=fields, record_count=len(records))
+    return DiscoverResponse(
+        fields=fields,
+        record_count=len(records),
+        auto_detected_data_root=detected_data_root,
+    )
 
 
 @router.get("/{connector_id}/endpoints/{endpoint_id}/fields/discover", response_model=DiscoverResponse)
@@ -258,7 +285,7 @@ async def discover_endpoint_fields(
 
     # Compose full URL: base_url + endpoint.path
     url = connector.base_url.rstrip("/") + "/" + endpoint.path.lstrip("/")
-    return await _discover_fields_from_url(connector, url)
+    return await _discover_fields_from_url(connector, url, data_root=endpoint.data_root)
 
 
 # DEPRECATED: v1.1 connector-level discover route — remove after v1.2 migration

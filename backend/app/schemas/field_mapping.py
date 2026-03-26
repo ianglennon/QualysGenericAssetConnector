@@ -46,7 +46,7 @@ class FieldMappingConditional(BaseModel):
     mapping_type: Literal["conditional"] = "conditional"
     target_field: str
     conditional_config: ConditionalMappingConfig
-    
+
     @field_validator("conditional_config")
     @classmethod
     def validate_conditional_config(cls, v: ConditionalMappingConfig) -> ConditionalMappingConfig:
@@ -55,41 +55,69 @@ class FieldMappingConditional(BaseModel):
         return v
 
 
+class CollectFilterConfig(BaseModel):
+    """Filter condition for collect mapping type."""
+    field: str
+    operator: ConditionalOperator
+    value: str
+
+
+class FieldMappingCollect(BaseModel):
+    mapping_type: Literal["collect"] = "collect"
+    target_field: str
+    array_path: str
+    extract_field: str | None = None
+    collect_filter: CollectFilterConfig | None = None
+    separator: str | None = None
+
+
 FieldMappingRule = Annotated[
-    Union[FieldMappingDirectCopy, FieldMappingStaticDefault, FieldMappingConditional],
+    Union[FieldMappingDirectCopy, FieldMappingStaticDefault, FieldMappingConditional, FieldMappingCollect],
     Field(discriminator="mapping_type"),
 ]
 
 
 class FieldMappingCreate(BaseModel):
     """Schema for creating a field mapping."""
-    mapping_type: Literal["direct_copy", "static_default", "conditional"]
+    mapping_type: Literal["direct_copy", "static_default", "conditional", "collect"]
     target_field: str
     source_field: str | None = None  # Required for direct_copy
     static_value: str | None = None  # Required for static_default
     conditions: list[ConditionRule] | None = None  # Required for conditional
     fallback: str | None = None  # Optional for conditional
+    # Collect mapping fields
+    array_path: str | None = None  # Required for collect
+    extract_field: str | None = None  # Optional for collect
+    collect_filter: CollectFilterConfig | None = None  # Optional for collect
+    separator: str | None = None  # Optional for collect
     order: int = 0
-    
+
     @field_validator("source_field")
     @classmethod
     def validate_direct_copy(cls, v: str | None, info) -> str | None:
         if info.data.get("mapping_type") == "direct_copy" and not v:
             raise ValueError("source_field required for direct_copy mapping")
         return v
-    
+
     @field_validator("static_value")
     @classmethod
     def validate_static_default(cls, v: str | None, info) -> str | None:
         if info.data.get("mapping_type") == "static_default" and not v:
             raise ValueError("static_value required for static_default mapping")
         return v
-    
+
     @field_validator("conditions")
     @classmethod
     def validate_conditional(cls, v: list | None, info) -> list | None:
         if info.data.get("mapping_type") == "conditional" and not v:
             raise ValueError("conditions required for conditional mapping")
+        return v
+
+    @field_validator("array_path")
+    @classmethod
+    def validate_collect_array_path(cls, v: str | None, info) -> str | None:
+        if info.data.get("mapping_type") == "collect" and not v:
+            raise ValueError("array_path required for collect mapping")
         return v
 
 
@@ -103,6 +131,10 @@ class FieldMappingResponse(BaseModel):
     static_value: str | None = None
     conditions: list[dict] | None = None  # JSON from DB
     fallback: str | None = None
+    array_path: str | None = None
+    extract_field: str | None = None
+    collect_filter: dict | None = None
+    separator: str | None = None
     order: int
     created_at: datetime
 
@@ -114,12 +146,16 @@ class FieldDiscoveryItem(BaseModel):
     path: str
     type: str
     sample_value: Any
+    is_array_parent: bool | None = None
+    is_array_child: bool | None = None
+    parent_array_path: str | None = None
 
 
 class DiscoverResponse(BaseModel):
     """Response body for GET /connectors/{id}/fields/discover."""
     fields: list[FieldDiscoveryItem]
     record_count: int
+    auto_detected_data_root: str | None = None
 
 
 class QualysSchemaField(BaseModel):

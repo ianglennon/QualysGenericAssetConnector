@@ -52,6 +52,7 @@ class DryRunResponse(BaseModel):
     records: list[dict]
     total_records: int
     capped: bool
+    records_filtered: int = 0
 
 
 class RunHistoryResponse(BaseModel):

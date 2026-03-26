@@ -34,6 +34,9 @@ from app.services.transform_engine import apply_mappings
 from app.services.source_client import fetch_all_pages
 from app.services.field_discovery import merge_fields_across_records
 from app.services.connector_service import HTTPX_TIMEOUT, _build_headers
+from app.services.exclusion_filter import apply_exclusion_rules
+from app.schemas.exclusion_rule import ExclusionRule
+from pydantic import TypeAdapter
 
 router = APIRouter(tags=["canvas-endpoints"])
 
@@ -359,11 +362,22 @@ async def dry_run_canvas(
 
     async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
         source_result = await fetch_all_pages(connector, url=root_url, client=client)
-        fan_out_result = await execute_tree(canvas_endpoints, source_result.records, connector, client)
 
-    # Cap, then apply mappings (D-09: cap at 50)
-    total = len(fan_out_result.merged_records)
-    capped_records = fan_out_result.merged_records[:DRY_RUN_CAP]
+        # D-03/D-12: Filter root records before fan-out
+        rule_adapter = TypeAdapter(list[ExclusionRule])
+        root_ce = roots[0]
+        root_rules_raw = root_ce.exclusion_rules or []
+        total_filtered = 0
+        if root_rules_raw:
+            root_rules = rule_adapter.validate_python(root_rules_raw)
+            filtered_root_records, root_filt = apply_exclusion_rules(
+                source_result.records, root_rules
+            )
+            total_filtered += root_filt
+        else:
+            filtered_root_records = source_result.records
+
+        fan_out_result = await execute_tree(canvas_endpoints, filtered_root_records, connector, client)
 
     # Determine leaf endpoints (those with no children)
     children_map = _build_tree(canvas_endpoints)
@@ -386,11 +400,26 @@ async def dry_run_canvas(
         )
         all_mapping_rules.extend(_build_mapping_rules(mappings))
 
+    # D-10/D-12: Apply leaf exclusion rules to merged records
+    records_to_map = fan_out_result.merged_records
+    for leaf_ce_id in leaf_ids:
+        leaf_ce = {ce.id: ce for ce in canvas_endpoints}.get(leaf_ce_id)
+        if not leaf_ce:
+            continue
+        leaf_rules_raw = leaf_ce.exclusion_rules or []
+        if leaf_rules_raw:
+            leaf_rules = rule_adapter.validate_python(leaf_rules_raw)
+            records_to_map, leaf_filt = apply_exclusion_rules(records_to_map, leaf_rules)
+            total_filtered += leaf_filt
+
+    total = len(records_to_map)
+    capped_records = records_to_map[:DRY_RUN_CAP]
+
     if not all_mapping_rules:
-        return DryRunResponse(records=[], total_records=total, capped=total > DRY_RUN_CAP)
+        return DryRunResponse(records=[], total_records=total, capped=total > DRY_RUN_CAP, records_filtered=total_filtered)
 
     transformed = [apply_mappings(rec, all_mapping_rules) for rec in capped_records]
-    return DryRunResponse(records=transformed, total_records=total, capped=total > DRY_RUN_CAP)
+    return DryRunResponse(records=transformed, total_records=total, capped=total > DRY_RUN_CAP, records_filtered=total_filtered)
 
 
 

@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useUpdateEndpoint, useDeleteEndpoint } from '@/hooks/queries/useEndpoints'
+import { useToast } from '@/hooks/use-toast'
 import type { ConnectorEndpoint } from '@/types/api'
 
 interface EndpointCardProps {
@@ -28,6 +29,7 @@ export function EndpointCard({ endpoint, connectorId, onEdit }: EndpointCardProp
   const [deleteOpen, setDeleteOpen] = useState(false)
   const updateEndpoint = useUpdateEndpoint()
   const deleteEndpoint = useDeleteEndpoint()
+  const { toast } = useToast()
 
   const {
     attributes,
@@ -55,7 +57,23 @@ export function EndpointCard({ endpoint, connectorId, onEdit }: EndpointCardProp
   const handleDelete = () => {
     deleteEndpoint.mutate(
       { connectorId, endpointId: endpoint.id },
-      { onSuccess: () => setDeleteOpen(false) }
+      {
+        onSuccess: () => setDeleteOpen(false),
+        onError: (err: unknown) => {
+          setDeleteOpen(false)
+          const axiosError = err as { response?: { status?: number; data?: { error?: { details?: { canvas_names?: string[] } } } } }
+          if (axiosError.response?.status === 409 && axiosError.response?.data?.error?.details?.canvas_names) {
+            const names = axiosError.response.data.error.details.canvas_names
+            toast({
+              title: 'Cannot delete endpoint',
+              description: `Endpoint is used in canvases: ${names.join(', ')}. Remove it from those canvases first.`,
+              variant: 'destructive',
+            })
+          } else {
+            toast({ title: 'Failed to delete endpoint', variant: 'destructive' })
+          }
+        },
+      }
     )
   }
 

@@ -66,7 +66,19 @@ export const useDeleteCanvas = () => {
     mutationFn: async (params: { connectorId: string; canvasId: string }) => {
       await apiClient.delete(`/connectors/${params.connectorId}/canvases/${params.canvasId}`)
     },
-    onSuccess: (_, variables) => {
+    onMutate: async (variables) => {
+      await queryClient.cancelQueries({ queryKey: ['canvases', variables.connectorId] })
+      const previous = queryClient.getQueryData<CanvasListItem[]>(['canvases', variables.connectorId])
+      queryClient.setQueryData<CanvasListItem[]>(
+        ['canvases', variables.connectorId],
+        (old) => old?.filter(c => c.id !== variables.canvasId)
+      )
+      return { previous }
+    },
+    onError: (_err, variables, context) => {
+      queryClient.setQueryData(['canvases', variables.connectorId], context?.previous)
+    },
+    onSettled: (_, __, variables) => {
       queryClient.invalidateQueries({ queryKey: ['canvases', variables.connectorId] })
     },
   })

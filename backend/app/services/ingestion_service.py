@@ -280,7 +280,7 @@ async def _run_canvas(
 
     root_url = connector.base_url.rstrip("/") + "/" + root_ep.path.lstrip("/")
     try:
-        source_result = await fetch_all_pages(connector, url=root_url, client=client)
+        source_result = await fetch_all_pages(connector, url=root_url, client=client, data_root=root_ep.data_root)
     except Exception as exc:
         # Root fetch failed -- log and return
         log = EndpointRunLog(

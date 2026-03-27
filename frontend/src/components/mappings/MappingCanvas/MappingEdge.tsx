@@ -99,7 +99,7 @@ export function MappingEdge({
   const badgeClassName =
     `px-2 py-0.5 text-xs rounded-full border font-medium cursor-pointer select-none ` +
     (mappingType === 'collect' && isConfigured
-      ? 'bg-amber-100 text-amber-700 border-amber-300 font-semibold'
+      ? 'bg-amber-100 text-amber-700 border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-700 font-semibold'
       : isConfigured && mappingType !== 'direct'
         ? 'bg-primary/10 text-primary border-primary/30 font-semibold'
         : 'bg-muted text-muted-foreground border-border')

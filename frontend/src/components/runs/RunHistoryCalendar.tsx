@@ -141,7 +141,7 @@ export const RunHistoryCalendar = ({ filters, onDayClick }: RunHistoryCalendarPr
                     {counts.success > 0 && (
                       <Badge
                         variant="outline"
-                        className="text-xs bg-green-600/10 text-green-700 border-green-600/20"
+                        className="text-xs bg-green-600/10 text-green-700 border-green-600/20 dark:bg-green-500/10 dark:text-green-400 dark:border-green-500/20"
                       >
                         {counts.success} ✓
                       </Badge>
@@ -149,7 +149,7 @@ export const RunHistoryCalendar = ({ filters, onDayClick }: RunHistoryCalendarPr
                     {counts.partial_success > 0 && (
                       <Badge
                         variant="outline"
-                        className="text-xs bg-yellow-600/10 text-yellow-700 border-yellow-600/20"
+                        className="text-xs bg-yellow-600/10 text-yellow-700 border-yellow-600/20 dark:bg-yellow-500/10 dark:text-yellow-400 dark:border-yellow-500/20"
                       >
                         {counts.partial_success} ⚠
                       </Badge>
@@ -157,7 +157,7 @@ export const RunHistoryCalendar = ({ filters, onDayClick }: RunHistoryCalendarPr
                     {counts.failed > 0 && (
                       <Badge
                         variant="outline"
-                        className="text-xs bg-red-600/10 text-red-700 border-red-600/20"
+                        className="text-xs bg-red-600/10 text-red-700 border-red-600/20 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20"
                       >
                         {counts.failed} ✗
                       </Badge>

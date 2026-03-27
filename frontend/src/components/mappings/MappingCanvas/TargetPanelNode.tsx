@@ -139,7 +139,7 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
                   {field.is_identity ? `★ ${field.field}` : field.field}
                 </span>
                 {field.is_identity && (
-                  <span className="bg-amber-100 text-amber-700 text-xs px-1 rounded">
+                  <span className="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 text-xs px-1 rounded">
                     [IDENTITY]
                   </span>
                 )}
@@ -166,7 +166,7 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
               {field.is_identity ? `★ ${field.field}` : field.field}
             </span>
             {field.is_identity && (
-              <span className="bg-amber-100 text-amber-700 text-xs px-1 rounded">
+              <span className="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 text-xs px-1 rounded">
                 [IDENTITY]
               </span>
             )}

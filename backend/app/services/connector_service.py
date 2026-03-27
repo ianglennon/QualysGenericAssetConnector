@@ -51,7 +51,7 @@ def test_connector_connection(connector: Connector) -> dict:
     headers = _build_headers(connector)
     start = time.monotonic()
     try:
-        with httpx.Client(timeout=HTTPX_TIMEOUT) as client:
+        with httpx.Client(timeout=HTTPX_TIMEOUT, verify=connector.verify_ssl) as client:
             response = client.get(url, headers=headers)
         elapsed_ms = int((time.monotonic() - start) * 1000)
 

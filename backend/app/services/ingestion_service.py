@@ -253,7 +253,7 @@ async def run_ingestion(run_id: str) -> None:
         total_submitted = 0
         total_failed = 0
 
-        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=connector.verify_ssl) as client:
             for idx, endpoint in enumerate(enabled_endpoints):
                 log = await _run_endpoint(db, run, connector, endpoint, qualys_config, client, idx)
                 logs.append(log)

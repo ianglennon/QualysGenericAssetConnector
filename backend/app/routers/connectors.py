@@ -190,7 +190,7 @@ async def _discover_fields_from_url(connector: Connector, url: str) -> DiscoverR
     """Shared helper: fetch first page from url and return discovered fields."""
     headers = _build_headers(connector)
 
-    async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=connector.verify_ssl) as client:
         response = await _source_client._fetch_with_retries(
             client,
             url,

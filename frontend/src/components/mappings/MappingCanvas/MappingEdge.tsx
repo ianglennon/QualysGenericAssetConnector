@@ -15,6 +15,7 @@ import { CollectEditor } from './CollectEditor'
 export type MappingEdgeType = Edge<MappingEdgeData, 'mapping'>
 
 const CYCLE: MappingTypeUI[] = ['direct', 'static', 'conditional', 'collect']
+const CUSTOM_ATTR_CYCLE: MappingTypeUI[] = ['direct', 'static', 'conditional']
 
 export function MappingEdge({
   id,
@@ -50,7 +51,10 @@ export function MappingEdge({
 
   const cycleType = useCallback(() => {
     const current = (data?.mappingType ?? 'direct') as MappingTypeUI
-    const next = CYCLE[(CYCLE.indexOf(current) + 1) % CYCLE.length]
+    const edge = getEdge(id)
+    const isCustomAttr = edge?.targetHandle?.startsWith('customAttribute.')
+    const cycle = isCustomAttr ? CUSTOM_ATTR_CYCLE : CYCLE
+    const next = cycle[(cycle.indexOf(current) + 1) % cycle.length]
     setEdges((eds) =>
       eds.map((e) =>
         e.id === id
@@ -58,7 +62,7 @@ export function MappingEdge({
           : e
       )
     )
-  }, [id, data?.mappingType, setEdges])
+  }, [id, data?.mappingType, setEdges, getEdge])
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {

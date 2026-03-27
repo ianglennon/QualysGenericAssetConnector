@@ -115,6 +115,151 @@ class TestSourceClientVerifySSL:
         assert call_kwargs.get("verify") is True
 
 
+class TestQualysClientUnaffected:
+    """Qualys API calls must never receive a verify= override — always strict TLS."""
+
+    def test_qualys_adapter_does_not_use_httpx_directly(self):
+        """qualys_adapter.py must not create httpx clients — it delegates to the qualys_client package."""
+        from pathlib import Path
+        adapter_path = Path(__file__).parent.parent.parent / "app" / "services" / "qualys_adapter.py"
+        content = adapter_path.read_text()
+        # The adapter must not import or instantiate httpx clients directly
+        assert "httpx.AsyncClient" not in content, (
+            "qualys_adapter.py must not create httpx.AsyncClient — "
+            "Qualys calls must go through QualysClient package only"
+        )
+        assert "httpx.Client(" not in content, (
+            "qualys_adapter.py must not create httpx.Client — "
+            "Qualys calls must go through QualysClient package only"
+        )
+
+    def test_qualys_adapter_does_not_pass_verify_false(self):
+        """qualys_adapter.py must not contain verify=False — Qualys TLS must always be strict."""
+        from pathlib import Path
+        adapter_path = Path(__file__).parent.parent.parent / "app" / "services" / "qualys_adapter.py"
+        content = adapter_path.read_text()
+        assert "verify=False" not in content, (
+            "qualys_adapter.py must not pass verify=False — "
+            "Qualys API calls must always use strict TLS verification"
+        )
+
+
+class TestMigrationServerDefault:
+    """Alembic migration must set server_default='1' so existing connectors default to verify_ssl=True."""
+
+    def test_migration_uses_server_default_one_for_verify_ssl(self):
+        """Migration add_verify_ssl must have server_default='1' to default existing rows to True."""
+        from pathlib import Path
+        migration_path = (
+            Path(__file__).parent.parent.parent
+            / "app" / "db" / "migrations" / "versions" / "add_verify_ssl.py"
+        )
+        content = migration_path.read_text()
+        assert "server_default='1'" in content, (
+            "Migration add_verify_ssl.py must include server_default='1' so that "
+            "existing connector rows receive verify_ssl=True after migration"
+        )
+
+    def test_migration_adds_verify_ssl_column(self):
+        """Migration must add the verify_ssl column to the connectors table."""
+        from pathlib import Path
+        migration_path = (
+            Path(__file__).parent.parent.parent
+            / "app" / "db" / "migrations" / "versions" / "add_verify_ssl.py"
+        )
+        content = migration_path.read_text()
+        assert "op.add_column" in content and "'verify_ssl'" in content, (
+            "Migration add_verify_ssl.py must call op.add_column with 'verify_ssl'"
+        )
+
+
+class TestConnectorSchemaVerifySSL:
+    """Pydantic schemas must accept verify_ssl in create/update and return it in responses."""
+
+    def test_connector_create_accepts_verify_ssl_false(self):
+        """ConnectorCreate schema must accept verify_ssl=False."""
+        from app.schemas.connector import ConnectorCreate
+        payload = ConnectorCreate(
+            name="test",
+            base_url="https://api.example.com",
+            auth_method="bearer_token",
+            verify_ssl=False,
+        )
+        assert payload.verify_ssl is False
+
+    def test_connector_create_defaults_verify_ssl_to_true(self):
+        """ConnectorCreate schema must default verify_ssl to True when omitted."""
+        from app.schemas.connector import ConnectorCreate
+        payload = ConnectorCreate(
+            name="test",
+            base_url="https://api.example.com",
+            auth_method="bearer_token",
+        )
+        assert payload.verify_ssl is True
+
+    def test_connector_update_accepts_verify_ssl_false(self):
+        """ConnectorUpdate schema must accept verify_ssl=False for patching."""
+        from app.schemas.connector import ConnectorUpdate
+        payload = ConnectorUpdate(verify_ssl=False)
+        assert payload.verify_ssl is False
+
+    def test_connector_update_preserves_none_when_verify_ssl_omitted(self):
+        """ConnectorUpdate schema must leave verify_ssl as None when not provided (preserve existing)."""
+        from app.schemas.connector import ConnectorUpdate
+        payload = ConnectorUpdate(name="renamed")
+        assert payload.verify_ssl is None
+
+    def test_connector_response_includes_verify_ssl_field(self):
+        """ConnectorResponse schema must include verify_ssl as a required boolean field."""
+        from app.schemas.connector import ConnectorResponse
+        from datetime import datetime
+        now = datetime.utcnow()
+        response = ConnectorResponse(
+            id="abc",
+            name="test",
+            base_url="https://api.example.com",
+            test_path=None,
+            auth_method="bearer_token",
+            has_token=True,
+            has_username=False,
+            has_password=False,
+            has_api_key=False,
+            api_key_name=None,
+            source_retry_limit=None,
+            qualys_retry_limit=None,
+            verify_ssl=False,
+            has_valid_endpoints=False,
+            created_at=now,
+            updated_at=now,
+        )
+        assert response.verify_ssl is False
+
+    def test_connector_response_verify_ssl_true_round_trips(self):
+        """ConnectorResponse schema must correctly return verify_ssl=True."""
+        from app.schemas.connector import ConnectorResponse
+        from datetime import datetime
+        now = datetime.utcnow()
+        response = ConnectorResponse(
+            id="xyz",
+            name="another",
+            base_url="https://api.example.com",
+            test_path=None,
+            auth_method="basic_auth",
+            has_token=False,
+            has_username=True,
+            has_password=True,
+            has_api_key=False,
+            api_key_name=None,
+            source_retry_limit=None,
+            qualys_retry_limit=None,
+            verify_ssl=True,
+            has_valid_endpoints=True,
+            created_at=now,
+            updated_at=now,
+        )
+        assert response.verify_ssl is True
+
+
 class TestGrepVerification:
     """Verify all httpx client creation points include verify= parameter via static analysis."""
 

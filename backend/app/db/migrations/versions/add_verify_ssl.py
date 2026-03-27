@@ -1,7 +1,7 @@
 """Add verify_ssl column to connectors table.
 
 Revision ID: c4d5e6f7a8b9
-Revises: b2c3d4e5f6a7
+Revises: b3c4d5e6f7a8
 Create Date: 2026-03-27
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'c4d5e6f7a8b9'
-down_revision: Union[str, None] = 'b2c3d4e5f6a7'
+down_revision: Union[str, None] = 'b3c4d5e6f7a8'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

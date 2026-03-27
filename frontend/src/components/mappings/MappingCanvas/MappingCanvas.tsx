@@ -117,7 +117,7 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
       id: 'target-panel',
       type: 'targetPanel',
       position: { x: TARGET_X, y: 0 },
-      data: { fields: [], linkedTargetFields: new Set(), linkedFieldOrder: new Map() } satisfies TargetPanelData,
+      data: { fields: [], linkedTargetFields: new Set(), linkedFieldOrder: new Map(), customAttributes: [] } satisfies TargetPanelData,
       draggable: false,
       selectable: false,
       style: { width: TARGET_WIDTH, height: 520 },
@@ -226,6 +226,7 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
               fields: targetFields,
               linkedTargetFields: tLinked,
               linkedFieldOrder: tOrder,
+              customAttributes: (n.data as TargetPanelData).customAttributes ?? [],
             } satisfies TargetPanelData,
           }
         }

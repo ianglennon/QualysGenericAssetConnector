@@ -151,6 +151,7 @@ export interface Connector {
   has_valid_endpoints: boolean
   source_retry_limit?: number
   qualys_retry_limit?: number
+  verify_ssl: boolean
   created_at: string
   updated_at: string
 }
@@ -171,6 +172,7 @@ export interface ConnectorCreate {
   credentials?: ConnectorCredentials
   source_retry_limit?: number
   qualys_retry_limit?: number
+  verify_ssl?: boolean
 }
 
 export interface TestConnectionResponse {

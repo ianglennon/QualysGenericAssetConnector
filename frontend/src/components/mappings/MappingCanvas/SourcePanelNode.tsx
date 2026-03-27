@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useUpdateNodeInternals, useNodeId, Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import type { SourcePanelData } from '@/types/canvas'
+import { typeBadgeClass } from '@/lib/field-type-colors'
 
 function getAncestorDepth(path: string): number {
   let depth = 0
@@ -16,18 +17,6 @@ function getAncestorDepth(path: string): number {
 const DEPTH_LABELS: Record<number, string> = {
   1: 'Parent Fields',
   2: 'Grandparent Fields',
-}
-
-const TYPE_BADGE: Record<string, string> = {
-  string: 'bg-blue-100 text-blue-700',
-  number: 'bg-green-100 text-green-700',
-  boolean: 'bg-purple-100 text-purple-700',
-  array: 'bg-orange-100 text-orange-700',
-  object: 'bg-gray-100 text-gray-600',
-}
-
-function typeBadgeClass(type: string): string {
-  return TYPE_BADGE[type] ?? 'bg-gray-100 text-gray-500'
 }
 
 // Inline styles override React Flow's default handle CSS (6x6, transform: translate(50%,-50%))

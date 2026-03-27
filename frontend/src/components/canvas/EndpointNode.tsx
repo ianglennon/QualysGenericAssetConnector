@@ -8,18 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { TemplateVariableHint } from './TemplateVariableHint'
 import { ExclusionRulesDialog } from './ExclusionRulesDialog'
 import type { EndpointNodeData, FieldDiscoveryItem, ExclusionRule } from '@/types/canvas'
-
-const TYPE_BADGE: Record<string, string> = {
-  string: 'bg-blue-100 text-blue-700',
-  number: 'bg-green-100 text-green-700',
-  boolean: 'bg-purple-100 text-purple-700',
-  array: 'bg-orange-100 text-orange-700',
-  object: 'bg-gray-100 text-gray-600',
-}
-
-function typeBadgeClass(type: string): string {
-  return TYPE_BADGE[type] ?? 'bg-gray-100 text-gray-500'
-}
+import { typeBadgeClass } from '@/lib/field-type-colors'
 
 const SOURCE_HANDLE_STYLE: React.CSSProperties = {
   right: 0,

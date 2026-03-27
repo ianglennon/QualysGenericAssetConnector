@@ -84,6 +84,47 @@ def test_flatten_array_primitives():
     assert entry["sample_value"] == ["linux", "prod"]
 
 
+def test_nested_array_children_get_correct_parent_array_path():
+    """Nested array children reference their immediate parent array, not the outermost.
+
+    Given {"data": {"result": [{"id": "123", "interfaces": [{"ip": "10.0.0.1"}]}]}}:
+    - data.result[].interfaces[].ip should have parent_array_path="data.result[].interfaces"
+    - data.result[].interfaces should have is_array_parent=True, is_array_child=True,
+      parent_array_path="data.result"
+    - data.result[].id should have parent_array_path="data.result"
+    """
+    record = {
+        "data": {
+            "result": [
+                {
+                    "id": "123",
+                    "interfaces": [
+                        {"ip": "10.0.0.1"}
+                    ],
+                }
+            ]
+        }
+    }
+    fields = flatten_fields(record)
+    paths = {f["path"]: f for f in fields}
+
+    # Leaf inside nested array: parent is the immediate array
+    ip_field = paths["data.result[].interfaces[].ip"]
+    assert ip_field["is_array_child"] is True
+    assert ip_field["parent_array_path"] == "data.result[].interfaces"
+
+    # Nested array parent: both an array parent and a child of the outer array
+    ifaces_field = paths["data.result[].interfaces"]
+    assert ifaces_field["is_array_parent"] is True
+    assert ifaces_field["is_array_child"] is True
+    assert ifaces_field["parent_array_path"] == "data.result"
+
+    # Simple child of outer array
+    id_field = paths["data.result[].id"]
+    assert id_field["is_array_child"] is True
+    assert id_field["parent_array_path"] == "data.result"
+
+
 def test_depth_cap():
     """Recursion stops at depth 5; no paths with 6 levels of nesting are emitted.
 

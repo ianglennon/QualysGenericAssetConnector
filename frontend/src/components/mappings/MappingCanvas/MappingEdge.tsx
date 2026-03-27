@@ -27,7 +27,7 @@ export function MappingEdge({
   targetPosition,
   data,
 }: EdgeProps<MappingEdgeType>) {
-  const { deleteElements, setEdges, getEdge } = useReactFlow()
+  const { deleteElements, setEdges, getEdge, getNodes } = useReactFlow()
   const [hovered, setHovered] = useState(false)
   const [editorOpen, setEditorOpen] = useState<'static' | 'conditional' | 'collect' | null>(null)
   const badgeRef = useRef<HTMLSpanElement>(null)
@@ -55,14 +55,33 @@ export function MappingEdge({
     const isCustomAttr = edge?.targetHandle?.startsWith('customAttribute.')
     const cycle = isCustomAttr ? CUSTOM_ATTR_CYCLE : CYCLE
     const next = cycle[(cycle.indexOf(current) + 1) % cycle.length]
+
+    // Pre-fill collectConfig from source field metadata when cycling TO collect
+    let collectConfig: CollectConfig | undefined
+    if (next === 'collect' && edge?.sourceHandle) {
+      const sourceNode = getNodes().find(n => n.id === edge.source)
+      const fields = (sourceNode?.data as any)?.fields as { path: string; is_array_child?: boolean; parent_array_path?: string; is_array_parent?: boolean }[] | undefined
+      const fieldMeta = fields?.find(f => f.path === edge.sourceHandle)
+      if (fieldMeta?.is_array_child && fieldMeta.parent_array_path) {
+        collectConfig = {
+          array_path: fieldMeta.parent_array_path,
+          extract_field: fieldMeta.path.split('[].').pop() || '',
+        }
+      } else if (fieldMeta?.is_array_parent) {
+        collectConfig = {
+          array_path: fieldMeta.path.replace('[]', ''),
+        }
+      }
+    }
+
     setEdges((eds) =>
       eds.map((e) =>
         e.id === id
-          ? { ...e, data: { ...e.data, mappingType: next, staticValue: undefined, conditions: [], fallback: undefined, collectConfig: undefined } }
+          ? { ...e, data: { ...e.data, mappingType: next, staticValue: undefined, conditions: [], fallback: undefined, collectConfig } }
           : e
       )
     )
-  }, [id, data?.mappingType, setEdges, getEdge])
+  }, [id, data?.mappingType, setEdges, getEdge, getNodes])
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent) => {

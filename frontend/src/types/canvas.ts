@@ -90,9 +90,7 @@ export interface TargetPanelData {
   fields: QualysSchemaField[]
   linkedTargetFields: Set<string>   // field names with an active edge
   linkedFieldOrder: Map<string, number>  // target field → sort position (matching source panel order)
-  customAttributes: QualysSchemaField[]     // custom attribute target fields
-  onAddCustomAttribute?: (key: string) => void  // callback from dialog
-  onRemoveCustomAttribute?: (field: string) => void  // callback from X button
+  customAttributes?: QualysSchemaField[]    // custom attribute target fields
 }
 
 // Edge data shape for MappingEdge custom edge

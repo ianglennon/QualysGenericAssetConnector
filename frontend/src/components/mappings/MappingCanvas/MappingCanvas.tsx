@@ -21,7 +21,7 @@ import { SourcePanelNode } from './SourcePanelNode'
 import { TargetPanelNode } from './TargetPanelNode'
 import { MappingEdge } from './MappingEdge'
 import { DashedConnectionLine } from './DashedConnectionLine'
-import type { SourcePanelData, TargetPanelData, MappingEdgeData, CanvasConditionRule, StaticValueType, DiscoverResponse, CollectConfig, FieldDiscoveryItem, MappingTypeUI, QualysSchemaField } from '@/types/canvas'
+import type { SourcePanelData, TargetPanelData, MappingEdgeData, CanvasConditionRule, StaticValueType, DiscoverResponse, CollectConfig, FieldDiscoveryItem, MappingTypeUI } from '@/types/canvas'
 import { apiTypeToCanvas } from '@/types/canvas'
 
 // Helper: infer StaticValueType from a string value
@@ -86,7 +86,6 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
   const { data: savedMappings, isLoading: loadingMappings, isError: mappingsError } = useEndpointMappings(connectorId, endpointId)
   const discoverFields = useEndpointDiscoverFields()
   const [discoveredFields, setDiscoveredFields] = useState<DiscoverResponse | null>(null)
-  const [customAttributes, setCustomAttributes] = useState<QualysSchemaField[]>([])
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(800)
@@ -139,7 +138,6 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
     seededEndpointRef.current = null
     setEdges([])
     setDiscoveredFields(null)
-    setCustomAttributes([])
   }, [endpointId, setEdges])
 
   // Compute source fields: discovered (if non-empty) > saved mappings fallback > empty
@@ -203,31 +201,22 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
 
     setEdges(seededEdges)
 
-    // Reconstruct custom attribute target fields from saved mappings
+    // Reconstruct custom attribute target fields from saved mappings into node data
     const customAttrsFromMappings = savedMappings
       .filter(m => m.target_field.startsWith('customAttribute.'))
       .map(m => m.target_field)
     const uniqueCustomKeys = [...new Set(customAttrsFromMappings)]
-    setCustomAttributes(
-      uniqueCustomKeys.map(field => ({ field, is_identity: false }))
-    )
-  }, [savedMappings, endpointId, setEdges])
-
-  const handleAddCustomAttribute = useCallback((key: string) => {
-    const field = `customAttribute.${key}`
-    setCustomAttributes(prev => {
-      if (prev.some(f => f.field === field)) return prev
-      return [...prev, { field, is_identity: false }]
-    })
-  }, [])
-
-  const handleRemoveCustomAttribute = useCallback((field: string) => {
-    setCustomAttributes(prev => prev.filter(f => f.field !== field))
-    // Also remove any edges connected to this custom attribute target
-    setEdges(eds => eds.filter(e => e.targetHandle !== field))
-  }, [setEdges])
+    if (uniqueCustomKeys.length > 0) {
+      const reconstructed = uniqueCustomKeys.map(field => ({ field, is_identity: false }))
+      setNodes(nds => nds.map(n => {
+        if (n.id !== 'target-panel') return n
+        return { ...n, data: { ...(n.data as unknown as TargetPanelData), customAttributes: reconstructed } }
+      }))
+    }
+  }, [savedMappings, endpointId, setEdges, setNodes])
 
   // Update both panels' node data whenever edges, source fields, or schema change.
+  // Preserves existing customAttributes in target panel (managed by TargetPanelNode locally).
   useEffect(() => {
     const { sLinked, sOrder, tLinked, tOrder } = computePanelData(edges)
     const targetFields = schemaData?.fields ?? []
@@ -248,19 +237,17 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
           return {
             ...n,
             data: {
+              ...(n.data as unknown as TargetPanelData),
               fields: targetFields,
               linkedTargetFields: tLinked,
               linkedFieldOrder: tOrder,
-              customAttributes,
-              onAddCustomAttribute: handleAddCustomAttribute,
-              onRemoveCustomAttribute: handleRemoveCustomAttribute,
-            } satisfies TargetPanelData,
+            },
           }
         }
         return n
       })
     )
-  }, [edges, sourceFields, schemaData, setNodes, customAttributes, handleAddCustomAttribute, handleRemoveCustomAttribute])
+  }, [edges, sourceFields, schemaData, setNodes])
 
   // Auto-discover removed: when saved mappings exist, sourceFields falls back
   // to the field names extracted from those mappings (line 146). Users can click

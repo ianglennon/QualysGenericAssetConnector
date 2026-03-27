@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useUpdateNodeInternals, useNodeId, Handle, Position } from '@xyflow/react'
+import { useUpdateNodeInternals, useNodeId, useReactFlow, Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import { Plus, X } from 'lucide-react'
 import type { TargetPanelData, QualysSchemaField } from '@/types/canvas'
@@ -39,7 +39,32 @@ function Separator({ label }: { label: string }) {
 export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData }) {
   const nodeId = useNodeId() ?? 'target-panel'
   const updateNodeInternals = useUpdateNodeInternals()
+  const { setEdges } = useReactFlow()
   const [addDialogOpen, setAddDialogOpen] = useState(false)
+
+  // Local custom attributes state — self-contained, no parent callback needed
+  const [localCustomAttrs, setLocalCustomAttrs] = useState<QualysSchemaField[]>(
+    data.customAttributes ?? []
+  )
+
+  // Sync from parent when data.customAttributes changes (reconstruct from saved mappings, reset)
+  useEffect(() => {
+    const parentAttrs = data.customAttributes ?? []
+    setLocalCustomAttrs(parentAttrs)
+  }, [data.customAttributes])
+
+  function handleAddAttribute(key: string) {
+    const field = `customAttribute.${key}`
+    setLocalCustomAttrs(prev => {
+      if (prev.some(f => f.field === field)) return prev
+      return [...prev, { field, is_identity: false }]
+    })
+  }
+
+  function handleRemoveAttribute(field: string) {
+    setLocalCustomAttrs(prev => prev.filter(f => f.field !== field))
+    setEdges(eds => eds.filter(e => e.targetHandle !== field))
+  }
 
   // Sort linked fields by edge index (matches source panel order → straight lines)
   const linkedFields = [...data.fields]
@@ -55,8 +80,7 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
     data.fields.filter(f => !data.linkedTargetFields.has(f.field))
   )
 
-  const customAttributes = data.customAttributes ?? []
-  const linkedCustomAttrs = customAttributes
+  const linkedCustomAttrs = localCustomAttrs
     .filter(f => data.linkedTargetFields.has(f.field))
     .sort((a, b) => {
       const posA = data.linkedFieldOrder?.get(a.field) ?? Infinity
@@ -64,17 +88,17 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
       if (posA !== posB) return posA - posB
       return a.field.localeCompare(b.field)
     })
-  const unlinkedCustomAttrs = customAttributes
+  const unlinkedCustomAttrs = localCustomAttrs
     .filter(f => !data.linkedTargetFields.has(f.field))
     .sort((a, b) => a.field.localeCompare(b.field))
   const allCustomAttrs = [...linkedCustomAttrs, ...unlinkedCustomAttrs]
 
   // Re-register handle positions when fields change (initial load, seeding)
   useEffect(() => {
-    if (data.fields.length > 0 || (data.customAttributes ?? []).length > 0) {
+    if (data.fields.length > 0 || localCustomAttrs.length > 0) {
       requestAnimationFrame(() => updateNodeInternals(nodeId))
     }
-  }, [data.fields, data.customAttributes, data.linkedTargetFields, data.linkedFieldOrder, nodeId, updateNodeInternals])
+  }, [data.fields, localCustomAttrs, data.linkedTargetFields, data.linkedFieldOrder, nodeId, updateNodeInternals])
 
   function handleScroll() {
     updateNodeInternals(nodeId)
@@ -149,7 +173,7 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
           </div>
         ))}
 
-        <Separator label={`——— Custom Attributes (${customAttributes.length}) ———`} />
+        <Separator label={`——— Custom Attributes (${localCustomAttrs.length}) ———`} />
 
         {allCustomAttrs.length === 0 ? (
           <p className="text-xs text-muted-foreground italic px-3 py-2">
@@ -164,7 +188,7 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
                 key={field.field}
                 className={`relative flex items-center gap-2 px-3 py-2 text-xs ${
                   isLinked
-                    ? 'border-r-2 border-violet-400 bg-violet-50'
+                    ? 'border-r-2 border-violet-400 bg-violet-50 dark:bg-violet-950/40'
                     : 'hover:bg-muted/30'
                 }`}
               >
@@ -176,12 +200,12 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
                   style={TARGET_HANDLE_STYLE}
                 />
                 <span className="flex-1 font-mono truncate">{displayName}</span>
-                <span className="bg-violet-100 text-violet-700 text-xs px-1 rounded">
+                <span className="bg-violet-100 text-violet-700 dark:bg-violet-900 dark:text-violet-300 text-xs px-1 rounded">
                   [CUSTOM]
                 </span>
                 <button
                   className="text-muted-foreground hover:text-destructive p-0.5"
-                  onClick={() => data.onRemoveCustomAttribute?.(field.field)}
+                  onClick={() => handleRemoveAttribute(field.field)}
                   title="Remove custom attribute"
                   aria-label="Remove custom attribute"
                 >
@@ -203,8 +227,11 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
 
         <AddCustomAttributeDialog
           open={addDialogOpen}
-          existingKeys={new Set(customAttributes.map(f => f.field))}
-          onAdd={(key) => data.onAddCustomAttribute?.(key)}
+          existingKeys={new Set(localCustomAttrs.map(f => f.field))}
+          onAdd={(key) => {
+            handleAddAttribute(key)
+            setAddDialogOpen(false)
+          }}
           onClose={() => setAddDialogOpen(false)}
         />
       </div>

@@ -43,8 +43,8 @@ export function AddCustomAttributeDialog({ open, existingKeys, onAdd, onClose }:
     onClose()
   }
 
-  function handleOpenChange(open: boolean) {
-    if (!open) {
+  function handleOpenChange(nextOpen: boolean) {
+    if (!nextOpen) {
       setKey('')
       onClose()
     }

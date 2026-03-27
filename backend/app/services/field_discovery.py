@@ -76,10 +76,13 @@ def flatten_fields(
                 child_prefix = f"{path}[]"
                 before_count = len(results)
                 flatten_fields(value[0], child_prefix, depth + 1, results)
-                # Tag child fields with array metadata
+                # Tag child fields with array metadata — only set parent_array_path
+                # for direct children; nested array children already have their own
+                # parent_array_path set by the inner recursion.
                 for i in range(before_count, len(results)):
                     results[i]["is_array_child"] = True
-                    results[i]["parent_array_path"] = path
+                    if "parent_array_path" not in results[i]:
+                        results[i]["parent_array_path"] = path
             else:
                 # Array of primitives (or empty) — surface as a single "array" entry
                 results.append({

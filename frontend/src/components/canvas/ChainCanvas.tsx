@@ -52,6 +52,8 @@ import type {
   EndpointNodeData,
   ChainEdgeData,
   MappingEdgeData,
+  MappingTypeUI,
+  CollectConfig,
   DiscoverResponse,
   TargetPanelData,
   ExclusionRule,
@@ -288,6 +290,20 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
       )
       if (mappingEdges.length > 0) {
         setEdges((prev) => [...prev, ...mappingEdges])
+
+        // Reconstruct custom attribute target fields from saved mappings
+        const customAttrFields = [...new Set(
+          mappingEdges
+            .map(e => e.targetHandle)
+            .filter((h): h is string => !!h && h.startsWith('customAttribute.'))
+        )]
+        if (customAttrFields.length > 0) {
+          const reconstructed = customAttrFields.map(field => ({ field, is_identity: false }))
+          setNodes(nds => nds.map(n => {
+            if (n.id !== TARGET_PANEL_ID) return n
+            return { ...n, data: { ...(n.data as unknown as TargetPanelData), customAttributes: reconstructed } }
+          }))
+        }
       }
 
       setTimeout(() => fitView({ padding: 0.2 }), 100)
@@ -315,10 +331,11 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
           return {
             ...n,
             data: {
+              ...(n.data as unknown as TargetPanelData),
               fields: qualysSchema.fields,
               linkedTargetFields: linkedFields,
               linkedFieldOrder: linkedOrder,
-            } satisfies TargetPanelData,
+            },
           }
         }
         return n
@@ -534,6 +551,36 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
 
       if (targetNode?.type === 'targetPanel') {
         // Mapping edge: field -> Qualys target
+        // Auto-detect collect mapping for array fields
+        let mappingType: MappingTypeUI = 'direct'
+        let collectConfig: CollectConfig | undefined
+        const sourceNode = getNode(connection.source ?? '')
+        const sourceFields = (sourceNode?.data as EndpointNodeData | undefined)?.fields
+        const fieldMeta = sourceFields?.find(f => f.path === connection.sourceHandle)
+
+        if (fieldMeta?.is_array_child && fieldMeta.parent_array_path) {
+          mappingType = 'collect'
+          collectConfig = {
+            array_path: fieldMeta.parent_array_path,
+            extract_field: fieldMeta.path.split('[].').pop() || '',
+          }
+        } else if (fieldMeta?.is_array_parent) {
+          mappingType = 'collect'
+          collectConfig = {
+            array_path: fieldMeta.path.replace('[]', ''),
+          }
+        }
+
+        // Block collect for custom attribute targets
+        const isCustomAttrTarget = connection.targetHandle?.startsWith('customAttribute.')
+        if (isCustomAttrTarget && mappingType === 'collect') {
+          toast({
+            title: 'Collect mappings are not supported for custom attributes. Use direct, static, or conditional.',
+          })
+          mappingType = 'direct'
+          collectConfig = undefined
+        }
+
         const newEdge: Edge = {
           id: `mapping-${connection.sourceHandle}-${connection.targetHandle}-${Date.now()}`,
           source: connection.source ?? '',
@@ -541,7 +588,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
           target: connection.target ?? '',
           targetHandle: connection.targetHandle ?? undefined,
           type: 'mapping',
-          data: { mappingType: 'direct' } satisfies MappingEdgeData,
+          data: { mappingType, ...(collectConfig ? { collectConfig } : {}) } satisfies MappingEdgeData,
         }
         setEdges((eds) => {
           // One-to-one: remove existing edges with same source or target handle
@@ -567,7 +614,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
         setEdges((eds) => [...eds, newEdge])
       }
     },
-    [getNode, setEdges],
+    [getNode, setEdges, toast],
   )
 
   // onConnectEnd: drag ended on empty canvas (D-05/D-06)

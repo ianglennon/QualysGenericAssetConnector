@@ -256,7 +256,15 @@ async def discover_canvas_endpoint_fields(
         # If target IS the root, return flat discovery
         if len(chain) == 1:
             raw_fields = merge_fields_across_records(root_records)
-            fields = [{"path": f["path"], "type": f["type"], "sample_value": f["sample_value"]} for f in raw_fields]
+            fields = [
+                {
+                    "path": f["path"], "type": f["type"], "sample_value": f["sample_value"],
+                    "is_array_child": f.get("is_array_child"),
+                    "parent_array_path": f.get("parent_array_path"),
+                    "is_array_parent": f.get("is_array_parent"),
+                }
+                for f in raw_fields
+            ]
             return DiscoverResponse(fields=fields, record_count=len(root_records))
 
         # Traverse DOWN through chain, sampling DISCOVERY_SAMPLE_SIZE records per level
@@ -344,7 +352,15 @@ async def discover_canvas_endpoint_fields(
         return DiscoverResponse(fields=[], record_count=0)
 
     raw_fields = merge_fields_across_records(all_merged_child_records)
-    fields = [{"path": f["path"], "type": f["type"], "sample_value": f["sample_value"]} for f in raw_fields]
+    fields = [
+        {
+            "path": f["path"], "type": f["type"], "sample_value": f["sample_value"],
+            "is_array_child": f.get("is_array_child"),
+            "parent_array_path": f.get("parent_array_path"),
+            "is_array_parent": f.get("is_array_parent"),
+        }
+        for f in raw_fields
+    ]
     return DiscoverResponse(fields=fields, record_count=len(all_merged_child_records))
 
 

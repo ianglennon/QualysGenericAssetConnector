@@ -238,7 +238,12 @@ async def _discover_fields_from_url(
 
     raw_fields = merge_fields_across_records(records)
     fields = [
-        {"path": f["path"], "type": f["type"], "sample_value": f["sample_value"]}
+        {
+            "path": f["path"], "type": f["type"], "sample_value": f["sample_value"],
+            "is_array_child": f.get("is_array_child"),
+            "parent_array_path": f.get("parent_array_path"),
+            "is_array_parent": f.get("is_array_parent"),
+        }
         for f in raw_fields
     ]
 

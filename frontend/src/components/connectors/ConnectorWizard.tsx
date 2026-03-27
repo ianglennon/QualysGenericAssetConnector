@@ -13,7 +13,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Loader2, CheckCircle2, XCircle } from 'lucide-react'
+import { Switch } from '@/components/ui/switch'
+import { Loader2, CheckCircle2, XCircle, ShieldAlert } from 'lucide-react'
 import { useTestConnection } from '@/hooks/queries/useConnectors'
 import type { ConnectorCreate, Connector, AuthMethod } from '@/types/api'
 
@@ -29,6 +30,7 @@ const connectorSchema = z.object({
     api_key_name: z.string().optional(),
     api_key: z.string().optional(),
   }).optional(),
+  verify_ssl: z.boolean().default(true),
 })
 
 type ConnectorFormData = z.infer<typeof connectorSchema>
@@ -57,12 +59,14 @@ export function ConnectorWizard({ connector, onSubmit, isSubmitting = false }: C
       test_path: connector.test_path || '',
       auth_method: connector.auth_method,
       credentials: {},
+      verify_ssl: connector.verify_ssl ?? true,
     } : {
       name: '',
       base_url: '',
       test_path: '',
       auth_method: 'bearer_token',
       credentials: {},
+      verify_ssl: true,
     },
     mode: 'onChange',
   })
@@ -263,6 +267,31 @@ export function ConnectorWizard({ connector, onSubmit, isSubmitting = false }: C
             </div>
           )}
 
+          {/* SSL Verification */}
+          <div className="space-y-2 pt-4 border-t">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="verify_ssl"
+                checked={form.watch('verify_ssl')}
+                onCheckedChange={(checked) => form.setValue('verify_ssl', checked)}
+                aria-describedby={!form.watch('verify_ssl') ? 'verify_ssl_warning' : undefined}
+              />
+              <Label htmlFor="verify_ssl">Verify SSL Certificate</Label>
+            </div>
+            {!form.watch('verify_ssl') && (
+              <p
+                id="verify_ssl_warning"
+                className="flex items-start gap-1 text-[13px] leading-[1.4] text-amber-600 dark:text-amber-500"
+              >
+                <ShieldAlert className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>
+                  Disabling certificate verification exposes connections to man-in-the-middle
+                  attacks. Only use for trusted internal endpoints with self-signed certificates.
+                </span>
+              </p>
+            )}
+          </div>
+
           <div className="flex justify-between">
             <Button type="button" variant="outline" onClick={() => setCurrentStep('basic')}>
               Previous
@@ -298,6 +327,11 @@ export function ConnectorWizard({ connector, onSubmit, isSubmitting = false }: C
             <div>
               <p className="text-sm font-medium text-muted-foreground">Authentication</p>
               <p className="text-sm capitalize">{form.watch('auth_method').replace('_', ' ')}</p>
+            </div>
+
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">SSL Verification</p>
+              <p className="text-sm">{form.watch('verify_ssl') ? 'Enabled' : 'Disabled'}</p>
             </div>
           </div>
 

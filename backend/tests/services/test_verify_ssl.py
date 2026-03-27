@@ -130,6 +130,7 @@ class TestGrepVerification:
             root / "services" / "ingestion_service.py",
             root / "services" / "preview.py",
             root / "routers" / "connectors.py",
+            root / "routers" / "canvas_endpoints.py",
         ]
 
         pattern = re.compile(r"httpx\.(Async)?Client\(")

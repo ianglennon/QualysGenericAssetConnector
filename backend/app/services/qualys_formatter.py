@@ -162,9 +162,17 @@ def format_asset_for_qualys(record: dict[str, Any]) -> dict[str, Any]:
     if "containers" in record:
         asset["coreAttributes"]["containers"] = record["containers"]
     
-    if "customConnectorAttributes" in record:
-        asset["coreAttributes"]["customConnectorAttributes"] = record["customConnectorAttributes"]
-    
+    # Collect customAttribute.* prefixed fields into customConnectorAttributes dict
+    # per D-09, D-10, D-11: flat dict format {"key": "value"} for Qualys CSAM Import API
+    custom_attrs = {}
+    for key, value in record.items():
+        if key.startswith("customAttribute."):
+            attr_name = key[len("customAttribute."):]
+            custom_attrs[attr_name] = value
+
+    if custom_attrs:
+        asset["coreAttributes"]["customConnectorAttributes"] = custom_attrs
+
     return asset
 
 

@@ -506,7 +506,7 @@ async def run_ingestion(run_id: str, canvas_id: str | None = None) -> None:
         total_submitted = 0
         total_failed = 0
 
-        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=connector.verify_ssl) as client:
             # === CANVAS PATH (D-01/D-03): Execute canvas trees first ===
             if canvas_id:
                 canvases = (

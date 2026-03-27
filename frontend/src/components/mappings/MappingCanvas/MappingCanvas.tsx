@@ -21,7 +21,7 @@ import { SourcePanelNode } from './SourcePanelNode'
 import { TargetPanelNode } from './TargetPanelNode'
 import { MappingEdge } from './MappingEdge'
 import { DashedConnectionLine } from './DashedConnectionLine'
-import type { SourcePanelData, TargetPanelData, MappingEdgeData, CanvasConditionRule, StaticValueType, DiscoverResponse, CollectConfig, FieldDiscoveryItem, MappingTypeUI } from '@/types/canvas'
+import type { SourcePanelData, TargetPanelData, MappingEdgeData, CanvasConditionRule, StaticValueType, DiscoverResponse, CollectConfig, FieldDiscoveryItem, MappingTypeUI, QualysSchemaField } from '@/types/canvas'
 import { apiTypeToCanvas } from '@/types/canvas'
 
 // Helper: infer StaticValueType from a string value
@@ -86,6 +86,7 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
   const { data: savedMappings, isLoading: loadingMappings, isError: mappingsError } = useEndpointMappings(connectorId, endpointId)
   const discoverFields = useEndpointDiscoverFields()
   const [discoveredFields, setDiscoveredFields] = useState<DiscoverResponse | null>(null)
+  const [customAttributes, setCustomAttributes] = useState<QualysSchemaField[]>([])
 
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(800)
@@ -138,6 +139,7 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
     seededEndpointRef.current = null
     setEdges([])
     setDiscoveredFields(null)
+    setCustomAttributes([])
   }, [endpointId, setEdges])
 
   // Compute source fields: discovered (if non-empty) > saved mappings fallback > empty
@@ -200,7 +202,30 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
     }))
 
     setEdges(seededEdges)
+
+    // Reconstruct custom attribute target fields from saved mappings
+    const customAttrsFromMappings = savedMappings
+      .filter(m => m.target_field.startsWith('customAttribute.'))
+      .map(m => m.target_field)
+    const uniqueCustomKeys = [...new Set(customAttrsFromMappings)]
+    setCustomAttributes(
+      uniqueCustomKeys.map(field => ({ field, is_identity: false }))
+    )
   }, [savedMappings, endpointId, setEdges])
+
+  const handleAddCustomAttribute = useCallback((key: string) => {
+    const field = `customAttribute.${key}`
+    setCustomAttributes(prev => {
+      if (prev.some(f => f.field === field)) return prev
+      return [...prev, { field, is_identity: false }]
+    })
+  }, [])
+
+  const handleRemoveCustomAttribute = useCallback((field: string) => {
+    setCustomAttributes(prev => prev.filter(f => f.field !== field))
+    // Also remove any edges connected to this custom attribute target
+    setEdges(eds => eds.filter(e => e.targetHandle !== field))
+  }, [setEdges])
 
   // Update both panels' node data whenever edges, source fields, or schema change.
   useEffect(() => {
@@ -226,14 +251,16 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
               fields: targetFields,
               linkedTargetFields: tLinked,
               linkedFieldOrder: tOrder,
-              customAttributes: (n.data as TargetPanelData).customAttributes ?? [],
+              customAttributes,
+              onAddCustomAttribute: handleAddCustomAttribute,
+              onRemoveCustomAttribute: handleRemoveCustomAttribute,
             } satisfies TargetPanelData,
           }
         }
         return n
       })
     )
-  }, [edges, sourceFields, schemaData, setNodes])
+  }, [edges, sourceFields, schemaData, setNodes, customAttributes, handleAddCustomAttribute, handleRemoveCustomAttribute])
 
   // Auto-discover removed: when saved mappings exist, sourceFields falls back
   // to the field names extracted from those mappings (line 146). Users can click
@@ -277,6 +304,16 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
       // D-14: Nested scalar fields (path contains dots but not []) create direct_copy
       // with the full dot-path as source_field — this is the default behavior,
       // resolve_path on the backend handles nested traversal.
+
+      // D-13: Block collect mapping type for custom attribute targets
+      const isCustomAttrTarget = norm.targetHandle?.startsWith('customAttribute.')
+      if (isCustomAttrTarget && mappingType === 'collect') {
+        toast({
+          title: 'Collect mappings are not supported for custom attributes. Use direct, static, or conditional.',
+        })
+        mappingType = 'direct'
+        collectConfig = undefined
+      }
 
       setEdges((eds) => {
         // Remove existing edges for same source or target handle (one-to-one)

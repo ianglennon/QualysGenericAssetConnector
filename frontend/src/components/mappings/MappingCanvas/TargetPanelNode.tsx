@@ -1,7 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useUpdateNodeInternals, useNodeId, Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
+import { Plus, X } from 'lucide-react'
 import type { TargetPanelData, QualysSchemaField } from '@/types/canvas'
+import { AddCustomAttributeDialog } from './AddCustomAttributeDialog'
 
 function sortFields(fields: QualysSchemaField[]): QualysSchemaField[] {
   return [...fields].sort((a, b) => {
@@ -37,6 +39,7 @@ function Separator({ label }: { label: string }) {
 export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData }) {
   const nodeId = useNodeId() ?? 'target-panel'
   const updateNodeInternals = useUpdateNodeInternals()
+  const [addDialogOpen, setAddDialogOpen] = useState(false)
 
   // Sort linked fields by edge index (matches source panel order → straight lines)
   const linkedFields = [...data.fields]
@@ -52,12 +55,26 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
     data.fields.filter(f => !data.linkedTargetFields.has(f.field))
   )
 
+  const customAttributes = data.customAttributes ?? []
+  const linkedCustomAttrs = customAttributes
+    .filter(f => data.linkedTargetFields.has(f.field))
+    .sort((a, b) => {
+      const posA = data.linkedFieldOrder?.get(a.field) ?? Infinity
+      const posB = data.linkedFieldOrder?.get(b.field) ?? Infinity
+      if (posA !== posB) return posA - posB
+      return a.field.localeCompare(b.field)
+    })
+  const unlinkedCustomAttrs = customAttributes
+    .filter(f => !data.linkedTargetFields.has(f.field))
+    .sort((a, b) => a.field.localeCompare(b.field))
+  const allCustomAttrs = [...linkedCustomAttrs, ...unlinkedCustomAttrs]
+
   // Re-register handle positions when fields change (initial load, seeding)
   useEffect(() => {
-    if (data.fields.length > 0) {
+    if (data.fields.length > 0 || (data.customAttributes ?? []).length > 0) {
       requestAnimationFrame(() => updateNodeInternals(nodeId))
     }
-  }, [data.fields, data.linkedTargetFields, data.linkedFieldOrder, nodeId, updateNodeInternals])
+  }, [data.fields, data.customAttributes, data.linkedTargetFields, data.linkedFieldOrder, nodeId, updateNodeInternals])
 
   function handleScroll() {
     updateNodeInternals(nodeId)
@@ -131,6 +148,65 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
             )}
           </div>
         ))}
+
+        <Separator label={`——— Custom Attributes (${customAttributes.length}) ———`} />
+
+        {allCustomAttrs.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic px-3 py-2">
+            No custom attributes defined. Click + Add custom attribute to map source fields to Qualys custom key-value pairs.
+          </p>
+        ) : (
+          allCustomAttrs.map(field => {
+            const isLinked = data.linkedTargetFields.has(field.field)
+            const displayName = field.field.replace('customAttribute.', '')
+            return (
+              <div
+                key={field.field}
+                className={`relative flex items-center gap-2 px-3 py-2 text-xs ${
+                  isLinked
+                    ? 'border-r-2 border-violet-400 bg-violet-50'
+                    : 'hover:bg-muted/30'
+                }`}
+              >
+                <Handle
+                  type="target"
+                  position={Position.Left}
+                  id={field.field}
+                  isConnectable={!isLinked}
+                  style={TARGET_HANDLE_STYLE}
+                />
+                <span className="flex-1 font-mono truncate">{displayName}</span>
+                <span className="bg-violet-100 text-violet-700 text-xs px-1 rounded">
+                  [CUSTOM]
+                </span>
+                <button
+                  className="text-muted-foreground hover:text-destructive p-0.5"
+                  onClick={() => data.onRemoveCustomAttribute?.(field.field)}
+                  title="Remove custom attribute"
+                  aria-label="Remove custom attribute"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            )
+          })
+        )}
+
+        {/* Add custom attribute button */}
+        <button
+          className="flex items-center gap-1 px-3 py-2 text-xs text-muted-foreground hover:text-foreground w-full text-left"
+          onClick={() => setAddDialogOpen(true)}
+        >
+          <Plus className="h-3 w-3" />
+          + Add custom attribute
+        </button>
+
+        <AddCustomAttributeDialog
+          open={addDialogOpen}
+          existingKeys={new Set(customAttributes.map(f => f.field))}
+          onAdd={(key) => data.onAddCustomAttribute?.(key)}
+          onClose={() => setAddDialogOpen(false)}
+        />
       </div>
     </div>
   )

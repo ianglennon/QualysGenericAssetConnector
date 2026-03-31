@@ -199,7 +199,7 @@ async def _discover_fields_from_url(
     """
     headers = _build_headers(connector)
 
-    async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=connector.verify_ssl) as client:
+    async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=bool(connector.verify_ssl)) as client:
         fetch_result = await _source_client._fetch_with_retries(
             client,
             url,

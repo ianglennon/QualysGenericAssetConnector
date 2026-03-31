@@ -199,7 +199,7 @@ async def fetch_all_pages(
 
     close_client = False
     if client is None:
-        client = httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=connector.verify_ssl)
+        client = httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=bool(connector.verify_ssl))
         close_client = True
 
     try:

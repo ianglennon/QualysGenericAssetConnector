@@ -69,7 +69,7 @@ async def preview_mappings(connector_id: str, db: Session) -> dict:
     headers = _build_headers(connector)
     test_url = f"{connector.base_url}/{connector.test_path or ''}"
     
-    async with httpx.AsyncClient(timeout=30.0, verify=connector.verify_ssl) as client:
+    async with httpx.AsyncClient(timeout=30.0, verify=bool(connector.verify_ssl)) as client:
         response = await client.get(test_url, headers=headers)
         response.raise_for_status()
         source_data = response.json()

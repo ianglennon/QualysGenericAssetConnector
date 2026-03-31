@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useUpdateNodeInternals, useNodeId, Handle, Position } from '@xyflow/react'
+import { useUpdateNodeInternals, useNodeId, useReactFlow, Handle, Position } from '@xyflow/react'
 import type { NodeProps } from '@xyflow/react'
 import type { SourcePanelData } from '@/types/canvas'
 import { typeBadgeClass } from '@/lib/field-type-colors'
@@ -36,6 +36,35 @@ const SOURCE_HANDLE_STYLE: React.CSSProperties = {
 export function SourcePanelNode({ data }: NodeProps & { data: SourcePanelData }) {
   const nodeId = useNodeId() ?? 'source-panel'
   const updateNodeInternals = useUpdateNodeInternals()
+  const { setNodes } = useReactFlow()
+
+  function handleResizeStart(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault()
+    e.stopPropagation()
+    const target = e.currentTarget
+    target.setPointerCapture(e.pointerId)
+    const startY = e.clientY
+    const nodeEl = target.closest('.react-flow__node') as HTMLElement | null
+    const startH = nodeEl ? nodeEl.offsetHeight : 520
+
+    const onMove = (ev: PointerEvent) => {
+      const delta = ev.clientY - startY
+      const newH = Math.max(200, Math.min(800, startH + delta))
+      setNodes(nds => nds.map(n => {
+        if (n.id !== nodeId) return n
+        return { ...n, style: { ...n.style, height: newH } }
+      }))
+      requestAnimationFrame(() => updateNodeInternals(nodeId))
+    }
+
+    const onUp = () => {
+      target.removeEventListener('pointermove', onMove)
+      target.removeEventListener('pointerup', onUp)
+    }
+
+    target.addEventListener('pointermove', onMove)
+    target.addEventListener('pointerup', onUp)
+  }
 
   // Mapped fields sorted by edge index (eliminates line crossing)
   const mapped = data.fields
@@ -165,6 +194,13 @@ export function SourcePanelNode({ data }: NodeProps & { data: SourcePanelData })
 
           return <div key={depth}>{rows}</div>
         })}
+      </div>
+
+      <div
+        className="h-3 cursor-row-resize flex items-center justify-center shrink-0"
+        onPointerDown={handleResizeStart}
+      >
+        <div className="w-8 h-0.5 rounded-full bg-muted-foreground/40" />
       </div>
     </div>
   )

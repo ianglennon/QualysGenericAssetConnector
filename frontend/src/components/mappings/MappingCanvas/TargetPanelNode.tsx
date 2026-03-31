@@ -29,7 +29,7 @@ const TARGET_HANDLE_STYLE: React.CSSProperties = {
 export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData }) {
   const nodeId = useNodeId() ?? 'target-panel'
   const updateNodeInternals = useUpdateNodeInternals()
-  const { setEdges } = useReactFlow()
+  const { setEdges, setNodes } = useReactFlow()
   const [addDialogOpen, setAddDialogOpen] = useState(false)
 
   // Local custom attributes state — self-contained, no parent callback needed
@@ -54,6 +54,34 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
   function handleRemoveAttribute(field: string) {
     setLocalCustomAttrs(prev => prev.filter(f => f.field !== field))
     setEdges(eds => eds.filter(e => e.targetHandle !== field))
+  }
+
+  function handleResizeStart(e: React.PointerEvent<HTMLDivElement>) {
+    e.preventDefault()
+    e.stopPropagation()
+    const target = e.currentTarget
+    target.setPointerCapture(e.pointerId)
+    const startY = e.clientY
+    const nodeEl = target.closest('.react-flow__node') as HTMLElement | null
+    const startH = nodeEl ? nodeEl.offsetHeight : 520
+
+    const onMove = (ev: PointerEvent) => {
+      const delta = ev.clientY - startY
+      const newH = Math.max(200, Math.min(800, startH + delta))
+      setNodes(nds => nds.map(n => {
+        if (n.id !== nodeId) return n
+        return { ...n, style: { ...n.style, height: newH } }
+      }))
+      requestAnimationFrame(() => updateNodeInternals(nodeId))
+    }
+
+    const onUp = () => {
+      target.removeEventListener('pointermove', onMove)
+      target.removeEventListener('pointerup', onUp)
+    }
+
+    target.addEventListener('pointermove', onMove)
+    target.addEventListener('pointerup', onUp)
   }
 
   // Mapped fields: merge schema + custom attrs, sorted by edge index
@@ -256,6 +284,13 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
           }}
           onClose={() => setAddDialogOpen(false)}
         />
+      </div>
+
+      <div
+        className="h-3 cursor-row-resize flex items-center justify-center shrink-0"
+        onPointerDown={handleResizeStart}
+      >
+        <div className="w-8 h-0.5 rounded-full bg-muted-foreground/40" />
       </div>
     </div>
   )

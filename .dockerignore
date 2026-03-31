@@ -14,3 +14,10 @@ QualysAPIConnectionManager/qualys_connection_manager.egg-info
 *.pyc
 .git
 .planning
+.claude
+
+# Frontend build artifacts (force clean build in Docker)
+frontend/node_modules
+frontend/dist
+frontend/.tsbuildinfo
+frontend/tsconfig.tsbuildinfo

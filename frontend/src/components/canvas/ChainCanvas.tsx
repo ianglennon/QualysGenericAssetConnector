@@ -183,6 +183,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
         id: ce.id,
         type: 'endpointNode',
         position: { x: 50 + i * 350, y: 50 },
+        style: { height: 520 },
         data: {
           endpointId: ce.endpoint_id,
           canvasEndpointId: ce.id,
@@ -315,14 +316,26 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
     setTimeout(() => fitView({ padding: 0.2 }), 100)
   }, [canvasEndpointsData, endpointsData, qualysSchema, initialized, setNodes, setEdges, fitView, connectorId])
 
-  // Update target panel data when qualys schema or edges change
+  // Update target panel and endpoint node linked-field data when edges change
   useEffect(() => {
     if (!qualysSchema) return
     const mappingEdges = edges.filter((e) => e.type === 'mapping')
-    const linkedFields = new Set(mappingEdges.map((e) => e.targetHandle).filter(Boolean) as string[])
-    const linkedOrder = new Map<string, number>()
+    const linkedTargetFields = new Set(mappingEdges.map((e) => e.targetHandle).filter(Boolean) as string[])
+    const linkedTargetOrder = new Map<string, number>()
     mappingEdges.forEach((e, i) => {
-      if (e.targetHandle) linkedOrder.set(e.targetHandle, i)
+      if (e.targetHandle) linkedTargetOrder.set(e.targetHandle, i)
+    })
+
+    // Compute per-endpoint linked source fields
+    const linkedByNode = new Map<string, { fields: Set<string>; order: Map<string, number> }>()
+    mappingEdges.forEach((e, i) => {
+      if (!e.sourceHandle) return
+      if (!linkedByNode.has(e.source)) {
+        linkedByNode.set(e.source, { fields: new Set(), order: new Map() })
+      }
+      const entry = linkedByNode.get(e.source)!
+      entry.fields.add(e.sourceHandle)
+      entry.order.set(e.sourceHandle, i)
     })
 
     setNodes((nds) =>
@@ -333,8 +346,19 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
             data: {
               ...(n.data as unknown as TargetPanelData),
               fields: qualysSchema.fields,
-              linkedTargetFields: linkedFields,
-              linkedFieldOrder: linkedOrder,
+              linkedTargetFields: linkedTargetFields,
+              linkedFieldOrder: linkedTargetOrder,
+            },
+          }
+        }
+        if (n.type === 'endpointNode') {
+          const nodeLinked = linkedByNode.get(n.id)
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              linkedSourceFields: nodeLinked?.fields ?? new Set<string>(),
+              linkedFieldOrder: nodeLinked?.order ?? new Map<string, number>(),
             },
           }
         }
@@ -646,6 +670,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
       id: newId,
       type: 'endpointNode',
       position: dropState.position,
+      style: { height: 520 },
       data: {
         endpointId: null,
         canvasEndpointId: null,
@@ -698,6 +723,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
       id: newId,
       type: 'endpointNode',
       position: { x: 200, y: 200 },
+      style: { height: 520 },
       data: {
         endpointId: null,
         canvasEndpointId: null,

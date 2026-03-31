@@ -188,6 +188,8 @@ export interface EndpointNodeData extends Record<string, unknown> {
   isDiscovering: boolean
   discoveryError: string | null
   exclusionRules: ExclusionRule[]
+  linkedSourceFields?: Set<string>
+  linkedFieldOrder?: Map<string, number>
 }
 
 // React Flow edge data for ChainEdge custom edge

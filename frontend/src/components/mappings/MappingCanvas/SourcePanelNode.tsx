@@ -33,45 +33,32 @@ const SOURCE_HANDLE_STYLE: React.CSSProperties = {
   zIndex: 10,
 }
 
-function Separator({ label }: { label: string }) {
-  return (
-    <div className="flex items-center gap-2 py-1 px-2 text-xs text-muted-foreground">
-      <span className="flex-1 border-t" />
-      <span>{label}</span>
-      <span className="flex-1 border-t" />
-    </div>
-  )
-}
-
 export function SourcePanelNode({ data }: NodeProps & { data: SourcePanelData }) {
   const nodeId = useNodeId() ?? 'source-panel'
   const updateNodeInternals = useUpdateNodeInternals()
 
-  // Group fields by ancestor depth, then split linked/unlinked within each group
-  const fieldsByDepth = new Map<number, typeof data.fields>()
-  for (const field of data.fields) {
+  // Mapped fields sorted by edge index (eliminates line crossing)
+  const mapped = data.fields
+    .filter(f => data.linkedSourceFields.has(f.path))
+    .sort((a, b) => {
+      const posA = data.linkedFieldOrder?.get(a.path) ?? Infinity
+      const posB = data.linkedFieldOrder?.get(b.path) ?? Infinity
+      if (posA !== posB) return posA - posB
+      return a.path.localeCompare(b.path)
+    })
+
+  // Unmapped fields grouped by ancestor depth
+  const unmapped = data.fields.filter(f => !data.linkedSourceFields.has(f.path))
+  const unmappedByDepth = new Map<number, typeof data.fields>()
+  for (const field of unmapped) {
     const depth = getAncestorDepth(field.path)
-    if (!fieldsByDepth.has(depth)) fieldsByDepth.set(depth, [])
-    fieldsByDepth.get(depth)!.push(field)
+    if (!unmappedByDepth.has(depth)) unmappedByDepth.set(depth, [])
+    unmappedByDepth.get(depth)!.push(field)
   }
-  const depths = [...fieldsByDepth.keys()].sort((a, b) => a - b)
-
-  function getLinkedForDepth(depthFields: typeof data.fields) {
-    return [...depthFields]
-      .filter(f => data.linkedSourceFields.has(f.path))
-      .sort((a, b) => {
-        const posA = data.linkedFieldOrder?.get(a.path) ?? Infinity
-        const posB = data.linkedFieldOrder?.get(b.path) ?? Infinity
-        if (posA !== posB) return posA - posB
-        return a.path.localeCompare(b.path)
-      })
+  for (const [, fields] of unmappedByDepth) {
+    fields.sort((a, b) => a.path.localeCompare(b.path))
   }
-
-  function getUnlinkedForDepth(depthFields: typeof data.fields) {
-    return [...depthFields]
-      .filter(f => !data.linkedSourceFields.has(f.path))
-      .sort((a, b) => a.path.localeCompare(b.path))
-  }
+  const unmappedDepths = [...unmappedByDepth.keys()].sort((a, b) => a - b)
 
   // Re-register handle positions when fields change (initial load, discovery, seeding)
   useEffect(() => {
@@ -95,92 +82,88 @@ export function SourcePanelNode({ data }: NodeProps & { data: SourcePanelData })
         style={{ pointerEvents: 'auto' }}
         onScroll={handleScroll}
       >
-        {depths.map(depth => {
-          const depthFields = fieldsByDepth.get(depth)!
-          const linked = getLinkedForDepth(depthFields)
-          const unlinked = getUnlinkedForDepth(depthFields)
+        {/* Mapped fields at the top */}
+        {mapped.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic px-3 py-1">
+            (no connections yet)
+          </p>
+        ) : (
+          mapped.map(field => {
+            const displayPath = field.is_array_child
+              ? '.' + field.path.split('[].').pop()
+              : field.path
+            return (
+              <div
+                key={field.path}
+                className={`relative flex items-center gap-2 px-3 py-2 text-xs border-l-2 ${
+                  field.is_array_child
+                    ? 'pl-4 border-orange-300 dark:border-orange-500 bg-primary/5'
+                    : 'border-primary/40 bg-primary/5'
+                }`}
+              >
+                <span className="flex-1 font-mono truncate">{displayPath}</span>
+                <span className={`px-1 rounded text-[10px] font-medium ${typeBadgeClass(field.type)}`}>
+                  {field.type}
+                </span>
+                <Handle
+                  type="source"
+                  position={Position.Right}
+                  id={field.path}
+                  isConnectable={false}
+                  style={SOURCE_HANDLE_STYLE}
+                />
+              </div>
+            )
+          })
+        )}
+
+        {/* Thin divider between mapped and unmapped */}
+        {mapped.length > 0 && unmapped.length > 0 && (
+          <div className="border-t border-border my-1" />
+        )}
+
+        {/* Unmapped fields grouped by depth, dimmed */}
+        {unmappedDepths.map(depth => {
+          const depthFields = unmappedByDepth.get(depth)!
           const isAncestor = depth > 0
           const depthLabel = DEPTH_LABELS[depth] ?? `Ancestor (depth ${depth}) Fields`
 
-          const content = (
-            <>
-              <Separator label={isAncestor ? `——— ${depthLabel}: Linked (${linked.length}) ———` : `——— Linked (${linked.length}) ———`} />
-
-              <div className="transition-all duration-200">
-                {linked.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic px-3 py-1">
-                    (no connections yet)
-                  </p>
-                ) : (
-                  linked.map(field => {
-                    const displayPath = field.is_array_child
-                      ? '.' + field.path.split('[].').pop()
-                      : field.path
-                    return (
-                      <div
-                        key={field.path}
-                        className={`relative flex items-center gap-2 px-3 py-2 text-xs border-l-2 ${
-                          field.is_array_child
-                            ? 'pl-4 border-orange-300 dark:border-orange-500 bg-primary/5'
-                            : 'border-primary/40 bg-primary/5'
-                        }`}
-                      >
-                        <span className="flex-1 font-mono truncate">{displayPath}</span>
-                        <span className={`px-1 rounded text-[10px] font-medium ${typeBadgeClass(field.type)}`}>
-                          {field.type}
-                        </span>
-                        <Handle
-                          type="source"
-                          position={Position.Right}
-                          id={field.path}
-                          isConnectable={false}
-                          style={SOURCE_HANDLE_STYLE}
-                        />
-                      </div>
-                    )
-                  })
-                )}
+          const rows = depthFields.map(field => {
+            const displayPath = field.is_array_child
+              ? '.' + field.path.split('[].').pop()
+              : field.path
+            return (
+              <div
+                key={field.path}
+                className={`relative flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted/30 opacity-60 ${
+                  field.is_array_child ? 'pl-4 border-l-2 border-orange-300 dark:border-orange-500' : ''
+                }`}
+              >
+                <span className="flex-1 font-mono truncate">{displayPath}</span>
+                <span className={`px-1 rounded text-[10px] font-medium ${typeBadgeClass(field.type)}`}>
+                  {field.type}
+                </span>
+                <Handle
+                  type="source"
+                  position={Position.Right}
+                  id={field.path}
+                  isConnectable={true}
+                  style={SOURCE_HANDLE_STYLE}
+                />
               </div>
-
-              <Separator label={isAncestor ? `——— ${depthLabel}: Unlinked (${unlinked.length}) ———` : `——— Unlinked (${unlinked.length}) ———`} />
-
-              {unlinked.map(field => {
-                const displayPath = field.is_array_child
-                  ? '.' + field.path.split('[].').pop()
-                  : field.path
-                return (
-                  <div
-                    key={field.path}
-                    className={`relative flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted/30 ${
-                      field.is_array_child ? 'pl-4 border-l-2 border-orange-300 dark:border-orange-500' : ''
-                    }`}
-                  >
-                    <span className="flex-1 font-mono truncate">{displayPath}</span>
-                    <span className={`px-1 rounded text-[10px] font-medium ${typeBadgeClass(field.type)}`}>
-                      {field.type}
-                    </span>
-                    <Handle
-                      type="source"
-                      position={Position.Right}
-                      id={field.path}
-                      isConnectable={true}
-                      style={SOURCE_HANDLE_STYLE}
-                    />
-                  </div>
-                )
-              })}
-            </>
-          )
+            )
+          })
 
           if (isAncestor) {
             return (
               <div key={depth} className="bg-blue-50 dark:bg-blue-950/20 border-l-2 border-blue-400 dark:border-blue-500">
-                {content}
+                <div className="px-3 py-1 text-xs font-medium text-muted-foreground">{depthLabel}</div>
+                {rows}
               </div>
             )
           }
 
-          return <div key={depth}>{content}</div>
+          return <div key={depth}>{rows}</div>
         })}
       </div>
     </div>

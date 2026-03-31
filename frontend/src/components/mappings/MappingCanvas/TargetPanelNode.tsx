@@ -26,16 +26,6 @@ const TARGET_HANDLE_STYLE: React.CSSProperties = {
   zIndex: 10,
 }
 
-function Separator({ label }: { label: string }) {
-  return (
-    <div className="flex items-center gap-2 py-1 px-2 text-xs text-muted-foreground">
-      <span className="flex-1 border-t" />
-      <span>{label}</span>
-      <span className="flex-1 border-t" />
-    </div>
-  )
-}
-
 export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData }) {
   const nodeId = useNodeId() ?? 'target-panel'
   const updateNodeInternals = useUpdateNodeInternals()
@@ -66,32 +56,34 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
     setEdges(eds => eds.filter(e => e.targetHandle !== field))
   }
 
-  // Sort linked fields by edge index (matches source panel order → straight lines)
-  const linkedFields = [...data.fields]
-    .filter(f => data.linkedTargetFields.has(f.field))
-    .sort((a, b) => {
-      const posA = data.linkedFieldOrder?.get(a.field) ?? Infinity
-      const posB = data.linkedFieldOrder?.get(b.field) ?? Infinity
-      if (posA !== posB) return posA - posB
-      return a.field.localeCompare(b.field)
-    })
+  // Mapped fields: merge schema + custom attrs, sorted by edge index
+  const allMapped: Array<{ key: string; isIdentity: boolean; isCustom: boolean }> = []
+  for (const f of data.fields) {
+    if (data.linkedTargetFields.has(f.field)) {
+      allMapped.push({ key: f.field, isIdentity: f.is_identity, isCustom: false })
+    }
+  }
+  for (const f of localCustomAttrs) {
+    if (data.linkedTargetFields.has(f.field)) {
+      allMapped.push({ key: f.field, isIdentity: false, isCustom: true })
+    }
+  }
+  allMapped.sort((a, b) => {
+    const posA = data.linkedFieldOrder?.get(a.key) ?? Infinity
+    const posB = data.linkedFieldOrder?.get(b.key) ?? Infinity
+    if (posA !== posB) return posA - posB
+    return a.key.localeCompare(b.key)
+  })
 
-  const unlinkedFields = sortFields(
+  // Unmapped schema fields: identity first, then alphabetical
+  const unmappedSchema = sortFields(
     data.fields.filter(f => !data.linkedTargetFields.has(f.field))
   )
 
-  const linkedCustomAttrs = localCustomAttrs
-    .filter(f => data.linkedTargetFields.has(f.field))
-    .sort((a, b) => {
-      const posA = data.linkedFieldOrder?.get(a.field) ?? Infinity
-      const posB = data.linkedFieldOrder?.get(b.field) ?? Infinity
-      if (posA !== posB) return posA - posB
-      return a.field.localeCompare(b.field)
-    })
-  const unlinkedCustomAttrs = localCustomAttrs
+  // Unmapped custom attributes
+  const unmappedCustom = localCustomAttrs
     .filter(f => !data.linkedTargetFields.has(f.field))
     .sort((a, b) => a.field.localeCompare(b.field))
-  const allCustomAttrs = [...linkedCustomAttrs, ...unlinkedCustomAttrs]
 
   // Re-register handle positions when fields change (initial load, seeding)
   useEffect(() => {
@@ -115,45 +107,77 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
         style={{ pointerEvents: 'auto' }}
         onScroll={handleScroll}
       >
-        <Separator label={`——— Linked (${linkedFields.length}) ———`} />
-
-        <div className="transition-all duration-200">
-          {linkedFields.length === 0 ? (
-            <p className="text-xs text-muted-foreground italic px-3 py-1">
-              (no connections yet)
-            </p>
-          ) : (
-            linkedFields.map(field => (
+        {/* Mapped fields at the top (schema + custom merged) */}
+        {allMapped.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic px-3 py-1">
+            (no connections yet)
+          </p>
+        ) : (
+          allMapped.map(item => {
+            if (item.isCustom) {
+              const displayName = item.key.replace('customAttribute.', '')
+              return (
+                <div
+                  key={item.key}
+                  className="relative flex items-center gap-2 px-3 py-2 text-xs border-r-2 border-violet-400 bg-violet-50 dark:bg-violet-950/40"
+                >
+                  <Handle
+                    type="target"
+                    position={Position.Left}
+                    id={item.key}
+                    isConnectable={false}
+                    style={TARGET_HANDLE_STYLE}
+                  />
+                  <span className="flex-1 font-mono truncate">{displayName}</span>
+                  <span className="bg-violet-100 text-violet-700 dark:bg-violet-900 dark:text-violet-300 text-xs px-1 rounded">
+                    [CUSTOM]
+                  </span>
+                  <button
+                    className="text-muted-foreground hover:text-destructive p-0.5"
+                    onClick={() => handleRemoveAttribute(item.key)}
+                    title="Remove custom attribute"
+                    aria-label="Remove custom attribute"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              )
+            }
+            return (
               <div
-                key={field.field}
+                key={item.key}
                 className="relative flex items-center gap-2 px-3 py-2 text-xs border-r-2 border-primary/40 bg-primary/5"
               >
                 <Handle
                   type="target"
                   position={Position.Left}
-                  id={field.field}
+                  id={item.key}
                   isConnectable={false}
                   style={TARGET_HANDLE_STYLE}
                 />
                 <span className="flex-1 font-mono truncate">
-                  {field.is_identity ? `★ ${field.field}` : field.field}
+                  {item.isIdentity ? `★ ${item.key}` : item.key}
                 </span>
-                {field.is_identity && (
+                {item.isIdentity && (
                   <span className="bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300 text-xs px-1 rounded">
                     [IDENTITY]
                   </span>
                 )}
               </div>
-            ))
-          )}
-        </div>
+            )
+          })
+        )}
 
-        <Separator label={`——— Unlinked (${unlinkedFields.length}) ———`} />
+        {/* Thin divider between mapped and unmapped */}
+        {allMapped.length > 0 && (unmappedSchema.length > 0 || unmappedCustom.length > 0) && (
+          <div className="border-t border-border my-1" />
+        )}
 
-        {unlinkedFields.map(field => (
+        {/* Unmapped schema fields dimmed below */}
+        {unmappedSchema.map(field => (
           <div
             key={field.field}
-            className="relative flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted/30"
+            className="relative flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted/30 opacity-60"
           >
             <Handle
               type="target"
@@ -173,30 +197,28 @@ export function TargetPanelNode({ data }: NodeProps & { data: TargetPanelData })
           </div>
         ))}
 
-        <Separator label={`——— Custom Attributes (${localCustomAttrs.length}) ———`} />
+        {/* Custom Attributes section */}
+        {(localCustomAttrs.length > 0 || unmappedCustom.length === 0) && (
+          <div className="px-3 py-1 text-xs font-medium text-muted-foreground">Custom Attributes</div>
+        )}
 
-        {allCustomAttrs.length === 0 ? (
-          <p className="text-xs text-muted-foreground italic px-3 py-2">
+        {unmappedCustom.length === 0 && localCustomAttrs.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic px-3 py-2 opacity-60">
             No custom attributes defined. Click + Add custom attribute to map source fields to Qualys custom key-value pairs.
           </p>
         ) : (
-          allCustomAttrs.map(field => {
-            const isLinked = data.linkedTargetFields.has(field.field)
+          unmappedCustom.map(field => {
             const displayName = field.field.replace('customAttribute.', '')
             return (
               <div
                 key={field.field}
-                className={`relative flex items-center gap-2 px-3 py-2 text-xs ${
-                  isLinked
-                    ? 'border-r-2 border-violet-400 bg-violet-50 dark:bg-violet-950/40'
-                    : 'hover:bg-muted/30'
-                }`}
+                className="relative flex items-center gap-2 px-3 py-2 text-xs hover:bg-muted/30 opacity-60"
               >
                 <Handle
                   type="target"
                   position={Position.Left}
                   id={field.field}
-                  isConnectable={!isLinked}
+                  isConnectable={true}
                   style={TARGET_HANDLE_STYLE}
                 />
                 <span className="flex-1 font-mono truncate">{displayName}</span>

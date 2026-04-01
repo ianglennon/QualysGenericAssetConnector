@@ -144,7 +144,7 @@ export function EndpointNode({ data, selected }: NodeProps & { data: EndpointNod
 
   return (
     <div
-      className={`flex flex-col bg-card border rounded-lg shadow-sm min-w-[280px] h-full ${
+      className={`flex flex-col bg-card border rounded-lg shadow-sm min-w-[280px] h-full overflow-hidden ${
         selected ? 'ring-2 ring-primary' : ''
       }`}
     >
@@ -235,18 +235,33 @@ export function EndpointNode({ data, selected }: NodeProps & { data: EndpointNod
         fieldSuggestions={data.fields.map((f: FieldDiscoveryItem) => f.path)}
       />
 
-      {/* Field list — mapped first, then divider, then unmapped dimmed */}
+      {/* Frozen section: mapped fields pinned at top */}
       {data.fields.length > 0 && (
         <div
-          className="nowheel overflow-y-auto overflow-x-hidden flex-1 border-t"
+          className={`nowheel overflow-y-auto overflow-x-hidden shrink-0 border-t ${
+            mapped.length > 0
+              ? 'shadow-[0_2px_4px_-1px_rgba(0,0,0,0.1)] dark:shadow-[0_2px_4px_-1px_rgba(255,255,255,0.06)]'
+              : ''
+          }`}
+          style={{ pointerEvents: 'auto', maxHeight: 'calc(40% - 24px)' }}
           onScroll={handleScroll}
         >
           {mapped.map(field => renderField(field, true))}
+        </div>
+      )}
 
-          {mapped.length > 0 && unmapped.length > 0 && (
-            <div className="border-t border-border my-1" />
-          )}
+      {/* Divider between frozen and scrollable sections */}
+      {mapped.length > 0 && unmapped.length > 0 && (
+        <div className="border-t border-border my-1" />
+      )}
 
+      {/* Scrollable section: unmapped fields */}
+      {data.fields.length > 0 && (
+        <div
+          className="nowheel overflow-y-auto overflow-x-hidden flex-1 min-h-0"
+          style={{ pointerEvents: 'auto' }}
+          onScroll={handleScroll}
+        >
           {unmapped.map(field => renderField(field, false))}
         </div>
       )}

@@ -1,5 +1,0 @@
-https://pve01.homelab.org.uk:8006
-Authorization
-PVEAPIToken=monitor@pam!QualysSync=ea490556-fe57-4df9-8755-e1cea939ad44
-/api2/json/nodes
-

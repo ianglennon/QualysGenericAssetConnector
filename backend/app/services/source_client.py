@@ -180,6 +180,35 @@ def _resolve_pagination_strategies(
     return []
 
 
+from pydantic import TypeAdapter as _TypeAdapter
+
+_pagination_adapter = _TypeAdapter(PaginationStrategy)
+
+
+def resolve_pagination_config(config: dict | list | None) -> list[PaginationStrategy] | None:
+    """Convert endpoint pagination_config JSON to PaginationStrategy list.
+
+    Handles None, empty dict, empty list, single dict, and list of dicts.
+    Returns None for falsy/invalid input so fetch_all_pages defaults to
+    no-pagination single-page fetch.
+    """
+    if not config:
+        return None
+    if isinstance(config, dict):
+        try:
+            return [_pagination_adapter.validate_python(config)]
+        except Exception:
+            return None
+    if isinstance(config, list):
+        if not config:
+            return None
+        try:
+            return [_pagination_adapter.validate_python(c) for c in config]
+        except Exception:
+            return None
+    return None
+
+
 async def fetch_all_pages(
     connector: Connector,
     url: str,

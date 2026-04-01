@@ -19,7 +19,7 @@ from app.models.run_history import EndpointRunLog, RunFailure, RunHistory, RunSt
 from app.schemas.field_mapping import FieldMappingRule
 from app.services.fan_out_executor import execute_tree, FanOutResult, _build_tree
 from app.services.path_resolver import resolve_path
-from app.services.source_client import SourceFetchResult, fetch_all_pages
+from app.services.source_client import SourceFetchResult, fetch_all_pages, resolve_pagination_config
 from app.services.transform_engine import apply_mappings
 from app.services.qualys_adapter import QualysAdapterError, QualysFailure, submit_batch, _decrypt_secret
 from app.services.connector_service import HTTPX_TIMEOUT
@@ -124,7 +124,11 @@ async def _run_endpoint(
         logger.debug(
             "Endpoint %s: fetching from %s", endpoint.path, resolved_url,
         )
-        source_result = await fetch_all_pages(connector, url=resolved_url, client=client, data_root=endpoint.data_root)
+        source_result = await fetch_all_pages(
+            connector, url=resolved_url, client=client,
+            data_root=endpoint.data_root,
+            pagination_strategies=resolve_pagination_config(endpoint.pagination_config),
+        )
         records_fetched = source_result.records_fetched
         logger.debug(
             "Endpoint %s: fetched %d records (partial=%s)",
@@ -256,10 +260,12 @@ async def _run_canvas(
     )
     ep_map = {ep.id: ep for ep in connector_endpoints}
 
-    # Attach .path to each canvas_endpoint for execute_tree compatibility
+    # Attach .path, .data_root, .pagination_config to each canvas_endpoint for execute_tree compatibility
     for ce in canvas_endpoints:
         ep = ep_map.get(ce.endpoint_id)
         ce.path = ep.path if ep else ""
+        ce.data_root = ep.data_root if ep else None
+        ce.pagination_config = ep.pagination_config if ep else None
 
     # Find root canvas endpoints (parent_ref_id is None)
     roots = [ce for ce in canvas_endpoints if ce.parent_ref_id is None]
@@ -280,13 +286,18 @@ async def _run_canvas(
 
     root_url = connector.base_url.rstrip("/") + "/" + root_ep.path.lstrip("/")
     try:
-        source_result = await fetch_all_pages(connector, url=root_url, client=client, data_root=root_ep.data_root)
+        source_result = await fetch_all_pages(
+            connector, url=root_url, client=client,
+            data_root=root_ep.data_root,
+            pagination_strategies=resolve_pagination_config(root_ep.pagination_config),
+        )
     except Exception as exc:
         # Root fetch failed -- log and return
         log = EndpointRunLog(
             run_id=run.id,
             endpoint_id=root_ep.id,
             canvas_id=canvas.id,
+            canvas_endpoint_id=root_ce.id,
             execution_order=execution_offset,
             records_fetched=0,
             records_submitted=0,
@@ -304,6 +315,7 @@ async def _run_canvas(
             run_id=run.id,
             endpoint_id=root_ep.id,
             canvas_id=canvas.id,
+            canvas_endpoint_id=root_ce.id,
             execution_order=execution_offset,
             records_fetched=0,
             records_submitted=0,
@@ -323,6 +335,7 @@ async def _run_canvas(
         run_id=run.id,
         endpoint_id=root_ep.id,
         canvas_id=canvas.id,
+        canvas_endpoint_id=root_ce.id,
         execution_order=execution_offset,
         records_fetched=source_result.records_fetched,
         records_submitted=0,
@@ -365,8 +378,9 @@ async def _run_canvas(
             run_id=run.id,
             endpoint_id=ce.endpoint_id,  # FK to connector_endpoints
             canvas_id=canvas.id,
+            canvas_endpoint_id=ce.id,
             execution_order=execution_offset + idx + 1,
-            records_fetched=0,
+            records_fetched=stats.records_fetched,
             records_submitted=0,
             records_failed=0,
             child_requests_total=stats.children_attempted,
@@ -399,7 +413,7 @@ async def _run_canvas(
             )
             # Update the leaf's log with filtered count
             for log in logs:
-                if log.endpoint_id == leaf_ce.endpoint_id and log != root_log:
+                if log.canvas_endpoint_id == leaf_ce.id and log != root_log:
                     log.records_filtered = leaf_filtered
                     break
         else:
@@ -428,7 +442,7 @@ async def _run_canvas(
         except QualysAdapterError as exc:
             # Find the leaf's log (it's in the child logs from LevelStats)
             for log in logs:
-                if log.endpoint_id == leaf_ep.id and log != root_log:
+                if log.canvas_endpoint_id == leaf_ce.id and log != root_log:
                     log.records_submitted = submitted_count
                     log.records_failed = len(failures)
                     log.status = "failed"
@@ -440,7 +454,7 @@ async def _run_canvas(
 
         # Update leaf log with submission counts
         for log in logs:
-            if log.endpoint_id == leaf_ep.id and log != root_log:
+            if log.canvas_endpoint_id == leaf_ce.id and log != root_log:
                 log.records_submitted = submitted_count
                 log.records_failed = len(failures)
                 break

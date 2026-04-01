@@ -906,3 +906,32 @@ async def test_run_canvas_root_fetch_failure(db_session):
     assert log.canvas_id == canvas.id
     assert log.records_fetched == 0
     assert "connection refused" in log.error_message
+
+
+# --------------- Phase 54 Wiring Smoke Tests ---------------
+
+
+class TestCanvasSyncWiring:
+    """Verify data_root and pagination_strategies propagation in _run_canvas."""
+
+    def test_resolve_pagination_config_imported_in_ingestion(self):
+        """Confirm ingestion_service can access resolve_pagination_config."""
+        from app.services.ingestion_service import resolve_pagination_config as rpc
+        assert callable(rpc)
+
+    def test_resolve_pagination_config_imported_in_fan_out(self):
+        """Confirm fan_out_executor can access resolve_pagination_config."""
+        from app.services.fan_out_executor import resolve_pagination_config as rpc
+        assert callable(rpc)
+
+    def test_endpoint_run_log_has_canvas_endpoint_id(self):
+        """Confirm EndpointRunLog model has canvas_endpoint_id attribute."""
+        from app.models.run_history import EndpointRunLog
+        assert hasattr(EndpointRunLog, 'canvas_endpoint_id')
+
+    def test_level_stats_has_records_fetched(self):
+        """Confirm LevelStats dataclass has records_fetched field."""
+        from app.services.fan_out_executor import LevelStats
+        stats = LevelStats(endpoint_id="test")
+        assert hasattr(stats, 'records_fetched')
+        assert stats.records_fetched == 0

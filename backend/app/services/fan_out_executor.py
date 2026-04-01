@@ -17,7 +17,7 @@ import logging
 from dataclasses import dataclass, field
 
 from app.services.template_resolver import resolve_path, TemplateResolutionError
-from app.services.source_client import fetch_all_pages
+from app.services.source_client import fetch_all_pages, resolve_pagination_config
 
 logger = logging.getLogger(__name__)
 
@@ -212,6 +212,8 @@ async def _fan_out_level(
                 try:
                     fetch_result = await fetch_all_pages(
                         connector, url=url, client=client,
+                        data_root=ep.data_root,
+                        pagination_strategies=resolve_pagination_config(ep.pagination_config),
                     )
                 except Exception as exc:
                     st.record_failure({

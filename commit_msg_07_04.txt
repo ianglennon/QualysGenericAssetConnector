@@ -1,9 +1,0 @@
-feat(07-04): implement PUT /connectors/{id}/mappings batch-replace endpoint
-
-- Add batch_replace_mappings endpoint with atomic transactional replace
-- Import BatchReplaceRequest/BatchReplaceResponse schemas from field_mapping.py
-- Add make_error import for structured 404 CONNECTOR_NOT_FOUND response
-- Call db.flush() before validate_connector_mappings (session has autoflush=False)
-- Fix test fixture with Base.metadata.create_all and _ensure_user helper
-
-Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>

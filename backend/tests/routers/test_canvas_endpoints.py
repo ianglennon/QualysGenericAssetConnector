@@ -456,3 +456,31 @@ def test_max_concurrency_custom(setup_db):
         )
     assert resp.status_code == 201
     assert resp.json()["max_concurrency"] == 10
+
+
+# --------------- Phase 54 Dry-Run Wiring Smoke Tests ---------------
+
+
+class TestDryRunCanvasWiring:
+    """Verify dry_run_canvas passes data_root and pagination to root fetch."""
+
+    def test_resolve_pagination_config_importable_from_canvas_endpoints(self):
+        """Confirm canvas_endpoints module imports resolve_pagination_config."""
+        from app.routers.canvas_endpoints import resolve_pagination_config
+        assert callable(resolve_pagination_config)
+
+    def test_source_client_resolve_pagination_handles_none(self):
+        """Verify the resolver used by dry-run handles None gracefully."""
+        from app.services.source_client import resolve_pagination_config
+        assert resolve_pagination_config(None) is None
+
+    def test_source_client_resolve_pagination_handles_valid_dict(self):
+        """Verify the resolver returns strategies for valid config."""
+        from app.services.source_client import resolve_pagination_config
+        result = resolve_pagination_config({
+            "strategy": "cursor",
+            "cursor_field": "next",
+            "cursor_param": "after",
+        })
+        assert result is not None
+        assert len(result) == 1

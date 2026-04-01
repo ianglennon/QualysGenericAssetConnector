@@ -31,7 +31,7 @@ from app.services.template_resolver import resolve_path, TemplateResolutionError
 from app.services.fan_out_executor import execute_tree, _build_tree, _merge_parent_context
 from app.services.ingestion_service import _build_mapping_rules
 from app.services.transform_engine import apply_mappings
-from app.services.source_client import fetch_all_pages
+from app.services.source_client import fetch_all_pages, resolve_pagination_config
 from app.services.field_discovery import merge_fields_across_records
 from app.services.connector_service import HTTPX_TIMEOUT, _build_headers
 from app.services.exclusion_filter import apply_exclusion_rules
@@ -396,6 +396,8 @@ async def dry_run_canvas(
     for ce in canvas_endpoints:
         ep = ep_map.get(ce.endpoint_id)
         ce.path = ep.path if ep else ""
+        ce.data_root = ep.data_root if ep else None
+        ce.pagination_config = ep.pagination_config if ep else None
 
     # Find root
     roots = [ce for ce in canvas_endpoints if ce.parent_ref_id is None]
@@ -406,7 +408,11 @@ async def dry_run_canvas(
     root_url = connector.base_url.rstrip("/") + "/" + root_ep.path.lstrip("/")
 
     async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=bool(connector.verify_ssl)) as client:
-        source_result = await fetch_all_pages(connector, url=root_url, client=client)
+        source_result = await fetch_all_pages(
+            connector, url=root_url, client=client,
+            data_root=root_ep.data_root,
+            pagination_strategies=resolve_pagination_config(root_ep.pagination_config),
+        )
 
         # D-03/D-12: Filter root records before fan-out
         rule_adapter = TypeAdapter(list[ExclusionRule])

@@ -694,3 +694,92 @@ async def test_zero_child_records_no_submission(db_factory):
 
     # submit_batch should NOT have been called (no merged records to submit)
     assert not submit_mock.called, "submit_batch should not be called when all child fetches return empty"
+
+
+# ---------------------------------------------------------------------------
+# Scenario 7: Mixed canvas and orphan endpoints in single run
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_mixed_canvas_and_orphan(db_factory):
+    """A connector with one canvas tree AND one orphan endpoint.
+
+    Both canvas and orphan paths execute in a single run_ingestion call.
+    Canvas logs have canvas_id set; orphan log has canvas_id=None.
+    """
+    db, _ = db_factory
+    connector = _seed_connector(db)
+    _seed_qualys_config(db)
+
+    # Canvas endpoints: root -> child
+    root_ep = _seed_endpoint(db, connector.id, name="Nodes", path="api/nodes", display_order=0)
+    child_ep = _seed_endpoint(db, connector.id, name="VMs", path="api/nodes/{node}/vms", display_order=1)
+
+    # Orphan endpoint: NOT added to any canvas
+    orphan_ep = _seed_endpoint(db, connector.id, name="Standalone", path="api/standalone-assets", display_order=2)
+
+    # Field mappings
+    _seed_mapping(db, child_ep.id, source_field="name", target_field="hostName")
+    _seed_mapping(db, orphan_ep.id, source_field="hostname", target_field="hostName")
+
+    # Canvas with tree
+    canvas = _seed_canvas(db, connector.id)
+    root_ce = _seed_canvas_endpoint(db, canvas.id, root_ep.id, parent_ref_id=None, tree_order=0)
+    child_ce = _seed_canvas_endpoint(
+        db, canvas.id, child_ep.id,
+        parent_ref_id=root_ce.id,
+        tree_order=1,
+        variable_extractions={"node": "node"},
+    )
+
+    run = _seed_run(db, connector.id)
+
+    # Route setup: specific patterns first
+    routes = {}
+    routes["/vms"] = _fetch_result(records=[{"vmid": 100, "name": "web-server-01"}])
+    routes["/nodes"] = _fetch_result(records=list(ROOT_RECORDS))
+    routes["/standalone"] = _fetch_result(records=[{"hostname": "standalone-host-01"}])
+
+    submit_mock = AsyncMock(return_value=_submit_result(count=1))
+
+    with _canvas_mocks(_url_router(routes), submit_mock):
+        await run_ingestion(run.id)
+
+    db.expire_all()
+    updated_run = db.query(RunHistory).filter(RunHistory.id == run.id).first()
+    assert updated_run.status == RunStatus.success
+
+    logs = (
+        db.query(EndpointRunLog)
+        .filter(EndpointRunLog.run_id == run.id)
+        .order_by(EndpointRunLog.execution_order)
+        .all()
+    )
+    # 3 logs: root (canvas), child (canvas), orphan
+    assert len(logs) == 3, f"Expected 3 EndpointRunLog rows, got {len(logs)}"
+
+    # Find logs by endpoint
+    root_log = next(l for l in logs if l.endpoint_id == root_ep.id)
+    child_log = next(l for l in logs if l.endpoint_id == child_ep.id)
+    orphan_log = next(l for l in logs if l.endpoint_id == orphan_ep.id)
+
+    # Canvas logs have canvas_id set
+    assert root_log.canvas_id == canvas.id, "Root log should have canvas_id"
+    assert child_log.canvas_id == canvas.id, "Child log should have canvas_id"
+
+    # Root is data-source only
+    assert root_log.records_submitted == 0, "Root should not submit (D-14)"
+
+    # Orphan log has no canvas association
+    assert orphan_log.canvas_id is None, "Orphan log should have canvas_id=None"
+    assert orphan_log.canvas_endpoint_id is None, "Orphan log should have canvas_endpoint_id=None"
+    assert orphan_log.records_fetched > 0, "Orphan should have fetched records"
+
+    # submit_batch was called at least twice (once for canvas leaf, once for orphan)
+    assert submit_mock.call_count >= 2, \
+        f"Expected submit_batch called at least 2 times (canvas leaf + orphan), got {submit_mock.call_count}"
+
+    # Total records submitted across all logs > 0
+    total_submitted = sum(l.records_submitted for l in logs)
+    assert total_submitted > 0, "Total records_submitted should be > 0"

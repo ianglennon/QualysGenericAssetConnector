@@ -540,3 +540,52 @@ async def test_overlap_guard_409_while_run_in_progress(db_factory):
     )
     assert existing_run_from_db is not None
     assert existing_run_from_db.id == existing_run.id
+
+
+# ---------------------------------------------------------------------------
+# Scenario 9: Orphan regression -- flat endpoint sync unaffected
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_orphan_regression_flat_endpoint_sync(db_factory):
+    """Pure orphan path: flat-endpoint sync works after Phase 54 canvas code changes.
+
+    No canvases exist. A single enabled endpoint runs through the orphan path.
+    EndpointRunLog has canvas_id=None and canvas_endpoint_id=None.
+    """
+    db, _ = db_factory
+    connector = _seed_connector(db)
+    _seed_qualys_config(db)
+    ep1 = _seed_endpoint(db, connector.id, name="Assets", path="/api/assets", display_order=0)
+    _seed_mapping(db, ep1.id, target_field="hostName")
+    run = _seed_run(db, connector.id)
+
+    with patch(
+        "app.services.ingestion_service.fetch_all_pages",
+        new=AsyncMock(
+            return_value=_fetch_result(
+                records=[{"hostname": "regression-host-01"}, {"hostname": "regression-host-02"}]
+            )
+        ),
+    ), patch(
+        "app.services.ingestion_service.submit_batch",
+        new=AsyncMock(return_value=_submit_result(count=2)),
+    ), patch(
+        "app.services.ingestion_service.apply_mappings",
+        side_effect=lambda record, rules: record,
+    ):
+        await run_ingestion(run.id)
+
+    db.expire_all()
+    updated_run = db.query(RunHistory).filter(RunHistory.id == run.id).first()
+    assert updated_run.status == RunStatus.success
+
+    logs = db.query(EndpointRunLog).filter(EndpointRunLog.run_id == run.id).all()
+    assert len(logs) == 1
+    assert logs[0].status == "success"
+    assert logs[0].records_fetched == 2
+
+    # Confirm orphan path (not canvas path)
+    assert logs[0].canvas_id is None, "Orphan log should have canvas_id=None"
+    assert logs[0].canvas_endpoint_id is None, "Orphan log should have canvas_endpoint_id=None"

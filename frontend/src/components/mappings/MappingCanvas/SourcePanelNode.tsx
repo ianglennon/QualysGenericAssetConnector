@@ -75,8 +75,12 @@ export function SourcePanelNode({ data }: NodeProps & { data: SourcePanelData })
       </div>
 
       <div
-        className="nowheel overflow-y-auto overflow-x-hidden flex-1"
-        style={{ pointerEvents: 'auto' }}
+        className={`nowheel overflow-y-auto overflow-x-hidden shrink-0 ${
+          linked.length > 0
+            ? 'shadow-[0_2px_4px_-1px_rgba(0,0,0,0.1)] dark:shadow-[0_2px_4px_-1px_rgba(255,255,255,0.06)]'
+            : ''
+        }`}
+        style={{ pointerEvents: 'auto', maxHeight: 'calc(50% - 24px)' }}
         onScroll={handleScroll}
       >
         <Separator label={`——— Linked (${linked.length}) ———`} />
@@ -107,7 +111,17 @@ export function SourcePanelNode({ data }: NodeProps & { data: SourcePanelData })
             ))
           )}
         </div>
+      </div>
 
+      {linked.length > 0 && unlinked.length > 0 && (
+        <div className="border-t border-border my-1" />
+      )}
+
+      <div
+        className="nowheel overflow-y-auto overflow-x-hidden flex-1 min-h-0"
+        style={{ pointerEvents: 'auto' }}
+        onScroll={handleScroll}
+      >
         <Separator label={`——— Unlinked (${unlinked.length}) ———`} />
 
         {unlinked.map(field => (

@@ -96,6 +96,7 @@ class EndpointRunLog(Base):
     http_request: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     http_response: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     canvas_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    canvas_endpoint_id: Mapped[str | None] = mapped_column(String, nullable=True)
     source_api_calls: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
     child_requests_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
     child_requests_failed: Mapped[int | None] = mapped_column(Integer, nullable=True)

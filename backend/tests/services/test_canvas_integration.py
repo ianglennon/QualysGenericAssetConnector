@@ -538,3 +538,159 @@ async def test_root_fetch_failure(db_factory):
 
     # submit_batch should NOT have been called
     assert not submit_mock.called, "submit_batch should not be called when root fetch fails"
+
+
+# ---------------------------------------------------------------------------
+# Scenario 5: Exclusion rules filter before fan-out
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_exclusion_rules_filter_before_fanout(db_factory):
+    """Root exclusion rules filter records BEFORE fan-out to children.
+
+    Root returns 2 records; exclusion rule matches 1 (status=offline).
+    Only the surviving record (pve1) should fan out to children.
+    """
+    db, _ = db_factory
+    connector = _seed_connector(db)
+    _seed_qualys_config(db)
+
+    root_ep = _seed_endpoint(db, connector.id, name="Nodes", path="api/nodes", display_order=0)
+    child_ep = _seed_endpoint(db, connector.id, name="VMs", path="api/nodes/{node}/vms", display_order=1)
+
+    # Field mapping on child (leaf) endpoint
+    _seed_mapping(db, child_ep.id, source_field="name", target_field="hostName")
+
+    canvas = _seed_canvas(db, connector.id)
+    root_ce = _seed_canvas_endpoint(
+        db, canvas.id, root_ep.id, parent_ref_id=None, tree_order=0,
+        exclusion_rules=[
+            {"source_field": "status", "operator": "equals", "value": "offline"},
+        ],
+    )
+    child_ce = _seed_canvas_endpoint(
+        db, canvas.id, child_ep.id,
+        parent_ref_id=root_ce.id,
+        tree_order=1,
+        variable_extractions={"node": "node"},
+    )
+
+    run = _seed_run(db, connector.id)
+
+    # Root: 2 records, 1 online (pve1), 1 offline (pve2 -- should be excluded)
+    root_records = [
+        {"node": "pve1", "status": "online"},
+        {"node": "pve2", "status": "offline"},
+    ]
+    child_records = [{"vmid": 100, "name": "web-server-01"}]
+
+    routes = {}
+    routes["/vms"] = _fetch_result(records=list(child_records))
+    routes["/nodes"] = _fetch_result(records=list(root_records))
+
+    submit_mock = AsyncMock(return_value=_submit_result(count=1))
+
+    with _canvas_mocks(_url_router(routes), submit_mock):
+        await run_ingestion(run.id)
+
+    db.expire_all()
+    updated_run = db.query(RunHistory).filter(RunHistory.id == run.id).first()
+    assert updated_run.status == RunStatus.success
+
+    logs = (
+        db.query(EndpointRunLog)
+        .filter(EndpointRunLog.run_id == run.id)
+        .order_by(EndpointRunLog.execution_order)
+        .all()
+    )
+    assert len(logs) == 2, f"Expected 2 EndpointRunLog rows, got {len(logs)}"
+
+    # Root log: fetched 2 records, filtered 1
+    root_log = logs[0]
+    assert root_log.endpoint_id == root_ep.id
+    assert root_log.records_fetched == 2
+    assert root_log.records_filtered == 1
+
+    # Child log: only pve1 fanned out (not pve2)
+    child_log = logs[1]
+    assert child_log.endpoint_id == child_ep.id
+    assert child_log.child_requests_total == 1, \
+        f"Expected 1 child fan-out request (only pve1), got {child_log.child_requests_total}"
+
+    # submit_batch was called with records from pve1's children only
+    assert submit_mock.called, "submit_batch should have been called for filtered leaf records"
+    call_args = submit_mock.call_args_list
+    submitted_records = call_args[0][0][0]
+    assert any(rec.get("hostName") == "web-server-01" for rec in submitted_records), \
+        f"Expected hostName='web-server-01' in submitted records"
+
+
+# ---------------------------------------------------------------------------
+# Scenario 6: Zero child records -- no submission
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_zero_child_records_no_submission(db_factory):
+    """Root returns records but ALL child fetches return empty records.
+
+    No merged records exist, so submit_batch should NOT be called.
+    """
+    db, _ = db_factory
+    connector = _seed_connector(db)
+    _seed_qualys_config(db)
+
+    root_ep = _seed_endpoint(db, connector.id, name="Nodes", path="api/nodes", display_order=0)
+    child_ep = _seed_endpoint(db, connector.id, name="VMs", path="api/nodes/{node}/vms", display_order=1)
+
+    # Field mapping on child (leaf) endpoint
+    _seed_mapping(db, child_ep.id, source_field="name", target_field="hostName")
+
+    canvas = _seed_canvas(db, connector.id)
+    root_ce = _seed_canvas_endpoint(db, canvas.id, root_ep.id, parent_ref_id=None, tree_order=0)
+    child_ce = _seed_canvas_endpoint(
+        db, canvas.id, child_ep.id,
+        parent_ref_id=root_ce.id,
+        tree_order=1,
+        variable_extractions={"node": "node"},
+    )
+
+    run = _seed_run(db, connector.id)
+
+    # Root: 2 records. Child: always returns empty.
+    empty_child = SourceFetchResult(records=[], records_fetched=0, pages_fetched=1, partial=False)
+    routes = {}
+    routes["/vms"] = empty_child
+    routes["/nodes"] = _fetch_result(records=list(ROOT_RECORDS))
+
+    submit_mock = AsyncMock(return_value=_submit_result(count=0))
+
+    with _canvas_mocks(_url_router(routes), submit_mock):
+        await run_ingestion(run.id)
+
+    db.expire_all()
+    updated_run = db.query(RunHistory).filter(RunHistory.id == run.id).first()
+    assert updated_run.status == RunStatus.success
+
+    logs = (
+        db.query(EndpointRunLog)
+        .filter(EndpointRunLog.run_id == run.id)
+        .order_by(EndpointRunLog.execution_order)
+        .all()
+    )
+    assert len(logs) == 2, f"Expected 2 EndpointRunLog rows, got {len(logs)}"
+
+    # Root log: fetched 2 records
+    root_log = logs[0]
+    assert root_log.endpoint_id == root_ep.id
+    assert root_log.records_fetched == 2
+    assert root_log.records_submitted == 0
+
+    # Child log: fetched 0 records (all empty)
+    child_log = logs[1]
+    assert child_log.endpoint_id == child_ep.id
+    assert child_log.records_fetched == 0
+
+    # submit_batch should NOT have been called (no merged records to submit)
+    assert not submit_mock.called, "submit_batch should not be called when all child fetches return empty"

@@ -206,13 +206,11 @@ export function MappingCanvas({ connectorId, endpointId, onEdgesSnapshot }: Mapp
       .filter(m => m.target_field.startsWith('customAttribute.'))
       .map(m => m.target_field)
     const uniqueCustomKeys = [...new Set(customAttrsFromMappings)]
-    if (uniqueCustomKeys.length > 0) {
-      const reconstructed = uniqueCustomKeys.map(field => ({ field, is_identity: false }))
-      setNodes(nds => nds.map(n => {
-        if (n.id !== 'target-panel') return n
-        return { ...n, data: { ...(n.data as unknown as TargetPanelData), customAttributes: reconstructed } }
-      }))
-    }
+    const reconstructed = uniqueCustomKeys.map(field => ({ field, is_identity: false }))
+    setNodes(nds => nds.map(n => {
+      if (n.id !== 'target-panel') return n
+      return { ...n, data: { ...(n.data as unknown as TargetPanelData), customAttributes: reconstructed } }
+    }))
   }, [savedMappings, endpointId, setEdges, setNodes])
 
   // Update both panels' node data whenever edges, source fields, or schema change.

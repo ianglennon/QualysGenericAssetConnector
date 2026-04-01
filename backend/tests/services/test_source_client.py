@@ -409,3 +409,46 @@ class TestFetchWithRetries429:
         assert result.response.status_code == 200
         # Should have used exponential backoff (0.1 * 2^0 = 0.1 for first attempt)
         mock_sleep.assert_called_once_with(0.1)
+
+
+# --- resolve_pagination_config tests (Phase 54, Plan 01) ---
+
+from app.services.source_client import resolve_pagination_config
+
+
+class TestResolvePaginationConfig:
+    def test_none_returns_none(self):
+        assert resolve_pagination_config(None) is None
+
+    def test_empty_dict_returns_none(self):
+        assert resolve_pagination_config({}) is None
+
+    def test_empty_list_returns_none(self):
+        assert resolve_pagination_config([]) is None
+
+    def test_valid_cursor_dict(self):
+        result = resolve_pagination_config({
+            "strategy": "cursor",
+            "cursor_field": "next",
+            "cursor_param": "after",
+        })
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].strategy == "cursor"
+
+    def test_valid_offset_list(self):
+        result = resolve_pagination_config([{
+            "strategy": "offset_limit",
+            "limit_param": "limit",
+            "offset_param": "offset",
+            "page_size": 100,
+        }])
+        assert result is not None
+        assert len(result) == 1
+        assert result[0].strategy == "offset_limit"
+
+    def test_invalid_strategy_returns_none(self):
+        assert resolve_pagination_config({"strategy": "invalid"}) is None
+
+    def test_wrong_type_returns_none(self):
+        assert resolve_pagination_config("not_a_dict") is None

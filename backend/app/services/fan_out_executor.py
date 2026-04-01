@@ -31,6 +31,7 @@ class LevelStats:
     children_succeeded: int = 0
     children_failed: int = 0
     children_skipped: int = 0
+    records_fetched: int = 0
     failure_diagnostics: list[dict] = field(default_factory=list)
     MAX_DIAGNOSTICS: int = 50
 
@@ -88,6 +89,19 @@ def _get_or_create_stats(result: FanOutResult, endpoint_id: str) -> LevelStats:
     return stats
 
 
+def _parent_identifier(record: dict) -> str:
+    """Extract a short identifier from a parent record for diagnostics."""
+    for key in ("id", "uuid", "name", "hostname", "serial", "ip"):
+        if key in record:
+            val = str(record[key])
+            return val[:80] if len(val) > 80 else val
+    if record:
+        key = next(iter(record))
+        val = str(record[key])[:40]
+        return f"{key}={val}"
+    return "(empty record)"
+
+
 async def execute_tree(
     canvas_endpoints: list,
     root_records: list[dict],
@@ -137,6 +151,7 @@ async def execute_tree(
                     connector=connector,
                     client=client,
                     result=result,
+                    depth=1,
                 )
 
     return result
@@ -150,6 +165,7 @@ async def _fan_out_level(
     connector,
     client,
     result: FanOutResult,
+    depth: int = 1,
 ) -> None:
     """Fan out to child endpoints for each parent record, bounded by semaphore.
 
@@ -199,7 +215,9 @@ async def _fan_out_level(
                     )
                 except Exception as exc:
                     st.record_failure({
-                        "parent_record_keys": list(parent_record.keys()),
+                        "endpoint_name": ep.path,
+                        "tree_level": depth,
+                        "parent_record": _parent_identifier(parent_record),
                         "url": url,
                         "error": str(exc),
                     })
@@ -210,7 +228,9 @@ async def _fan_out_level(
                 # Check for partial fetch (HTTP error after retries)
                 if fetch_result.partial:
                     st.record_failure({
-                        "parent_record_keys": list(parent_record.keys()),
+                        "endpoint_name": ep.path,
+                        "tree_level": depth,
+                        "parent_record": _parent_identifier(parent_record),
                         "url": url,
                         "http_request": fetch_result.http_request,
                         "http_response": fetch_result.http_response,
@@ -219,6 +239,7 @@ async def _fan_out_level(
                     return []
 
                 st.children_succeeded += 1
+                st.records_fetched += len(fetch_result.records)
 
                 # Check if this child endpoint is a leaf or has further children
                 grandchild_endpoints = children_map.get(ep.id, [])
@@ -238,6 +259,7 @@ async def _fan_out_level(
                         connector=connector,
                         client=client,
                         result=result,
+                        depth=depth + 1,
                     )
                     return []  # results added by recursive call
 

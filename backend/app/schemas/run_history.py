@@ -39,6 +39,7 @@ class EndpointRunLogResponse(BaseModel):
     created_at: datetime
     canvas_id: Optional[str] = None
     canvas_name: Optional[str] = None
+    canvas_endpoint_id: Optional[str] = None
     child_requests_total: Optional[int] = None
     child_requests_failed: Optional[int] = None
     child_requests_skipped: Optional[int] = None

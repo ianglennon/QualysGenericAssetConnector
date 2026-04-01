@@ -36,6 +36,8 @@ def _make_canvas_ep(
     variable_extractions=None,
     max_concurrency=5,
     path="/default",
+    data_root=None,
+    pagination_config=None,
 ):
     return SimpleNamespace(
         id=id,
@@ -45,6 +47,8 @@ def _make_canvas_ep(
         variable_extractions=variable_extractions,
         max_concurrency=max_concurrency,
         path=path,
+        data_root=data_root,
+        pagination_config=pagination_config,
     )
 
 

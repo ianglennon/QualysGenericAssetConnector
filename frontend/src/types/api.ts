@@ -132,6 +132,31 @@ export interface DryRunResult {
   records_filtered?: number
 }
 
+// Pipeline Event Types
+export interface StageEntry {
+  stage: string
+  records_in: number
+  records_out: number
+  duration_ms: number
+  status: string
+  error: string | null
+}
+
+export interface EventEntry {
+  id: string
+  timestamp: string
+  event_type: string
+  stage: string
+  message: string
+  detail: Record<string, unknown> | null
+}
+
+export interface RunEventsResponse {
+  stages: StageEntry[]
+  events: EventEntry[]
+  total_events: number
+}
+
 // Connector Types
 export type AuthMethod = 'bearer_token' | 'basic_auth' | 'api_key_header'
 
@@ -176,6 +201,7 @@ export interface Connector {
   source_retry_limit?: number
   qualys_retry_limit?: number
   verify_ssl: boolean
+  fault_diagnosis: boolean
   created_at: string
   updated_at: string
 }

@@ -67,6 +67,8 @@ def validate_no_target_collisions(canvas_id: str, db: Session) -> list[dict]:
     Empty list means no collisions.
     """
     from app.models.canvas_endpoint import CanvasEndpoint
+    from app.models.field_mapping import FieldMapping
+    from app.models.connector_endpoint import ConnectorEndpoint
 
     ces = db.query(CanvasEndpoint).filter_by(canvas_id=canvas_id).all()
     if not ces:

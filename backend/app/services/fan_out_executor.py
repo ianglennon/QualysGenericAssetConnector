@@ -44,9 +44,30 @@ class LevelStats:
 
 
 @dataclass
+class TraversalRecord:
+    """Per-base-record container for endpoint outputs during tree traversal.
+
+    Each TraversalRecord represents one base record flowing through the
+    canvas endpoint tree.  ``endpoint_outputs`` accumulates the transformed
+    field dicts produced by ``apply_mappings()`` at each canvas-endpoint,
+    keyed by canvas_endpoint.id.
+    """
+
+    raw_record: dict  # Raw base record (for exclusion rules)
+    ancestor_context: dict  # Accumulated _parent.* context for template resolution
+    endpoint_outputs: dict[str, list[dict]] = field(
+        default_factory=dict
+    )  # {canvas_endpoint_id: [transformed_fields_dict...]}
+
+
+@dataclass
 class FanOutResult:
     """Accumulated result of a fan-out tree traversal."""
 
+    record_outputs: list[TraversalRecord] = field(default_factory=list)
+    base_records_total: int = 0
+    base_records_excluded: int = 0
+    enrichment_gaps: int = 0
     merged_records: list[dict] = field(default_factory=list)
     level_stats: list[LevelStats] = field(default_factory=list)
     has_failures: bool = False

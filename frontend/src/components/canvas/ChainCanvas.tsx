@@ -32,6 +32,7 @@ import {
   useCanvasEndpoints,
   useCreateCanvasEndpoint,
   useUpdateCanvasEndpoint,
+  useDeleteCanvasEndpoint,
 } from '@/hooks/queries/useCanvasEndpoints'
 import { useEndpoints, useCreateEndpoint } from '@/hooks/queries/useEndpoints'
 import { useEndpointDiscoverFields, useCanvasDiscoverFields } from '@/hooks/queries/useEndpointDiscover'
@@ -129,6 +130,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
   // Mutations
   const createCanvasEndpoint = useCreateCanvasEndpoint()
   const updateCanvasEndpoint = useUpdateCanvasEndpoint()
+  const deleteCanvasEndpoint = useDeleteCanvasEndpoint()
   const createEndpoint = useCreateEndpoint()
   const discoverFields = useEndpointDiscoverFields()
   const canvasDiscoverFields = useCanvasDiscoverFields()
@@ -808,6 +810,25 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
 
     try {
       const endpointNodes = nodes.filter((n) => n.type === 'endpointNode')
+      const validationErrors: string[] = []
+
+      // Step 0: Delete canvas-endpoints removed from the canvas
+      if (canvasEndpointsData) {
+        const currentCeIds = new Set(
+          endpointNodes
+            .map((n) => (n.data as EndpointNodeData).canvasEndpointId)
+            .filter(Boolean)
+        )
+        for (const ce of canvasEndpointsData) {
+          if (!currentCeIds.has(ce.id)) {
+            await deleteCanvasEndpoint.mutateAsync({
+              connectorId,
+              canvasId: canvasId!,
+              canvasEndpointId: ce.id,
+            })
+          }
+        }
+      }
 
       // Step a: Create base endpoints for unsaved nodes
       for (const node of endpointNodes) {
@@ -917,16 +938,27 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
           mapping_type: 'direct_copy' as const,
         }))
 
-        await batchReplaceMappings.mutateAsync({
+        const result = await batchReplaceMappings.mutateAsync({
           connectorId,
           endpointId: d.endpointId,
           mappings,
         })
+        if (!result.is_valid_mappings) {
+          validationErrors.push(...result.validation_errors)
+        }
       }
 
       // Invalidate canvases query so base_canvas_endpoint_id updates in node data
       await queryClient.invalidateQueries({ queryKey: ['canvases', connectorId] })
-      toast({ title: 'Canvas saved', description: 'All endpoints and mappings have been saved.' })
+      if (validationErrors.length > 0) {
+        toast({
+          title: 'Canvas saved with validation warnings',
+          description: validationErrors.join('; '),
+          variant: 'destructive',
+        })
+      } else {
+        toast({ title: 'Canvas saved', description: 'All endpoints and mappings have been saved.' })
+      }
     } catch {
       toast({
         title: 'Save failed',
@@ -941,9 +973,11 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
     nodes,
     edges,
     connectorId,
+    canvasEndpointsData,
     createEndpoint,
     createCanvasEndpoint,
     updateCanvasEndpoint,
+    deleteCanvasEndpoint,
     batchReplaceMappings,
     setNodes,
     toast,

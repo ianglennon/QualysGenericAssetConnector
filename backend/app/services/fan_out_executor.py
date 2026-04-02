@@ -212,21 +212,40 @@ async def execute_tree(
     connector,
     client,
     collector: EventCollector | None = None,
+    base_canvas_endpoint_id: str | None = None,
+    mappings_by_ce: dict[str, list] | None = None,
 ) -> FanOutResult:
     """Traverse canvas endpoint tree, fan out child requests, merge results.
 
     DFS per root record (D-03). No DB writes (D-13). Returns flat merged records.
 
+    When base_canvas_endpoint_id is provided, uses base-aware traversal:
+    - Upstream endpoints (root to base) are critical path — failure aborts canvas
+    - Base exclusion cascades to skip all downstream requests (D-08)
+    - Downstream failures are non-fatal enrichment gaps (DEG-01)
+    - Per-endpoint field mappings produce endpoint_outputs (D-11)
+
+    When base_canvas_endpoint_id is None, falls back to legacy leaf-centric traversal.
+
     Args:
-        canvas_endpoints: All CanvasEndpoint records for this canvas, each with
-            a .path attribute (eagerly loaded from ConnectorEndpoint or attached).
+        canvas_endpoints: All CanvasEndpoint records for this canvas.
         root_records: Records fetched from the root endpoint.
         connector: Connector instance with base_url, auth credentials.
         client: Shared httpx.AsyncClient for all HTTP requests.
+        collector: Optional EventCollector for structured diagnostic logging.
+        base_canvas_endpoint_id: If set, enables base-aware traversal.
+        mappings_by_ce: Dict of {canvas_endpoint_id: [FieldMappingRule...]} for per-endpoint mapping.
 
     Returns:
-        FanOutResult with flat merged_records list and per-level stats.
+        FanOutResult with per-record traversal outputs and backward-compat merged_records.
     """
+    if base_canvas_endpoint_id is not None:
+        return await _execute_tree_base_aware(
+            canvas_endpoints, root_records, connector, client,
+            collector, base_canvas_endpoint_id, mappings_by_ce or {},
+        )
+
+    # Legacy path: leaf-centric traversal (backward compat)
     children_map = _build_tree(canvas_endpoints)
     result = FanOutResult()
 
@@ -261,6 +280,273 @@ async def execute_tree(
                 )
 
     return result
+
+
+async def _execute_tree_base_aware(
+    canvas_endpoints: list,
+    root_records: list[dict],
+    connector,
+    client,
+    collector: EventCollector | None,
+    base_canvas_endpoint_id: str,
+    mappings_by_ce: dict[str, list],
+) -> FanOutResult:
+    """Base-aware tree traversal with upstream/downstream split.
+
+    Upstream endpoints (root to base) are critical path — failure aborts canvas (D-05).
+    Base exclusion cascades to skip all downstream HTTP requests (D-08).
+    Downstream failures are non-fatal enrichment gaps (DEG-01).
+    Per-endpoint field mappings produce endpoint_outputs during traversal (D-11).
+    """
+    children_map = _build_tree(canvas_endpoints)
+    ce_by_id = {ce.id: ce for ce in canvas_endpoints}
+    upstream_ids, downstream_ids = classify_endpoints(canvas_endpoints, base_canvas_endpoint_id)
+    result = FanOutResult()
+
+    # Build upstream path: walk parent_ref_id from base to root, reverse to root-to-base order
+    upstream_path: list[str] = []
+    current: str | None = base_canvas_endpoint_id
+    while current is not None:
+        upstream_path.append(current)
+        ce = ce_by_id.get(current)
+        current = ce.parent_ref_id if ce else None
+    upstream_path.reverse()  # Now root-first
+
+    base_ep = ce_by_id[base_canvas_endpoint_id]
+
+    # --- Single-endpoint canvas (root = base, no children) ---
+    if len(upstream_path) == 1 and not downstream_ids:
+        base_records = root_records
+        result.base_records_total = len(base_records)
+
+        # Apply base exclusion rules on raw data (D-10)
+        if hasattr(base_ep, "exclusion_rules") and base_ep.exclusion_rules:
+            rule_adapter = TypeAdapter(list[ExclusionRule])
+            rules = rule_adapter.validate_python(base_ep.exclusion_rules)
+            base_records, excluded = apply_exclusion_rules(base_records, rules)
+            result.base_records_excluded = excluded
+
+        # Apply base mappings and build TraversalRecords
+        base_rules = mappings_by_ce.get(base_canvas_endpoint_id, [])
+        for rec in base_records:
+            tr = TraversalRecord(raw_record=rec, ancestor_context={})
+            tr.endpoint_outputs[base_canvas_endpoint_id] = [apply_mappings(rec, base_rules)]
+            result.record_outputs.append(tr)
+            # Backward compat
+            result.merged_records.append(dict(rec))
+
+        return result
+
+    # --- Multi-endpoint canvas ---
+    # Store per-upstream-endpoint transformed outputs (shared across all root records)
+    # Root endpoint: root_records are the source data (already fetched)
+    root_ce_id = upstream_path[0]
+    root_rules = mappings_by_ce.get(root_ce_id, [])
+    root_outputs = [apply_mappings(rec, root_rules) for rec in root_records]
+
+    # Traverse upstream: fetch intermediate endpoints between root and base
+    # root_records -> intermediate1 -> intermediate2 -> ... -> base
+    current_records = root_records
+    current_context: dict = {}  # accumulated _parent.* context
+    upstream_outputs: dict[str, list[dict]] = {root_ce_id: root_outputs}
+
+    for i in range(1, len(upstream_path)):
+        ce_id = upstream_path[i]
+        ce = ce_by_id[ce_id]
+
+        # Fan out from current_records to this upstream endpoint
+        fetched_records: list[dict] = []
+        accumulated_contexts: list[dict] = []
+
+        for parent_rec in current_records:
+            ancestor = _merge_parent_context(parent_rec, current_context)
+
+            # Resolve template and build URL
+            try:
+                resolved_path = resolve_path(
+                    ce.path,
+                    ancestor,
+                    ce.variable_extractions or {},
+                )
+            except TemplateResolutionError as exc:
+                logger.debug("Upstream template resolution failed for %s: %s", ce_id, exc)
+                continue
+
+            url = connector.base_url.rstrip("/") + "/" + resolved_path.lstrip("/")
+
+            # Upstream fetch with one retry — failure aborts canvas (D-05)
+            fetch_result = await _fetch_with_one_retry(
+                connector, url, client, ce, collector,
+            )
+            if fetch_result is None or fetch_result.partial:
+                raise Exception(
+                    f"Upstream endpoint {ce_id} fetch failed for {url}"
+                )
+
+            for child_rec in fetch_result.records:
+                merged = _merge_parent_context(child_rec, ancestor)
+                fetched_records.append(child_rec)
+                accumulated_contexts.append(ancestor)
+
+        # Apply this endpoint's mappings
+        ce_rules = mappings_by_ce.get(ce_id, [])
+        upstream_outputs[ce_id] = [apply_mappings(rec, ce_rules) for rec in fetched_records]
+
+        # Update current records and context for next level
+        if accumulated_contexts:
+            current_context = accumulated_contexts[0]  # all share same parent context at this level
+        current_records = fetched_records
+
+    # current_records are now the base records
+    base_records = current_records
+    result.base_records_total = len(base_records)
+
+    # Apply base exclusion rules on RAW base records (D-10, before mappings)
+    if hasattr(base_ep, "exclusion_rules") and base_ep.exclusion_rules:
+        rule_adapter = TypeAdapter(list[ExclusionRule])
+        rules = rule_adapter.validate_python(base_ep.exclusion_rules)
+        base_records, excluded = apply_exclusion_rules(base_records, rules)
+        result.base_records_excluded = excluded
+
+    # Apply base field mappings to non-excluded records
+    base_rules = mappings_by_ce.get(base_canvas_endpoint_id, [])
+    base_mapped = [apply_mappings(rec, base_rules) for rec in base_records]
+
+    # For each non-excluded base record, traverse downstream
+    for idx, base_rec in enumerate(base_records):
+        # Build ancestor context for this base record
+        ancestor_ctx = _merge_parent_context(base_rec, current_context)
+
+        # Collect endpoint outputs for this traversal record
+        ep_outputs: dict[str, list[dict]] = {}
+
+        # Include upstream endpoint outputs
+        for up_ce_id in upstream_path[:-1]:  # all upstream except base
+            if up_ce_id in upstream_outputs:
+                ep_outputs[up_ce_id] = upstream_outputs[up_ce_id]
+
+        # Include base outputs
+        ep_outputs[base_canvas_endpoint_id] = [base_mapped[idx]]
+
+        # Traverse downstream endpoints
+        await _traverse_downstream(
+            base_rec=base_rec,
+            ancestor_context=ancestor_ctx,
+            base_ce_id=base_canvas_endpoint_id,
+            children_map=children_map,
+            ce_by_id=ce_by_id,
+            downstream_ids=downstream_ids,
+            connector=connector,
+            client=client,
+            collector=collector,
+            mappings_by_ce=mappings_by_ce,
+            ep_outputs=ep_outputs,
+            result=result,
+        )
+
+        tr = TraversalRecord(
+            raw_record=base_rec,
+            ancestor_context=ancestor_ctx,
+            endpoint_outputs=ep_outputs,
+        )
+        result.record_outputs.append(tr)
+
+        # Backward compat: flat merged record
+        result.merged_records.append(_merge_parent_context(base_rec, current_context))
+
+    # Set has_failures if any enrichment gaps occurred (D-04)
+    if result.enrichment_gaps > 0:
+        result.has_failures = True
+
+    return result
+
+
+async def _traverse_downstream(
+    base_rec: dict,
+    ancestor_context: dict,
+    base_ce_id: str,
+    children_map: dict,
+    ce_by_id: dict,
+    downstream_ids: set[str],
+    connector,
+    client,
+    collector: EventCollector | None,
+    mappings_by_ce: dict[str, list],
+    ep_outputs: dict[str, list[dict]],
+    result: FanOutResult,
+) -> None:
+    """Traverse downstream endpoints for a single base record.
+
+    Downstream failures are non-fatal — enrichment gaps logged but base record preserved.
+    Empty responses (0 records, 2xx) are normal operation (D-01, D-03).
+    """
+    # BFS from base children
+    queue: list[tuple[str, dict]] = []  # (ce_id, parent_context)
+    for child_ce in children_map.get(base_ce_id, []):
+        if child_ce.id in downstream_ids:
+            queue.append((child_ce.id, ancestor_context))
+
+    for ds_ce_id, parent_ctx in queue:
+        ds_ce = ce_by_id[ds_ce_id]
+
+        # Resolve template
+        try:
+            resolved_path = resolve_path(
+                ds_ce.path,
+                parent_ctx,
+                ds_ce.variable_extractions or {},
+            )
+        except TemplateResolutionError as exc:
+            logger.debug("Downstream template skip for %s: %s", ds_ce_id, exc)
+            continue
+
+        url = connector.base_url.rstrip("/") + "/" + resolved_path.lstrip("/")
+
+        # Fetch with one retry (D-02) — failure is non-fatal
+        try:
+            fetch_result = await _fetch_with_one_retry(
+                connector, url, client, ds_ce, collector,
+            )
+        except Exception as exc:
+            # Both attempts failed — enrichment gap
+            result.enrichment_gaps += 1
+            logger.debug("Downstream enrichment gap for %s: %s", ds_ce_id, exc)
+            if collector:
+                collector.add_detail(
+                    API_CALL, STAGE_FETCH,
+                    f"Enrichment gap: {ds_ce.path} failed after retry",
+                    {"url": url, "error": str(exc), "endpoint_id": ds_ce_id},
+                )
+            continue
+
+        if fetch_result is None or fetch_result.partial:
+            # Partial after retry — enrichment gap
+            result.enrichment_gaps += 1
+            logger.debug("Downstream enrichment gap (partial) for %s", ds_ce_id)
+            if collector:
+                collector.add_detail(
+                    API_CALL, STAGE_FETCH,
+                    f"Enrichment gap: {ds_ce.path} partial after retry",
+                    {"url": url, "endpoint_id": ds_ce_id},
+                )
+            continue
+
+        # 0 records from 2xx is normal — no gap, no retry (D-01, D-03)
+        if not fetch_result.records:
+            continue
+
+        # Apply downstream mappings
+        ds_rules = mappings_by_ce.get(ds_ce_id, [])
+        ds_mapped = [apply_mappings(rec, ds_rules) for rec in fetch_result.records]
+        ep_outputs[ds_ce_id] = ds_mapped
+
+        # Queue children of this downstream endpoint
+        for grandchild_ce in children_map.get(ds_ce_id, []):
+            if grandchild_ce.id in downstream_ids:
+                # Build context for deeper downstream
+                if fetch_result.records:
+                    deeper_ctx = _merge_parent_context(fetch_result.records[0], parent_ctx)
+                    queue.append((grandchild_ce.id, deeper_ctx))
 
 
 async def _fan_out_level(

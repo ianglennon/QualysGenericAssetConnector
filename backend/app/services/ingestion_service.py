@@ -455,9 +455,21 @@ async def _run_canvas(
 
     if collector and fan_out_result.level_stats:
         total_child_fetched = sum(s.records_fetched for s in fan_out_result.level_stats)
+        level_detail = [
+            {"endpoint_id": s.endpoint_id, "fetched": s.records_fetched,
+             "attempted": s.children_attempted, "succeeded": s.children_succeeded,
+             "failed": s.children_failed, "skipped": s.children_skipped}
+            for s in fan_out_result.level_stats
+        ]
         collector.add_detail(API_CALL, STAGE_FETCH,
-            f"Fan-out: {total_child_fetched} child records from {len(fan_out_result.level_stats)} levels",
-            {"child_records": total_child_fetched, "levels": len(fan_out_result.level_stats)})
+            f"Fan-out complete: {total_child_fetched} child records from {len(fan_out_result.level_stats)} levels, "
+            f"{len(fan_out_result.merged_records)} leaf records for submission",
+            {"child_records": total_child_fetched,
+             "levels": len(fan_out_result.level_stats),
+             "merged_records_count": len(fan_out_result.merged_records),
+             "has_failures": fan_out_result.has_failures,
+             "has_skipped": fan_out_result.has_skipped,
+             "level_detail": level_detail})
 
     # Create EndpointRunLog per child canvas-endpoint from LevelStats
     # PITFALL 1: LevelStats.endpoint_id is canvas_endpoint.id, not connector_endpoint.id

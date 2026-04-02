@@ -18,7 +18,9 @@ from dataclasses import dataclass, field
 
 from app.services.template_resolver import resolve_path, TemplateResolutionError
 from app.services.source_client import fetch_all_pages, resolve_pagination_config
-from app.services.event_collector import EventCollector, API_CALL, STAGE_FETCH
+from app.services.event_collector import EventCollector, API_CALL, EXCLUSION_RESULT, STAGE_FETCH, STAGE_EXCLUSION
+from app.services.exclusion_filter import apply_exclusion_rules, ExclusionRule
+from pydantic import TypeAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -273,18 +275,36 @@ async def _fan_out_level(
                          "http_request": fetch_result.http_request,
                          "http_response": fetch_result.http_response})
 
+                # Apply exclusion rules if configured on this endpoint
+                records_to_pass = fetch_result.records
+                if hasattr(ep, "exclusion_rules") and ep.exclusion_rules:
+                    rule_adapter = TypeAdapter(list[ExclusionRule])
+                    rules = rule_adapter.validate_python(ep.exclusion_rules)
+                    records_to_pass, excluded_count = apply_exclusion_rules(
+                        fetch_result.records, rules
+                    )
+                    if excluded_count > 0:
+                        st.records_fetched -= excluded_count
+                        if coll:
+                            coll.add_detail(EXCLUSION_RESULT, STAGE_EXCLUSION,
+                                f"Child L{depth} exclusion: {excluded_count} records excluded from {ep_path}",
+                                {"excluded_count": excluded_count,
+                                 "remaining": len(records_to_pass),
+                                 "endpoint_path": ep_path, "depth": depth,
+                                 "parent": _parent_identifier(parent_record)})
+
                 # Check if this child endpoint is a leaf or has further children
                 grandchild_endpoints = children_map.get(ep.id, [])
                 if not grandchild_endpoints:
                     # Leaf -- merge parent context into each child record
                     merged = []
-                    for child_rec in fetch_result.records:
+                    for child_rec in records_to_pass:
                         merged.append(_merge_parent_context(child_rec, current_ancestor))
                     return merged
                 else:
                     # Intermediate -- recurse deeper
                     await _fan_out_level(
-                        parent_records=fetch_result.records,
+                        parent_records=records_to_pass,
                         parent_context=current_ancestor,
                         child_endpoints=grandchild_endpoints,
                         children_map=children_map,
@@ -301,10 +321,27 @@ async def _fan_out_level(
         gather_results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Collect leaf merged records, handle any unexpected exceptions
+        exceptions_caught = 0
+        records_collected = 0
         for res in gather_results:
             if isinstance(res, Exception):
+                exceptions_caught += 1
                 stats.children_failed += 1
                 result.has_failures = True
                 logger.error("Unexpected fan-out error: %s", res)
             elif isinstance(res, list):
+                records_collected += len(res)
                 result.merged_records.extend(res)
+
+        if collector and collector.fault_diagnosis:
+            collector.add_detail(API_CALL, STAGE_FETCH,
+                f"Fan-out L{depth} {child_ep.path}: {stats.children_succeeded}/{stats.children_attempted} succeeded, "
+                f"{records_collected} leaf records collected, {exceptions_caught} exceptions",
+                {"depth": depth, "endpoint_path": child_ep.path,
+                 "attempted": stats.children_attempted,
+                 "succeeded": stats.children_succeeded,
+                 "failed": stats.children_failed,
+                 "skipped": stats.children_skipped,
+                 "records_collected": records_collected,
+                 "exceptions": exceptions_caught,
+                 "total_merged_so_far": len(result.merged_records)})

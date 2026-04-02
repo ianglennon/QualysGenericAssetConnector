@@ -46,5 +46,7 @@ class Connector(Base):
     verify_ssl: Mapped[bool] = mapped_column(Integer, nullable=False, default=True)
     # Field mapping validation tracking
     is_valid_mappings: Mapped[bool] = mapped_column(Integer, nullable=False, default=False)
+    # Fault Diagnosis mode — when True, sync runs capture detailed event timeline
+    fault_diagnosis: Mapped[bool] = mapped_column(Integer, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

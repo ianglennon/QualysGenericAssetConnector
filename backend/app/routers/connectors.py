@@ -33,6 +33,7 @@ def _to_response(connector: Connector) -> ConnectorResponse:
         source_retry_limit=connector.source_retry_limit,
         qualys_retry_limit=connector.qualys_retry_limit,
         verify_ssl=bool(connector.verify_ssl),
+        fault_diagnosis=bool(connector.fault_diagnosis),
         has_valid_endpoints=bool(connector.is_valid_mappings),
         created_at=connector.created_at,
         updated_at=connector.updated_at,
@@ -132,6 +133,8 @@ def update_connector(
         connector.qualys_retry_limit = payload.qualys_retry_limit
     if payload.verify_ssl is not None:
         connector.verify_ssl = payload.verify_ssl
+    if payload.fault_diagnosis is not None:
+        connector.fault_diagnosis = payload.fault_diagnosis
 
     if payload.credentials is not None:
         crypto = get_crypto()

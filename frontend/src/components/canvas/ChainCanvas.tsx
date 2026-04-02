@@ -926,12 +926,12 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
         mappingsByEndpoint.set(edge.source, existing)
       }
 
-      for (const [nodeId, nodeEdges] of mappingsByEndpoint) {
-        const node = nodes.find((n) => n.id === nodeId)
-        if (!node) continue
+      // Send mappings for all saved endpoints (including empty to clear removed mappings)
+      for (const node of endpointNodes) {
         const d = node.data as EndpointNodeData
         if (!d.endpointId) continue
 
+        const nodeEdges = mappingsByEndpoint.get(node.id) ?? []
         const mappings = nodeEdges.map((e) => ({
           source_field: e.sourceHandle ?? '',
           target_field: e.targetHandle ?? '',

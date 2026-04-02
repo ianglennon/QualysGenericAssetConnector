@@ -18,8 +18,10 @@ from dataclasses import dataclass, field
 
 from app.services.template_resolver import resolve_path, TemplateResolutionError
 from app.services.source_client import fetch_all_pages, resolve_pagination_config
+from app.services.transform_engine import apply_mappings
 from app.services.event_collector import EventCollector, API_CALL, EXCLUSION_RESULT, STAGE_FETCH, STAGE_EXCLUSION
 from app.services.exclusion_filter import apply_exclusion_rules, ExclusionRule
+from app.schemas.field_mapping import FieldMappingRule
 from pydantic import TypeAdapter
 
 logger = logging.getLogger(__name__)
@@ -48,9 +50,33 @@ class LevelStats:
 
 
 @dataclass
+class TraversalRecord:
+    """A single record flowing through the pipeline with per-endpoint outputs.
+
+    Per D-11: Each endpoint's field mappings are applied to its own source data.
+    Per D-13: ancestor_context carries raw _parent.* fields for template resolution.
+    endpoint_outputs carries transformed fields per endpoint (separate data channel).
+    """
+
+    raw_record: dict  # Raw base record (for exclusion rules)
+    ancestor_context: dict  # Accumulated _parent.* context for template resolution
+    endpoint_outputs: dict[str, list[dict]] = field(
+        default_factory=dict
+    )  # {endpoint_id: [transformed_fields...]}
+
+
+@dataclass
 class FanOutResult:
     """Accumulated result of a fan-out tree traversal."""
 
+    # New: per-base-record traversal outputs
+    record_outputs: list[TraversalRecord] = field(default_factory=list)
+    # New: base-level counters
+    base_records_total: int = 0
+    base_records_excluded: int = 0
+    # New: downstream enrichment gap counter
+    enrichment_gaps: int = 0
+    # Preserved: existing fields for backward compat
     merged_records: list[dict] = field(default_factory=list)
     level_stats: list[LevelStats] = field(default_factory=list)
     has_failures: bool = False
@@ -80,6 +106,81 @@ def _build_tree(canvas_endpoints: list) -> dict[str | None, list]:
     for ep in sorted(canvas_endpoints, key=lambda e: e.tree_order):
         children_map.setdefault(ep.parent_ref_id, []).append(ep)
     return children_map
+
+
+def classify_endpoints(
+    canvas_endpoints: list,
+    base_canvas_endpoint_id: str,
+) -> tuple[set[str], set[str]]:
+    """Classify canvas endpoints as upstream or downstream relative to base.
+
+    Upstream: all endpoints on the path from root to base (inclusive).
+    Downstream: all children of base and their descendants.
+
+    Walk parent_ref_id chain from base to root for upstream.
+    BFS from base's children for downstream.
+    """
+    children_map = _build_tree(canvas_endpoints)
+    ce_by_id = {ce.id: ce for ce in canvas_endpoints}
+
+    # Walk backward from base to root via parent_ref_id
+    upstream_ids: set[str] = set()
+    current: str | None = base_canvas_endpoint_id
+    while current is not None:
+        upstream_ids.add(current)
+        ce = ce_by_id.get(current)
+        current = ce.parent_ref_id if ce else None
+
+    # BFS forward from base's children
+    downstream_ids: set[str] = set()
+    queue = list(children_map.get(base_canvas_endpoint_id, []))
+    for ep in queue:
+        downstream_ids.add(ep.id)
+        queue.extend(children_map.get(ep.id, []))
+
+    return upstream_ids, downstream_ids
+
+
+async def _fetch_with_one_retry(
+    connector,
+    url: str,
+    client,
+    ep,
+    collector: EventCollector | None = None,
+    depth: int = 0,
+) -> "SourceFetchResult | None":
+    """Fetch endpoint data with one retry for transient errors.
+
+    Per D-02/D-06: wraps the entire fetch_all_pages call.
+    Returns SourceFetchResult on success, None on failure after retry.
+    """
+    from app.services.source_client import SourceFetchResult
+
+    for attempt in range(2):
+        try:
+            result = await fetch_all_pages(
+                connector,
+                url=url,
+                client=client,
+                data_root=ep.data_root,
+                pagination_strategies=resolve_pagination_config(ep.pagination_config),
+                capture_on_success=(
+                    collector is not None and collector.fault_diagnosis
+                ),
+            )
+            if not result.partial:
+                return result
+            # partial = internal retries exhausted; this counts as attempt
+            if attempt == 0:
+                logger.debug("Retry fetch (partial) for %s", url)
+                continue
+            return result  # still partial after retry
+        except Exception as exc:
+            if attempt == 0:
+                logger.debug("Retry fetch (exception) for %s: %s", url, exc)
+                continue
+            raise  # re-raise on second attempt
+    return None  # unreachable but satisfies type checker
 
 
 def _get_or_create_stats(result: FanOutResult, endpoint_id: str) -> LevelStats:

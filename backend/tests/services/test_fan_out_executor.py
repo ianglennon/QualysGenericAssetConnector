@@ -7,8 +7,10 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from app.services.fan_out_executor import (
     FanOutResult,
     LevelStats,
+    TraversalRecord,
     _merge_parent_context,
     _build_tree,
+    classify_endpoints,
     execute_tree,
 )
 from app.services.template_resolver import TemplateResolutionError
@@ -454,5 +456,66 @@ async def test_no_children_root_is_leaf():
     assert len(result.merged_records) == 2
     assert result.merged_records[0] == {"node": "pve1"}
     assert result.merged_records[1] == {"node": "pve2"}
+    assert result.has_failures is False
+    assert result.has_skipped is False
+
+
+# --- classify_endpoints tests ---
+
+
+def test_classify_three_level_tree():
+    """root -> base -> leaf: upstream={root, base}, downstream={leaf}."""
+    root = _make_canvas_ep(id="root", parent_ref_id=None, tree_order=0)
+    base = _make_canvas_ep(id="base", parent_ref_id="root", tree_order=1)
+    leaf = _make_canvas_ep(id="leaf", parent_ref_id="base", tree_order=2)
+    upstream, downstream = classify_endpoints([root, base, leaf], "base")
+    assert upstream == {"root", "base"}
+    assert downstream == {"leaf"}
+
+
+def test_classify_single_endpoint():
+    """Single root=base endpoint: upstream={root}, downstream=set()."""
+    root = _make_canvas_ep(id="root", parent_ref_id=None, tree_order=0)
+    upstream, downstream = classify_endpoints([root], "root")
+    assert upstream == {"root"}
+    assert downstream == set()
+
+
+def test_classify_deep_upstream():
+    """root -> mid -> base -> ds1 -> ds2: upstream={root, mid, base}, downstream={ds1, ds2}."""
+    root = _make_canvas_ep(id="root", parent_ref_id=None, tree_order=0)
+    mid = _make_canvas_ep(id="mid", parent_ref_id="root", tree_order=1)
+    base = _make_canvas_ep(id="base", parent_ref_id="mid", tree_order=2)
+    ds1 = _make_canvas_ep(id="ds1", parent_ref_id="base", tree_order=3)
+    ds2 = _make_canvas_ep(id="ds2", parent_ref_id="ds1", tree_order=4)
+    upstream, downstream = classify_endpoints([root, mid, base, ds1, ds2], "base")
+    assert upstream == {"root", "mid", "base"}
+    assert downstream == {"ds1", "ds2"}
+
+
+# --- TraversalRecord tests ---
+
+
+def test_traversal_record_defaults():
+    """TraversalRecord with raw_record={}, ancestor_context={} has empty endpoint_outputs dict."""
+    tr = TraversalRecord(raw_record={}, ancestor_context={})
+    assert tr.endpoint_outputs == {}
+    assert tr.raw_record == {}
+    assert tr.ancestor_context == {}
+
+
+# --- FanOutResult new fields tests ---
+
+
+def test_fan_out_result_new_fields():
+    """FanOutResult() has record_outputs=[], base_records_total=0, base_records_excluded=0, enrichment_gaps=0."""
+    result = FanOutResult()
+    assert result.record_outputs == []
+    assert result.base_records_total == 0
+    assert result.base_records_excluded == 0
+    assert result.enrichment_gaps == 0
+    # Existing fields still present
+    assert result.merged_records == []
+    assert result.level_stats == []
     assert result.has_failures is False
     assert result.has_skipped is False

@@ -1,4 +1,7 @@
-"""Unit tests for validation service — validate_endpoint_mappings."""
+"""Unit tests for validation service — validate_endpoint_mappings.
+
+Validation now delegates to find_base_endpoint() for canvas-based detection.
+"""
 
 import pytest
 from sqlalchemy import create_engine
@@ -8,6 +11,8 @@ from sqlalchemy.pool import StaticPool
 from app.db.base import Base
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
+from app.models.canvas import Canvas
+from app.models.canvas_endpoint import CanvasEndpoint
 from app.models.field_mapping import FieldMapping
 from app.services.validation import validate_endpoint_mappings, IDENTITY_ATTRIBUTES
 
@@ -53,6 +58,31 @@ def _make_endpoint(db, connector_id, endpoint_id, name="Endpoint 1", is_enabled=
     return endpoint
 
 
+def _make_canvas(db, canvas_id, connector_id, is_enabled=True):
+    canvas = Canvas(
+        id=canvas_id,
+        connector_id=connector_id,
+        name="Test Canvas",
+        is_enabled=is_enabled,
+    )
+    db.add(canvas)
+    db.commit()
+    return canvas
+
+
+def _make_canvas_endpoint(db, ce_id, canvas_id, endpoint_id, parent_ref_id=None, tree_order=0):
+    ce = CanvasEndpoint(
+        id=ce_id,
+        canvas_id=canvas_id,
+        endpoint_id=endpoint_id,
+        parent_ref_id=parent_ref_id,
+        tree_order=tree_order,
+    )
+    db.add(ce)
+    db.commit()
+    return ce
+
+
 def _make_mapping(db, endpoint_id, mapping_id, target_field, source_field="field"):
     mapping = FieldMapping(
         id=mapping_id,
@@ -67,7 +97,7 @@ def _make_mapping(db, endpoint_id, mapping_id, target_field, source_field="field
 
 
 def test_no_enabled_endpoints_returns_valid(db_session):
-    """Connector with no enabled endpoints returns (True, []) — guard is in run trigger."""
+    """Connector with no enabled canvases returns (True, []) — guard is in run trigger."""
     _make_connector(db_session, "conn-no-endpoints")
 
     is_valid, invalid = validate_endpoint_mappings("conn-no-endpoints", db_session)
@@ -76,41 +106,67 @@ def test_no_enabled_endpoints_returns_valid(db_session):
     assert invalid == []
 
 
-def test_enabled_endpoint_with_identity_mapping_returns_valid(db_session):
-    """Connector with enabled endpoint that has an identity mapping returns (True, [])."""
+def test_canvas_with_identity_mapping_returns_valid(db_session):
+    """Canvas with endpoint that has an identity mapping returns valid."""
     _make_connector(db_session, "conn-valid")
     _make_endpoint(db_session, "conn-valid", "ep-valid", is_enabled=True)
+    _make_canvas(db_session, "canvas-1", "conn-valid")
+    _make_canvas_endpoint(db_session, "ce-1", "canvas-1", "ep-valid")
     _make_mapping(db_session, "ep-valid", "map-1", target_field="hostName")
 
-    is_valid, invalid = validate_endpoint_mappings("conn-valid", db_session)
+    is_valid, invalid = validate_endpoint_mappings("conn-valid", db_session, canvas_id="canvas-1")
 
     assert is_valid is True
     assert invalid == []
 
 
-def test_enabled_endpoint_missing_identity_mapping_returns_invalid(db_session):
-    """Connector with enabled endpoint that has no identity mapping returns (False, [{id, name}])."""
+def test_canvas_missing_identity_mapping_returns_invalid(db_session):
+    """Canvas with endpoint that has no identity mapping returns invalid with error."""
     _make_connector(db_session, "conn-invalid")
-    endpoint = _make_endpoint(db_session, "conn-invalid", "ep-invalid", name="Bad Endpoint", is_enabled=True)
-    # Map a non-identity field only
+    _make_endpoint(db_session, "conn-invalid", "ep-invalid", name="Bad Endpoint", is_enabled=True)
+    _make_canvas(db_session, "canvas-1", "conn-invalid")
+    _make_canvas_endpoint(db_session, "ce-1", "canvas-1", "ep-invalid")
     _make_mapping(db_session, "ep-invalid", "map-bad", target_field="operatingSystem")
 
-    is_valid, invalid = validate_endpoint_mappings("conn-invalid", db_session)
+    is_valid, invalid = validate_endpoint_mappings("conn-invalid", db_session, canvas_id="canvas-1")
 
     assert is_valid is False
     assert len(invalid) == 1
-    assert invalid[0]["id"] == endpoint.id
-    assert invalid[0]["name"] == "Bad Endpoint"
+    assert invalid[0]["canvas_id"] == "canvas-1"
+    assert "no endpoint has identity fields mapped" in invalid[0]["error"]
 
 
-def test_disabled_endpoint_missing_identity_mapping_is_ignored(db_session):
-    """Disabled endpoint with no identity mapping is ignored — connector is valid."""
+def test_disabled_canvas_ignored_in_full_connector_validation(db_session):
+    """Disabled canvas is ignored during full connector validation."""
     _make_connector(db_session, "conn-disabled")
-    _make_endpoint(db_session, "conn-disabled", "ep-disabled", name="Disabled", is_enabled=False)
-    # No identity mapping for the disabled endpoint
-    _make_mapping(db_session, "ep-disabled", "map-dis", target_field="operatingSystem")
+    _make_endpoint(db_session, "conn-disabled", "ep-1", is_enabled=True)
+    _make_canvas(db_session, "canvas-disabled", "conn-disabled", is_enabled=False)
+    _make_canvas_endpoint(db_session, "ce-1", "canvas-disabled", "ep-1")
+    # No identity mapping — but canvas is disabled
+    _make_mapping(db_session, "ep-1", "map-1", target_field="operatingSystem")
 
     is_valid, invalid = validate_endpoint_mappings("conn-disabled", db_session)
 
     assert is_valid is True
     assert invalid == []
+
+
+def test_full_connector_validation_multiple_canvases(db_session):
+    """Full connector validation checks all enabled canvases and collects errors."""
+    _make_connector(db_session, "conn-multi")
+    _make_endpoint(db_session, "conn-multi", "ep-good")
+    _make_endpoint(db_session, "conn-multi", "ep-bad")
+    # Canvas 1: valid (has identity mapping)
+    _make_canvas(db_session, "canvas-good", "conn-multi")
+    _make_canvas_endpoint(db_session, "ce-good", "canvas-good", "ep-good")
+    _make_mapping(db_session, "ep-good", "map-good", target_field="hostName")
+    # Canvas 2: invalid (no identity mapping)
+    _make_canvas(db_session, "canvas-bad", "conn-multi")
+    _make_canvas_endpoint(db_session, "ce-bad", "canvas-bad", "ep-bad")
+    _make_mapping(db_session, "ep-bad", "map-bad", target_field="operatingSystem")
+
+    is_valid, invalid = validate_endpoint_mappings("conn-multi", db_session)
+
+    assert is_valid is False
+    assert len(invalid) == 1
+    assert invalid[0]["canvas_id"] == "canvas-bad"

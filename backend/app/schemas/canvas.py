@@ -30,6 +30,7 @@ class CanvasResponse(BaseModel):
     name: str
     description: Optional[str] = None
     is_enabled: bool
+    base_canvas_endpoint_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -43,6 +44,7 @@ class CanvasListResponse(BaseModel):
     name: str
     description: Optional[str] = None
     is_enabled: bool
+    base_canvas_endpoint_id: Optional[str] = None
     endpoint_count: int = 0
     field_mapping_count: int = 0
     last_run_status: Optional[str] = None

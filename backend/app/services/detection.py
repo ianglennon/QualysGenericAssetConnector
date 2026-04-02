@@ -12,7 +12,12 @@ from sqlalchemy.orm import Session
 
 from app.models.canvas_endpoint import CanvasEndpoint
 from app.models.field_mapping import FieldMapping
-from app.services.validation import IDENTITY_ATTRIBUTES
+
+IDENTITY_ATTRIBUTES = {
+    "qualysAssetId", "sourceNativeKey", "instanceUuid", "hostName",
+    "netBiosName", "fqdn", "macAddress", "ipAddress",
+    "serialNumber", "hardwareUuid", "networkUuid"
+}
 
 
 @dataclass

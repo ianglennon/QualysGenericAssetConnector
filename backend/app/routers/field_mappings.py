@@ -16,6 +16,9 @@ from app.schemas.field_mapping import (
 )
 from app.services.preview import preview_mappings
 from app.services.validation import validate_endpoint_mappings
+from app.services.detection import find_base_endpoint
+from app.models.canvas_endpoint import CanvasEndpoint
+from app.models.canvas import Canvas
 import uuid
 
 router = APIRouter()
@@ -93,6 +96,19 @@ def batch_replace_endpoint_mappings(
 
     # Single commit — if any prior step raised, nothing is persisted
     db.commit()
+
+    # Trigger base detection for all canvases containing this endpoint
+    canvas_eps = db.query(CanvasEndpoint).filter(
+        CanvasEndpoint.endpoint_id == endpoint_id
+    ).all()
+    canvas_ids = {ce.canvas_id for ce in canvas_eps}
+    for cid in canvas_ids:
+        det = find_base_endpoint(cid, db)
+        canvas = db.query(Canvas).filter_by(id=cid).first()
+        if canvas:
+            canvas.base_canvas_endpoint_id = det.base_canvas_endpoint_id
+    if canvas_ids:
+        db.commit()
 
     is_valid, invalid_endpoints = validate_endpoint_mappings(connector_id, db)
     validation_errors = [ep["name"] for ep in invalid_endpoints]

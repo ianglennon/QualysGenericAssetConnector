@@ -35,6 +35,7 @@ from app.services.source_client import fetch_all_pages, resolve_pagination_confi
 from app.services.field_discovery import merge_fields_across_records
 from app.services.connector_service import HTTPX_TIMEOUT, _build_headers
 from app.services.exclusion_filter import apply_exclusion_rules
+from app.services.detection import find_base_endpoint
 from app.schemas.exclusion_rule import ExclusionRule
 from pydantic import TypeAdapter
 
@@ -97,6 +98,15 @@ def find_orphans(canvas_endpoints: list[CanvasEndpoint]) -> list[str]:
             queue.append(child)
 
     return sorted(all_ids - reachable)
+
+
+def _re_detect_base(canvas_id: str, db: Session) -> None:
+    """Re-run base detection and persist result on the Canvas model."""
+    result = find_base_endpoint(canvas_id, db)
+    canvas = db.query(Canvas).filter_by(id=canvas_id).first()
+    if canvas:
+        canvas.base_canvas_endpoint_id = result.base_canvas_endpoint_id
+        db.commit()
 
 
 def _get_canvas_or_404(
@@ -603,6 +613,9 @@ def create_canvas_endpoint(
     db.commit()
     db.refresh(ref)
 
+    # Re-detect base endpoint after tree structure change
+    _re_detect_base(canvas_id, db)
+
     # Check for orphans after creation and include warning if found
     all_refs = (
         db.query(CanvasEndpoint)
@@ -684,6 +697,10 @@ def update_canvas_endpoint(
         setattr(ref, field, value)
     db.commit()
     db.refresh(ref)
+
+    # Re-detect base endpoint after tree structure change
+    _re_detect_base(canvas_id, db)
+
     return ref
 
 
@@ -719,4 +736,8 @@ def delete_canvas_endpoint(
         )
     db.delete(ref)
     db.commit()
+
+    # Re-detect base endpoint after tree structure change
+    _re_detect_base(canvas_id, db)
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)

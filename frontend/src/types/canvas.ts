@@ -113,6 +113,7 @@ export interface CanvasListItem {
   name: string
   description: string | null
   is_enabled: boolean
+  base_canvas_endpoint_id: string | null
   endpoint_count: number
   field_mapping_count: number
   last_run_status: string | null
@@ -135,6 +136,7 @@ export interface CanvasResponse {
   name: string
   description: string | null
   is_enabled: boolean
+  base_canvas_endpoint_id: string | null
   created_at: string
   updated_at: string
 }
@@ -188,6 +190,7 @@ export interface EndpointNodeData extends Record<string, unknown> {
   isDiscovering: boolean
   discoveryError: string | null
   exclusionRules: ExclusionRule[]
+  isBase: boolean  // true if this endpoint is the detected base (Phase 57)
   linkedSourceFields?: Set<string>
   linkedFieldOrder?: Map<string, number>
 }

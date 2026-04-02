@@ -164,6 +164,14 @@ export function EndpointNode({ data, selected }: NodeProps & { data: EndpointNod
           value={data.name}
           onChange={(e) => data.onNameChange?.(e.target.value)}
         />
+        {data.isBase && (
+          <Badge
+            variant="outline"
+            className="text-[10px] px-1.5 py-0 h-5 bg-primary/10 text-primary border-primary/30 shrink-0"
+          >
+            Base
+          </Badge>
+        )}
         <button
           className="p-1 text-muted-foreground hover:text-destructive rounded"
           aria-label="Delete endpoint"

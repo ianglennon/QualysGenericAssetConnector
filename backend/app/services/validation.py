@@ -90,3 +90,35 @@ def validate_endpoint_mappings(
 
     is_valid = len(invalid_endpoints) == 0
     return is_valid, invalid_endpoints
+
+
+def validate_no_target_collisions(canvas_id: str, db: Session) -> list[dict]:
+    """Check all endpoints in a canvas for duplicate Qualys target fields.
+
+    Per D-01/D-03: duplicate target field mappings across endpoints in the
+    same canvas are errors. Per D-02: identity fields follow the same rule.
+
+    Returns list of collision dicts:
+        [{"field": "hostName", "endpoints": ["Nodes", "VMs"]}]
+    Empty list means no collisions.
+    """
+    from app.models.canvas_endpoint import CanvasEndpoint
+
+    ces = db.query(CanvasEndpoint).filter_by(canvas_id=canvas_id).all()
+    if not ces:
+        return []
+
+    # Build: target_field -> set of connector_endpoint names
+    target_sources: dict[str, list[str]] = {}
+    for ce in ces:
+        mappings = db.query(FieldMapping).filter_by(endpoint_id=ce.endpoint_id).all()
+        ep = db.query(ConnectorEndpoint).filter_by(id=ce.endpoint_id).first()
+        ep_label = ep.name if ep else str(ce.endpoint_id)
+        for m in mappings:
+            target_sources.setdefault(m.target_field, []).append(ep_label)
+
+    return [
+        {"field": field, "endpoints": sorted(set(sources))}
+        for field, sources in target_sources.items()
+        if len(set(sources)) > 1
+    ]

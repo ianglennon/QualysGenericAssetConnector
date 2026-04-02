@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 from app.services.template_resolver import resolve_path, TemplateResolutionError
 from app.services.source_client import fetch_all_pages, resolve_pagination_config
+from app.services.event_collector import EventCollector, API_CALL, STAGE_FETCH
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,7 @@ async def execute_tree(
     root_records: list[dict],
     connector,
     client,
+    collector: EventCollector | None = None,
 ) -> FanOutResult:
     """Traverse canvas endpoint tree, fan out child requests, merge results.
 
@@ -152,6 +154,7 @@ async def execute_tree(
                     client=client,
                     result=result,
                     depth=1,
+                    collector=collector,
                 )
 
     return result
@@ -166,6 +169,7 @@ async def _fan_out_level(
     client,
     result: FanOutResult,
     depth: int = 1,
+    collector: EventCollector | None = None,
 ) -> None:
     """Fan out to child endpoints for each parent record, bounded by semaphore.
 
@@ -177,6 +181,7 @@ async def _fan_out_level(
         semaphore = asyncio.Semaphore(child_ep.max_concurrency)
         stats = _get_or_create_stats(result, child_ep.id)
         child_path = child_ep.path
+        should_capture = collector is not None and collector.fault_diagnosis
 
         async def _process_one_parent(
             parent_record: dict,
@@ -184,6 +189,8 @@ async def _fan_out_level(
             ep_path=child_path,
             ep=child_ep,
             st=stats,
+            coll=collector,
+            do_capture=should_capture,
         ) -> list[dict]:
             """Process a single parent record against a child endpoint."""
             async with sem:
@@ -214,6 +221,7 @@ async def _fan_out_level(
                         connector, url=url, client=client,
                         data_root=ep.data_root,
                         pagination_strategies=resolve_pagination_config(ep.pagination_config),
+                        capture_on_success=do_capture,
                     )
                 except Exception as exc:
                     st.record_failure({
@@ -225,6 +233,12 @@ async def _fan_out_level(
                     })
                     result.has_failures = True
                     logger.debug("Child fetch failed %s: %s", url, exc)
+                    if coll:
+                        coll.add_detail(API_CALL, STAGE_FETCH,
+                            f"GET {url} -> FAILED (child L{depth})",
+                            {"url": url, "error": str(exc),
+                             "endpoint_path": ep_path, "depth": depth,
+                             "parent": _parent_identifier(parent_record)})
                     return []
 
                 # Check for partial fetch (HTTP error after retries)
@@ -238,10 +252,26 @@ async def _fan_out_level(
                         "http_response": fetch_result.http_response,
                     })
                     result.has_failures = True
+                    if coll:
+                        coll.add_detail(API_CALL, STAGE_FETCH,
+                            f"GET {url} -> PARTIAL (child L{depth})",
+                            {"url": url, "endpoint_path": ep_path, "depth": depth,
+                             "parent": _parent_identifier(parent_record),
+                             "http_request": fetch_result.http_request,
+                             "http_response": fetch_result.http_response})
                     return []
 
                 st.children_succeeded += 1
                 st.records_fetched += len(fetch_result.records)
+
+                if coll:
+                    coll.add_detail(API_CALL, STAGE_FETCH,
+                        f"GET {url} -> {len(fetch_result.records)} records (child L{depth})",
+                        {"url": url, "records": len(fetch_result.records),
+                         "endpoint_path": ep_path, "depth": depth,
+                         "parent": _parent_identifier(parent_record),
+                         "http_request": fetch_result.http_request,
+                         "http_response": fetch_result.http_response})
 
                 # Check if this child endpoint is a leaf or has further children
                 grandchild_endpoints = children_map.get(ep.id, [])
@@ -262,6 +292,7 @@ async def _fan_out_level(
                         client=client,
                         result=result,
                         depth=depth + 1,
+                        collector=coll,
                     )
                     return []  # results added by recursive call
 

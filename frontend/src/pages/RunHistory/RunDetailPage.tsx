@@ -7,7 +7,9 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ArrowLeft, AlertCircle } from 'lucide-react'
 import { useRun } from '@/hooks/queries/useRuns'
+import { useRunEvents } from '@/hooks/queries/useRunEvents'
 import { HttpDetailPanel } from './HttpDetailPanel'
+import { PipelineLogSection, hasFaultDiagnosisData } from './PipelineLogSection'
 import { format } from 'date-fns'
 import type { EndpointRunLog } from '@/types/api'
 
@@ -20,6 +22,8 @@ const STAGE_LABELS: Record<string, string> = {
 export default function RunDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { data: run, isLoading } = useRun(id)
+  const { data: eventsData } = useRunEvents(id)
+  const hasFaultDiagData = hasFaultDiagnosisData(eventsData)
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -235,10 +239,12 @@ export default function RunDetailPage() {
                         <AlertDescription>{log.error_message}</AlertDescription>
                       </Alert>
                     )}
-                    <HttpDetailPanel
-                      httpRequest={log.http_request}
-                      httpResponse={log.http_response}
-                    />
+                    {!hasFaultDiagData && (
+                      <HttpDetailPanel
+                        httpRequest={log.http_request}
+                        httpResponse={log.http_response}
+                      />
+                    )}
                   </CardContent>
                 </Card>
               </div>
@@ -266,6 +272,11 @@ export default function RunDetailPage() {
               </div>
             )
           })()}
+
+          {/* Pipeline Log (per D-08: below Endpoint Breakdown) */}
+          <div className="mt-8">
+            <PipelineLogSection runId={id!} />
+          </div>
       </div>
     </div>
   )

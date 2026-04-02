@@ -180,6 +180,35 @@ def _resolve_pagination_strategies(
     return []
 
 
+from pydantic import TypeAdapter as _TypeAdapter
+
+_pagination_adapter = _TypeAdapter(PaginationStrategy)
+
+
+def resolve_pagination_config(config: dict | list | None) -> list[PaginationStrategy] | None:
+    """Convert endpoint pagination_config JSON to PaginationStrategy list.
+
+    Handles None, empty dict, empty list, single dict, and list of dicts.
+    Returns None for falsy/invalid input so fetch_all_pages defaults to
+    no-pagination single-page fetch.
+    """
+    if not config:
+        return None
+    if isinstance(config, dict):
+        try:
+            return [_pagination_adapter.validate_python(config)]
+        except Exception:
+            return None
+    if isinstance(config, list):
+        if not config:
+            return None
+        try:
+            return [_pagination_adapter.validate_python(c) for c in config]
+        except Exception:
+            return None
+    return None
+
+
 async def fetch_all_pages(
     connector: Connector,
     url: str,
@@ -187,6 +216,7 @@ async def fetch_all_pages(
     retry_limit: int | None = None,
     client: httpx.AsyncClient | None = None,
     data_root: str | None = None,
+    capture_on_success: bool = False,
 ) -> SourceFetchResult:
     headers = _build_headers(connector)
     effective_retry_limit = (
@@ -223,7 +253,12 @@ async def fetch_all_pages(
             payload = fetch_result.response.json()
             records = _extract_records_with_root(payload, data_root)
             logger.debug("Source fetch complete: %d records in 1 page", len(records))
-            return SourceFetchResult(records, len(records), 1, False)
+            req_capture = None
+            resp_capture = None
+            if capture_on_success:
+                req_capture = capture_request(fetch_result.response.request, connector.auth_method, connector.api_key_name)
+                resp_capture = capture_response(fetch_result.response)
+            return SourceFetchResult(records, len(records), 1, False, req_capture, resp_capture)
 
         if isinstance(strategy, CursorPagination):
             return await _fetch_cursor_pages(
@@ -235,6 +270,7 @@ async def fetch_all_pages(
                 connector.auth_method,
                 connector.api_key_name,
                 data_root,
+                capture_on_success=capture_on_success,
             )
         if isinstance(strategy, OffsetLimitPagination):
             return await _fetch_offset_limit_pages(
@@ -246,6 +282,7 @@ async def fetch_all_pages(
                 connector.auth_method,
                 connector.api_key_name,
                 data_root,
+                capture_on_success=capture_on_success,
             )
         if isinstance(strategy, LinkHeaderPagination):
             return await _fetch_link_header_pages(
@@ -256,6 +293,7 @@ async def fetch_all_pages(
                 connector.auth_method,
                 connector.api_key_name,
                 data_root,
+                capture_on_success=capture_on_success,
             )
         if isinstance(strategy, PageNumberPagination):
             return await _fetch_page_number_pages(
@@ -267,6 +305,7 @@ async def fetch_all_pages(
                 connector.auth_method,
                 connector.api_key_name,
                 data_root,
+                capture_on_success=capture_on_success,
             )
 
         return SourceFetchResult([], 0, 0, False)
@@ -284,10 +323,12 @@ async def _fetch_cursor_pages(
     auth_type: str,
     api_key_name: str | None,
     data_root: str | None = None,
+    capture_on_success: bool = False,
 ) -> SourceFetchResult:
     records: list[Any] = []
     pages_fetched = 0
     cursor = None
+    last_response: httpx.Response | None = None
 
     while True:
         params: dict[str, Any] = {}
@@ -303,6 +344,7 @@ async def _fetch_cursor_pages(
             req_capture, resp_capture = _maybe_capture(fetch_result, auth_type, api_key_name)
             return SourceFetchResult(records, len(records), pages_fetched, True, req_capture, resp_capture)
 
+        last_response = fetch_result.response
         payload = fetch_result.response.json()
         page_records = _extract_records_with_root(payload, data_root)
         records.extend(page_records)
@@ -310,7 +352,12 @@ async def _fetch_cursor_pages(
 
         next_cursor = payload.get(strategy.cursor_field) if isinstance(payload, dict) else None
         if not next_cursor:
-            return SourceFetchResult(records, len(records), pages_fetched, False)
+            req_capture = None
+            resp_capture = None
+            if capture_on_success and last_response is not None:
+                req_capture = capture_request(last_response.request, auth_type, api_key_name)
+                resp_capture = capture_response(last_response)
+            return SourceFetchResult(records, len(records), pages_fetched, False, req_capture, resp_capture)
         cursor = next_cursor
 
 
@@ -323,11 +370,13 @@ async def _fetch_offset_limit_pages(
     auth_type: str,
     api_key_name: str | None,
     data_root: str | None = None,
+    capture_on_success: bool = False,
 ) -> SourceFetchResult:
     records: list[Any] = []
     pages_fetched = 0
     offset = 0
     limit = strategy.page_size
+    last_response: httpx.Response | None = None
 
     while True:
         params: dict[str, Any] = {strategy.offset_param: offset}
@@ -341,15 +390,24 @@ async def _fetch_offset_limit_pages(
             req_capture, resp_capture = _maybe_capture(fetch_result, auth_type, api_key_name)
             return SourceFetchResult(records, len(records), pages_fetched, True, req_capture, resp_capture)
 
+        last_response = fetch_result.response
         payload = fetch_result.response.json()
         page_records = _extract_records_with_root(payload, data_root)
         records.extend(page_records)
         pages_fetched += 1
 
+        def _success_result() -> SourceFetchResult:
+            req_capture = None
+            resp_capture = None
+            if capture_on_success and last_response is not None:
+                req_capture = capture_request(last_response.request, auth_type, api_key_name)
+                resp_capture = capture_response(last_response)
+            return SourceFetchResult(records, len(records), pages_fetched, False, req_capture, resp_capture)
+
         if not page_records:
-            return SourceFetchResult(records, len(records), pages_fetched, False)
+            return _success_result()
         if limit is not None and len(page_records) < limit:
-            return SourceFetchResult(records, len(records), pages_fetched, False)
+            return _success_result()
 
         offset += len(page_records) if limit is None else limit
 
@@ -362,10 +420,12 @@ async def _fetch_link_header_pages(
     auth_type: str,
     api_key_name: str | None,
     data_root: str | None = None,
+    capture_on_success: bool = False,
 ) -> SourceFetchResult:
     records: list[Any] = []
     pages_fetched = 0
     next_url = base_url
+    last_response: httpx.Response | None = None
 
     while True:
         fetch_result = await _fetch_with_retries(
@@ -375,6 +435,7 @@ async def _fetch_link_header_pages(
             req_capture, resp_capture = _maybe_capture(fetch_result, auth_type, api_key_name)
             return SourceFetchResult(records, len(records), pages_fetched, True, req_capture, resp_capture)
 
+        last_response = fetch_result.response
         payload = fetch_result.response.json()
         page_records = _extract_records_with_root(payload, data_root)
         records.extend(page_records)
@@ -382,7 +443,12 @@ async def _fetch_link_header_pages(
 
         next_link = _parse_next_link(fetch_result.response.headers.get("link"))
         if not next_link:
-            return SourceFetchResult(records, len(records), pages_fetched, False)
+            req_capture = None
+            resp_capture = None
+            if capture_on_success and last_response is not None:
+                req_capture = capture_request(last_response.request, auth_type, api_key_name)
+                resp_capture = capture_response(last_response)
+            return SourceFetchResult(records, len(records), pages_fetched, False, req_capture, resp_capture)
         next_url = urljoin(next_url, next_link)
 
 
@@ -395,10 +461,12 @@ async def _fetch_page_number_pages(
     auth_type: str,
     api_key_name: str | None,
     data_root: str | None = None,
+    capture_on_success: bool = False,
 ) -> SourceFetchResult:
     records: list[Any] = []
     pages_fetched = 0
     page = 1
+    last_response: httpx.Response | None = None
 
     while True:
         params: dict[str, Any] = {strategy.page_param: page}
@@ -412,14 +480,23 @@ async def _fetch_page_number_pages(
             req_capture, resp_capture = _maybe_capture(fetch_result, auth_type, api_key_name)
             return SourceFetchResult(records, len(records), pages_fetched, True, req_capture, resp_capture)
 
+        last_response = fetch_result.response
         payload = fetch_result.response.json()
         page_records = _extract_records_with_root(payload, data_root)
         records.extend(page_records)
         pages_fetched += 1
 
+        def _success_result() -> SourceFetchResult:
+            req_capture = None
+            resp_capture = None
+            if capture_on_success and last_response is not None:
+                req_capture = capture_request(last_response.request, auth_type, api_key_name)
+                resp_capture = capture_response(last_response)
+            return SourceFetchResult(records, len(records), pages_fetched, False, req_capture, resp_capture)
+
         if not page_records:
-            return SourceFetchResult(records, len(records), pages_fetched, False)
+            return _success_result()
         if strategy.page_size is not None and len(page_records) < strategy.page_size:
-            return SourceFetchResult(records, len(records), pages_fetched, False)
+            return _success_result()
 
         page += 1

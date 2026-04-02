@@ -7,8 +7,10 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from app.services.fan_out_executor import (
     FanOutResult,
     LevelStats,
+    TraversalRecord,
     _merge_parent_context,
     _build_tree,
+    classify_endpoints,
     execute_tree,
 )
 from app.services.template_resolver import TemplateResolutionError
@@ -36,6 +38,9 @@ def _make_canvas_ep(
     variable_extractions=None,
     max_concurrency=5,
     path="/default",
+    data_root=None,
+    pagination_config=None,
+    exclusion_rules=None,
 ):
     return SimpleNamespace(
         id=id,
@@ -45,6 +50,9 @@ def _make_canvas_ep(
         variable_extractions=variable_extractions,
         max_concurrency=max_concurrency,
         path=path,
+        data_root=data_root,
+        pagination_config=pagination_config,
+        exclusion_rules=exclusion_rules,
     )
 
 
@@ -452,3 +460,447 @@ async def test_no_children_root_is_leaf():
     assert result.merged_records[1] == {"node": "pve2"}
     assert result.has_failures is False
     assert result.has_skipped is False
+
+
+# --- classify_endpoints tests ---
+
+
+def test_classify_three_level_tree():
+    """root -> base -> leaf: upstream={root, base}, downstream={leaf}."""
+    root = _make_canvas_ep(id="root", parent_ref_id=None, tree_order=0)
+    base = _make_canvas_ep(id="base", parent_ref_id="root", tree_order=1)
+    leaf = _make_canvas_ep(id="leaf", parent_ref_id="base", tree_order=2)
+    upstream, downstream = classify_endpoints([root, base, leaf], "base")
+    assert upstream == {"root", "base"}
+    assert downstream == {"leaf"}
+
+
+def test_classify_single_endpoint():
+    """Single root=base endpoint: upstream={root}, downstream=set()."""
+    root = _make_canvas_ep(id="root", parent_ref_id=None, tree_order=0)
+    upstream, downstream = classify_endpoints([root], "root")
+    assert upstream == {"root"}
+    assert downstream == set()
+
+
+def test_classify_deep_upstream():
+    """root -> mid -> base -> ds1 -> ds2: upstream={root, mid, base}, downstream={ds1, ds2}."""
+    root = _make_canvas_ep(id="root", parent_ref_id=None, tree_order=0)
+    mid = _make_canvas_ep(id="mid", parent_ref_id="root", tree_order=1)
+    base = _make_canvas_ep(id="base", parent_ref_id="mid", tree_order=2)
+    ds1 = _make_canvas_ep(id="ds1", parent_ref_id="base", tree_order=3)
+    ds2 = _make_canvas_ep(id="ds2", parent_ref_id="ds1", tree_order=4)
+    upstream, downstream = classify_endpoints([root, mid, base, ds1, ds2], "base")
+    assert upstream == {"root", "mid", "base"}
+    assert downstream == {"ds1", "ds2"}
+
+
+# --- TraversalRecord tests ---
+
+
+def test_traversal_record_defaults():
+    """TraversalRecord with raw_record={}, ancestor_context={} has empty endpoint_outputs dict."""
+    tr = TraversalRecord(raw_record={}, ancestor_context={})
+    assert tr.endpoint_outputs == {}
+    assert tr.raw_record == {}
+    assert tr.ancestor_context == {}
+
+
+# --- FanOutResult new fields tests ---
+
+
+def test_fan_out_result_new_fields():
+    """FanOutResult() has record_outputs=[], base_records_total=0, base_records_excluded=0, enrichment_gaps=0."""
+    result = FanOutResult()
+    assert result.record_outputs == []
+    assert result.base_records_total == 0
+    assert result.base_records_excluded == 0
+    assert result.enrichment_gaps == 0
+    # Existing fields still present
+    assert result.merged_records == []
+    assert result.level_stats == []
+    assert result.has_failures is False
+    assert result.has_skipped is False
+
+
+# --- Base-aware execute_tree tests ---
+
+from app.schemas.field_mapping import FieldMappingDirectCopy
+
+
+def _make_direct_rule(source: str, target: str):
+    """Helper to create a direct_copy FieldMappingRule."""
+    return FieldMappingDirectCopy(
+        mapping_type="direct_copy", source_field=source, target_field=target
+    )
+
+
+@pytest.mark.asyncio
+@patch("app.services.fan_out_executor.fetch_all_pages")
+async def test_base_exclusion_skips_downstream(mock_fetch):
+    """3-level tree (upstream -> base -> downstream). Base has exclusion rules that
+    filter out a record. Downstream fetch NOT called for excluded record. (SUB-03 / D-08)"""
+    root_ep = _make_canvas_ep(id="root", parent_ref_id=None, tree_order=0, path="/nodes")
+    base_ep = _make_canvas_ep(
+        id="base", parent_ref_id="root", tree_order=1, path="/vms",
+        variable_extractions={},
+        exclusion_rules=[{"source_field": "status", "operator": "equals", "value": "offline"}],
+    )
+    ds_ep = _make_canvas_ep(
+        id="ds", parent_ref_id="base", tree_order=2, path="/agent",
+        variable_extractions={},
+    )
+    connector = _make_connector()
+    client = AsyncMock()
+
+    call_urls = []
+
+    async def fake_fetch(conn, url, client=None, **kwargs):
+        call_urls.append(url)
+        if "/vms" in url:
+            # Return 2 base records: one online, one offline
+            return SourceFetchResult(
+                records=[
+                    {"vmid": 1, "name": "web01", "status": "online"},
+                    {"vmid": 2, "name": "web02", "status": "offline"},
+                ],
+                records_fetched=2, pages_fetched=1, partial=False,
+            )
+        elif "/agent" in url:
+            return SourceFetchResult(
+                records=[{"agent_version": "1.0"}],
+                records_fetched=1, pages_fetched=1, partial=False,
+            )
+        return SourceFetchResult(records=[], records_fetched=0, pages_fetched=0, partial=False)
+    mock_fetch.side_effect = fake_fetch
+
+    mappings = {
+        "base": [_make_direct_rule("name", "hostName")],
+        "ds": [_make_direct_rule("agent_version", "agentVersion")],
+    }
+
+    result = await execute_tree(
+        [root_ep, base_ep, ds_ep],
+        [{"node": "pve1"}],
+        connector, client,
+        base_canvas_endpoint_id="base",
+        mappings_by_ce=mappings,
+    )
+
+    # Only 1 downstream fetch (for the non-excluded record)
+    agent_urls = [u for u in call_urls if "/agent" in u]
+    assert len(agent_urls) == 1
+    assert result.base_records_excluded == 1
+    assert result.base_records_total == 2
+    # 1 record output (the non-excluded base record)
+    assert len(result.record_outputs) == 1
+
+
+@pytest.mark.asyncio
+@patch("app.services.fan_out_executor.fetch_all_pages")
+async def test_upstream_produces_endpoint_outputs(mock_fetch):
+    """2-level tree (upstream=root -> base). Root has field mappings. After execute_tree,
+    each TraversalRecord.endpoint_outputs contains root endpoint's transformed fields. (SUB-04 / D-11)"""
+    root_ep = _make_canvas_ep(id="root", parent_ref_id=None, tree_order=0, path="/nodes")
+    base_ep = _make_canvas_ep(
+        id="base", parent_ref_id="root", tree_order=1, path="/vms",
+        variable_extractions={},
+    )
+    connector = _make_connector()
+    client = AsyncMock()
+
+    async def fake_fetch(conn, url, client=None, **kwargs):
+        if "/vms" in url:
+            return SourceFetchResult(
+                records=[{"vmid": 100, "name": "web01"}],
+                records_fetched=1, pages_fetched=1, partial=False,
+            )
+        return SourceFetchResult(records=[], records_fetched=0, pages_fetched=0, partial=False)
+    mock_fetch.side_effect = fake_fetch
+
+    mappings = {
+        "root": [_make_direct_rule("node", "nodeName")],
+        "base": [_make_direct_rule("name", "hostName")],
+    }
+
+    result = await execute_tree(
+        [root_ep, base_ep],
+        [{"node": "pve1"}],
+        connector, client,
+        base_canvas_endpoint_id="base",
+        mappings_by_ce=mappings,
+    )
+
+    assert len(result.record_outputs) == 1
+    tr = result.record_outputs[0]
+    # Root endpoint outputs should be present
+    assert "root" in tr.endpoint_outputs
+    assert tr.endpoint_outputs["root"] == [{"nodeName": "pve1"}]
+    # Base endpoint outputs should be present
+    assert "base" in tr.endpoint_outputs
+    assert tr.endpoint_outputs["base"] == [{"hostName": "web01"}]
+
+
+@pytest.mark.asyncio
+@patch("app.services.fan_out_executor.fetch_all_pages")
+async def test_downstream_failure_preserves_base(mock_fetch):
+    """3-level tree. Downstream fetch raises on both attempts. Base record still in
+    record_outputs, enrichment_gaps > 0, has_failures True. (DEG-01 / D-02)"""
+    root_ep = _make_canvas_ep(id="root", parent_ref_id=None, tree_order=0, path="/nodes")
+    base_ep = _make_canvas_ep(
+        id="base", parent_ref_id="root", tree_order=1, path="/vms",
+        variable_extractions={},
+    )
+    ds_ep = _make_canvas_ep(
+        id="ds", parent_ref_id="base", tree_order=2, path="/agent",
+        variable_extractions={},
+    )
+    connector = _make_connector()
+    client = AsyncMock()
+
+    async def fake_fetch(conn, url, client=None, **kwargs):
+        if "/vms" in url:
+            return SourceFetchResult(
+                records=[{"vmid": 100, "name": "web01"}],
+                records_fetched=1, pages_fetched=1, partial=False,
+            )
+        elif "/agent" in url:
+            raise Exception("Connection refused")
+        return SourceFetchResult(records=[], records_fetched=0, pages_fetched=0, partial=False)
+    mock_fetch.side_effect = fake_fetch
+
+    mappings = {
+        "base": [_make_direct_rule("name", "hostName")],
+        "ds": [_make_direct_rule("agent_version", "agentVersion")],
+    }
+
+    result = await execute_tree(
+        [root_ep, base_ep, ds_ep],
+        [{"node": "pve1"}],
+        connector, client,
+        base_canvas_endpoint_id="base",
+        mappings_by_ce=mappings,
+    )
+
+    # Base record preserved despite downstream failure
+    assert len(result.record_outputs) == 1
+    assert result.enrichment_gaps > 0
+    assert result.has_failures is True
+    # Base outputs still present
+    assert "base" in result.record_outputs[0].endpoint_outputs
+
+
+@pytest.mark.asyncio
+@patch("app.services.fan_out_executor.fetch_all_pages")
+async def test_downstream_empty_is_normal(mock_fetch):
+    """3-level tree. Downstream fetch returns 0 records (2xx). Base record present,
+    enrichment_gaps == 0. (D-01, D-03)"""
+    root_ep = _make_canvas_ep(id="root", parent_ref_id=None, tree_order=0, path="/nodes")
+    base_ep = _make_canvas_ep(
+        id="base", parent_ref_id="root", tree_order=1, path="/vms",
+        variable_extractions={},
+    )
+    ds_ep = _make_canvas_ep(
+        id="ds", parent_ref_id="base", tree_order=2, path="/agent",
+        variable_extractions={},
+    )
+    connector = _make_connector()
+    client = AsyncMock()
+
+    async def fake_fetch(conn, url, client=None, **kwargs):
+        if "/vms" in url:
+            return SourceFetchResult(
+                records=[{"vmid": 100, "name": "web01"}],
+                records_fetched=1, pages_fetched=1, partial=False,
+            )
+        elif "/agent" in url:
+            return SourceFetchResult(
+                records=[], records_fetched=0, pages_fetched=1, partial=False,
+            )
+        return SourceFetchResult(records=[], records_fetched=0, pages_fetched=0, partial=False)
+    mock_fetch.side_effect = fake_fetch
+
+    mappings = {
+        "base": [_make_direct_rule("name", "hostName")],
+    }
+
+    result = await execute_tree(
+        [root_ep, base_ep, ds_ep],
+        [{"node": "pve1"}],
+        connector, client,
+        base_canvas_endpoint_id="base",
+        mappings_by_ce=mappings,
+    )
+
+    assert len(result.record_outputs) == 1
+    assert result.enrichment_gaps == 0
+    assert result.has_failures is False
+
+
+@pytest.mark.asyncio
+@patch("app.services.fan_out_executor.fetch_all_pages")
+async def test_downstream_retry_once(mock_fetch):
+    """3-level tree. Downstream fetch fails first attempt, succeeds second.
+    fetch_all_pages called twice for downstream. (D-02)"""
+    root_ep = _make_canvas_ep(id="root", parent_ref_id=None, tree_order=0, path="/nodes")
+    base_ep = _make_canvas_ep(
+        id="base", parent_ref_id="root", tree_order=1, path="/vms",
+        variable_extractions={},
+    )
+    ds_ep = _make_canvas_ep(
+        id="ds", parent_ref_id="base", tree_order=2, path="/agent",
+        variable_extractions={},
+    )
+    connector = _make_connector()
+    client = AsyncMock()
+
+    ds_attempt = 0
+
+    async def fake_fetch(conn, url, client=None, **kwargs):
+        nonlocal ds_attempt
+        if "/vms" in url:
+            return SourceFetchResult(
+                records=[{"vmid": 100, "name": "web01"}],
+                records_fetched=1, pages_fetched=1, partial=False,
+            )
+        elif "/agent" in url:
+            ds_attempt += 1
+            if ds_attempt == 1:
+                raise Exception("Transient error")
+            return SourceFetchResult(
+                records=[{"agent_version": "2.0"}],
+                records_fetched=1, pages_fetched=1, partial=False,
+            )
+        return SourceFetchResult(records=[], records_fetched=0, pages_fetched=0, partial=False)
+    mock_fetch.side_effect = fake_fetch
+
+    mappings = {
+        "base": [_make_direct_rule("name", "hostName")],
+        "ds": [_make_direct_rule("agent_version", "agentVersion")],
+    }
+
+    result = await execute_tree(
+        [root_ep, base_ep, ds_ep],
+        [{"node": "pve1"}],
+        connector, client,
+        base_canvas_endpoint_id="base",
+        mappings_by_ce=mappings,
+    )
+
+    # Downstream should have retried and succeeded
+    assert ds_attempt == 2
+    assert len(result.record_outputs) == 1
+    assert "ds" in result.record_outputs[0].endpoint_outputs
+    assert result.enrichment_gaps == 0
+
+
+@pytest.mark.asyncio
+@patch("app.services.fan_out_executor.fetch_all_pages")
+async def test_upstream_failure_aborts(mock_fetch):
+    """2-level tree (upstream=root -> base). Root fetch fails.
+    execute_tree raises exception (canvas abort per D-05)."""
+    root_ep = _make_canvas_ep(id="root", parent_ref_id=None, tree_order=0, path="/nodes")
+    base_ep = _make_canvas_ep(
+        id="base", parent_ref_id="root", tree_order=1, path="/vms",
+        variable_extractions={},
+    )
+    connector = _make_connector()
+    client = AsyncMock()
+
+    # Root records are passed in but base fetch (upstream) fails
+    # Actually, for root->base tree: root records are the input.
+    # The "base" endpoint fetch is what runs upstream. Let's simulate base fetch failing.
+    async def fake_fetch(conn, url, client=None, **kwargs):
+        if "/vms" in url:
+            raise Exception("Upstream failure")
+        return SourceFetchResult(records=[], records_fetched=0, pages_fetched=0, partial=False)
+    mock_fetch.side_effect = fake_fetch
+
+    mappings = {
+        "root": [_make_direct_rule("node", "nodeName")],
+        "base": [_make_direct_rule("name", "hostName")],
+    }
+
+    with pytest.raises(Exception, match="Upstream failure"):
+        await execute_tree(
+            [root_ep, base_ep],
+            [{"node": "pve1"}],
+            connector, client,
+            base_canvas_endpoint_id="base",
+            mappings_by_ce=mappings,
+        )
+
+
+@pytest.mark.asyncio
+@patch("app.services.fan_out_executor.fetch_all_pages")
+async def test_single_endpoint_canvas_base_aware(mock_fetch):
+    """Single endpoint (root=base, no children). Pass base_canvas_endpoint_id=root.id.
+    record_outputs has one TraversalRecord with base endpoint's transformed fields. (Pitfall 4)"""
+    root_ep = _make_canvas_ep(id="root", parent_ref_id=None, tree_order=0, path="/nodes")
+    connector = _make_connector()
+    client = AsyncMock()
+
+    mappings = {
+        "root": [_make_direct_rule("node", "nodeName")],
+    }
+
+    result = await execute_tree(
+        [root_ep],
+        [{"node": "pve1"}, {"node": "pve2"}],
+        connector, client,
+        base_canvas_endpoint_id="root",
+        mappings_by_ce=mappings,
+    )
+
+    assert len(result.record_outputs) == 2
+    assert result.record_outputs[0].endpoint_outputs["root"] == [{"nodeName": "pve1"}]
+    assert result.record_outputs[1].endpoint_outputs["root"] == [{"nodeName": "pve2"}]
+    assert result.base_records_total == 2
+    assert result.base_records_excluded == 0
+
+
+@pytest.mark.asyncio
+@patch("app.services.fan_out_executor.fetch_all_pages")
+async def test_base_exclusion_before_mappings(mock_fetch):
+    """Base has exclusion rules and field mappings. Exclusion runs on raw source data
+    (before apply_mappings). Excluded records have NO endpoint_outputs entry. (D-10)"""
+    root_ep = _make_canvas_ep(id="root", parent_ref_id=None, tree_order=0, path="/nodes")
+    base_ep = _make_canvas_ep(
+        id="base", parent_ref_id="root", tree_order=1, path="/vms",
+        variable_extractions={},
+        exclusion_rules=[{"source_field": "template", "operator": "equals", "value": "1"}],
+    )
+    connector = _make_connector()
+    client = AsyncMock()
+
+    async def fake_fetch(conn, url, client=None, **kwargs):
+        if "/vms" in url:
+            return SourceFetchResult(
+                records=[
+                    {"vmid": 1, "name": "real-vm", "template": "0"},
+                    {"vmid": 2, "name": "template-vm", "template": "1"},
+                ],
+                records_fetched=2, pages_fetched=1, partial=False,
+            )
+        return SourceFetchResult(records=[], records_fetched=0, pages_fetched=0, partial=False)
+    mock_fetch.side_effect = fake_fetch
+
+    mappings = {
+        "root": [_make_direct_rule("node", "nodeName")],
+        "base": [_make_direct_rule("name", "hostName")],
+    }
+
+    result = await execute_tree(
+        [root_ep, base_ep],
+        [{"node": "pve1"}],
+        connector, client,
+        base_canvas_endpoint_id="base",
+        mappings_by_ce=mappings,
+    )
+
+    # Only 1 record output (the non-template one)
+    assert len(result.record_outputs) == 1
+    assert result.base_records_excluded == 1
+    assert result.base_records_total == 2
+    # The surviving record should have base mappings
+    assert result.record_outputs[0].endpoint_outputs["base"] == [{"hostName": "real-vm"}]

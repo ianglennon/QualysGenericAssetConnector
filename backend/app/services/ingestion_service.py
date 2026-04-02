@@ -17,7 +17,8 @@ from app.models.field_mapping import FieldMapping
 from app.models.qualys_config import QualysConfig
 from app.models.run_history import EndpointRunLog, RunFailure, RunHistory, RunStatus
 from app.schemas.field_mapping import FieldMappingRule
-from app.services.fan_out_executor import execute_tree, FanOutResult, _build_tree
+from app.services.fan_out_executor import execute_tree, FanOutResult, TraversalRecord, _build_tree
+from app.services.event_collector import EventCollector, API_CALL, STAGE_FETCH
 from app.services.path_resolver import resolve_path
 from app.services.source_client import SourceFetchResult, fetch_all_pages
 from app.services.transform_engine import apply_mappings
@@ -74,6 +75,32 @@ def _build_mapping_rules(mappings: list[FieldMapping]) -> list[FieldMappingRule]
             payload["separator"] = mapping.separator
         rules.append(adapter.validate_python(payload))
     return rules
+
+
+def _preload_endpoint_mappings(
+    db, canvas_endpoints: list, ep_map: dict
+) -> dict[str, list[FieldMappingRule]]:
+    """Pre-load and convert field mappings for all canvas endpoints.
+
+    Per Pitfall 1: fan_out_executor.py has no DB access.
+    Load all mappings here and pass as a dict.
+
+    Returns: {canvas_endpoint_id: list[FieldMappingRule]}
+    """
+    mappings_by_ce: dict[str, list[FieldMappingRule]] = {}
+    for ce in canvas_endpoints:
+        ep = ep_map.get(ce.endpoint_id)
+        if not ep:
+            mappings_by_ce[ce.id] = []
+            continue
+        mappings = (
+            db.query(FieldMapping)
+            .filter(FieldMapping.endpoint_id == ep.id)
+            .order_by(FieldMapping.created_at.asc())
+            .all()
+        )
+        mappings_by_ce[ce.id] = _build_mapping_rules(mappings)
+    return mappings_by_ce
 
 
 def _mark_failed(
@@ -256,10 +283,12 @@ async def _run_canvas(
     )
     ep_map = {ep.id: ep for ep in connector_endpoints}
 
-    # Attach .path to each canvas_endpoint for execute_tree compatibility
+    # Attach connector endpoint attributes to canvas endpoints for execute_tree compatibility
     for ce in canvas_endpoints:
         ep = ep_map.get(ce.endpoint_id)
         ce.path = ep.path if ep else ""
+        ce.data_root = ep.data_root if ep else None
+        ce.pagination_config = ep.pagination_config if ep and hasattr(ep, "pagination_config") else None
 
     # Find root canvas endpoints (parent_ref_id is None)
     roots = [ce for ce in canvas_endpoints if ce.parent_ref_id is None]
@@ -347,13 +376,31 @@ async def _run_canvas(
     else:
         filtered_root_records = source_result.records
 
-    # Execute tree (fan-out children)
+    # Pre-load field mappings for all canvas endpoints (Pitfall 1: no DB in executor)
+    mappings_by_ce = _preload_endpoint_mappings(db, canvas_endpoints, ep_map)
+
+    # Read base_canvas_endpoint_id from canvas model (set by Phase 57 detection)
+    base_ce_id = getattr(canvas, "base_canvas_endpoint_id", None)
+
+    # Execute tree (fan-out children) with base-aware params
     fan_out_result = await execute_tree(
         canvas_endpoints=canvas_endpoints,
         root_records=filtered_root_records,
         connector=connector,
         client=client,
+        base_canvas_endpoint_id=base_ce_id,
+        mappings_by_ce=mappings_by_ce,
     )
+
+    # Log base-aware traversal stats if applicable
+    if base_ce_id:
+        logger.info(
+            "Base-aware traversal: %d base records, %d excluded, %d enrichment gaps, %d record outputs",
+            fan_out_result.base_records_total,
+            fan_out_result.base_records_excluded,
+            fan_out_result.enrichment_gaps,
+            len(fan_out_result.record_outputs),
+        )
 
     # Create EndpointRunLog per child canvas-endpoint from LevelStats
     # PITFALL 1: LevelStats.endpoint_id is canvas_endpoint.id, not connector_endpoint.id

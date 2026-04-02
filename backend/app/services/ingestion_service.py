@@ -438,6 +438,7 @@ async def _run_canvas(
         root_records=filtered_root_records,
         connector=connector,
         client=client,
+        collector=collector,
     )
 
     if collector and fan_out_result.level_stats:

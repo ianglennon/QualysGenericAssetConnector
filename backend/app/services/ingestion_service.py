@@ -17,7 +17,8 @@ from app.models.field_mapping import FieldMapping
 from app.models.qualys_config import QualysConfig
 from app.models.run_history import EndpointRunLog, RunFailure, RunHistory, RunStatus
 from app.schemas.field_mapping import FieldMappingRule
-from app.services.fan_out_executor import execute_tree, FanOutResult, TraversalRecord, _build_tree
+from app.services.fan_out_executor import execute_tree, FanOutResult, TraversalRecord, _build_tree, classify_endpoints
+from app.services.record_assembler import assemble_qualys_record
 from app.services.event_collector import EventCollector, API_CALL, STAGE_FETCH
 from app.services.path_resolver import resolve_path
 from app.services.source_client import SourceFetchResult, fetch_all_pages, resolve_pagination_config
@@ -26,6 +27,7 @@ from app.services.qualys_adapter import QualysAdapterError, QualysFailure, submi
 from app.services.connector_service import HTTPX_TIMEOUT
 from app.services.payload_capture import cleanup_old_payloads
 from app.services.exclusion_filter import apply_exclusion_rules
+from app.services.detection import find_base_endpoint
 from app.services.event_collector import (
     EventCollector, STAGE_FETCH, STAGE_TRANSFORM, STAGE_EXCLUSION, STAGE_QUALYS,
     API_CALL, TRANSFORM_DECISION, EXCLUSION_RESULT, QUALYS_BATCH, QUALYS_REJECTION,
@@ -477,6 +479,34 @@ async def _run_canvas(
     # Read base_canvas_endpoint_id from canvas model (set by Phase 57 detection)
     base_ce_id = getattr(canvas, "base_canvas_endpoint_id", None)
 
+    # D-09: Auto-migrate legacy canvases (pre-Phase 57, no base_canvas_endpoint_id)
+    if base_ce_id is None:
+        det = find_base_endpoint(canvas.id, db)
+        if det.is_valid and det.base_canvas_endpoint_id:
+            base_ce_id = det.base_canvas_endpoint_id
+            canvas.base_canvas_endpoint_id = base_ce_id
+            db.commit()
+            logger.info("Auto-migrated canvas %s: base_canvas_endpoint_id=%s", canvas.id, base_ce_id)
+        elif not det.is_valid:
+            # D-10: Fail with actionable error if no identity fields found
+            error_msg = det.error_message or "No identity fields mapped on any endpoint in this canvas"
+            fail_log = EndpointRunLog(
+                run_id=run.id,
+                endpoint_id=root_ep.id,
+                canvas_id=canvas.id,
+                canvas_endpoint_id=root_ce.id,
+                execution_order=execution_offset,
+                records_fetched=0,
+                records_submitted=0,
+                records_failed=0,
+                status="failed",
+                error_message=f"Canvas migration failed: {error_msg}. Add identity field mappings (e.g., instanceUuid, hostName) to enable execution.",
+                failure_stage="validation",
+            )
+            db.add(fail_log)
+            db.commit()
+            return [fail_log]
+
     # Execute tree (fan-out children) with base-aware params
     fan_out_result = await execute_tree(
         canvas_endpoints=canvas_endpoints,
@@ -543,69 +573,30 @@ async def _run_canvas(
         db.add(child_log)
         logs.append(child_log)
 
-    # Apply leaf endpoint field mappings to merged records and submit to Qualys (D-04)
-    for leaf_ce_id in leaf_ids:
-        leaf_ce = ce_map.get(leaf_ce_id)
-        if not leaf_ce:
-            continue
+    # --- Base-anchored submission (Phase 59, D-07/D-08) ---
+    if base_ce_id and fan_out_result.record_outputs:
+        # Build ordered endpoint list for assembly: upstream (excl base) -> base -> downstream
+        upstream_ids, downstream_ids = classify_endpoints(canvas_endpoints, base_ce_id)
+        # upstream_ids includes base; remove it for ordering, then: upstream -> base -> downstream
+        upstream_only = [ce.id for ce in canvas_endpoints
+                         if ce.id in upstream_ids and ce.id != base_ce_id]
+        downstream_list = [ce.id for ce in canvas_endpoints
+                           if ce.id in downstream_ids]
+        endpoint_order = upstream_only + [base_ce_id] + downstream_list
 
-        # Skip root if it's also a leaf (no children = single endpoint canvas)
-        # In that case the root_log already exists and we submit its records directly
-        leaf_ep = ep_map.get(leaf_ce.endpoint_id)
-        if not leaf_ep:
-            continue
+        # Assemble one Qualys payload per base record
+        assembled_records = []
+        for tr in fan_out_result.record_outputs:
+            payload = assemble_qualys_record(tr, endpoint_order)
+            if payload:  # Skip empty payloads (no mapped fields)
+                assembled_records.append(payload)
 
-        # --- D-10: Apply leaf exclusion rules to merged records ---
-        records_before_exclusion = len(fan_out_result.merged_records)
-        leaf_rules_raw = leaf_ce.exclusion_rules or []
-        leaf_filtered = 0
-
-        if collector:
-            collector.start_stage(STAGE_EXCLUSION)
-
-        if leaf_rules_raw:
-            leaf_rules = rule_adapter.validate_python(leaf_rules_raw)
-            records_to_map, leaf_filtered = apply_exclusion_rules(
-                fan_out_result.merged_records, leaf_rules
-            )
-            # Update the leaf's log with filtered count
-            for log in logs:
-                if log.canvas_endpoint_id == leaf_ce.id and log != root_log:
-                    log.records_filtered = leaf_filtered
-                    break
-        else:
-            records_to_map = fan_out_result.merged_records
-
-        if collector:
-            collector.end_stage(STAGE_EXCLUSION, records_in=records_before_exclusion, records_out=len(records_to_map))
-            if leaf_filtered > 0:
-                collector.add_detail(EXCLUSION_RESULT, STAGE_EXCLUSION,
-                    f"Leaf exclusion: {leaf_filtered} records excluded",
-                    {"excluded_count": leaf_filtered, "remaining": len(records_to_map)})
-
-        # --- Transform stage ---
-        if collector:
-            collector.start_stage(STAGE_TRANSFORM)
-
-        mappings = (
-            db.query(FieldMapping)
-            .filter(FieldMapping.endpoint_id == leaf_ep.id)
-            .order_by(FieldMapping.created_at.asc())
-            .all()
-        )
-        mapping_rules = _build_mapping_rules(mappings)
-        transformed = [apply_mappings(rec, mapping_rules) for rec in records_to_map]
-
-        if collector:
-            collector.end_stage(STAGE_TRANSFORM, records_in=len(records_to_map), records_out=len(transformed))
-
-        # --- Qualys submit stage ---
+        # Submit in batches using existing infrastructure
         if collector:
             collector.start_stage(STAGE_QUALYS)
 
-        # Submit to Qualys in batches
         failures: list[QualysFailure] = []
-        batches = _chunk_records(transformed, QUALYS_BATCH_SIZE)
+        batches = _chunk_records(assembled_records, QUALYS_BATCH_SIZE)
         submitted_count = 0
         try:
             for batch_idx, batch in enumerate(batches):
@@ -621,24 +612,19 @@ async def _run_canvas(
                          "accepted": result.submitted_count, "rejected": len(result.failures)})
         except QualysAdapterError as exc:
             if collector:
-                collector.end_stage(STAGE_QUALYS, records_in=len(transformed), records_out=submitted_count, status="failed", error=str(exc))
-            # Find the leaf's log (it's in the child logs from LevelStats)
-            for log in logs:
-                if log.canvas_endpoint_id == leaf_ce.id and log != root_log:
-                    log.records_submitted = submitted_count
-                    log.records_failed = len(failures)
-                    log.status = "failed"
-                    log.error_message = str(exc)
-                    log.failure_stage = "qualys_submit"
-                    break
+                collector.end_stage(STAGE_QUALYS, records_in=len(assembled_records), records_out=submitted_count, status="failed", error=str(exc))
+            root_log.records_submitted = submitted_count
+            root_log.records_failed = len(failures)
+            root_log.status = "failed"
+            root_log.error_message = str(exc)
+            root_log.failure_stage = "qualys_submit"
             db.commit()
-            continue
+            return logs
 
+        records_failed = len(failures)
         if collector:
             qualys_status = "success" if not failures else "partial_success"
-            collector.end_stage(STAGE_QUALYS, records_in=len(transformed), records_out=submitted_count, status=qualys_status)
-
-            # Group failures by error_message for rejection detail (per D-07)
+            collector.end_stage(STAGE_QUALYS, records_in=len(assembled_records), records_out=submitted_count, status=qualys_status)
             if failures:
                 reason_groups: dict[str, list[str]] = {}
                 for f in failures:
@@ -648,12 +634,14 @@ async def _run_canvas(
                         f"{len(record_ids)} records: {reason}",
                         {"reason": reason, "count": len(record_ids), "record_ids": record_ids})
 
-        # Update leaf log with submission counts
-        for log in logs:
-            if log.canvas_endpoint_id == leaf_ce.id and log != root_log:
-                log.records_submitted = submitted_count
-                log.records_failed = len(failures)
-                break
+        # Update root_log with base-anchored submission counts (Pitfall 5)
+        root_log.records_submitted = submitted_count
+        root_log.records_failed = records_failed
+
+    elif not base_ce_id:
+        # Legacy fallback: leaf-centric submission (pre-Phase 57 canvases that
+        # somehow bypassed auto-migration -- should not happen after Task 1)
+        logger.warning("Canvas %s: no base_ce_id, skipping submission", canvas.id)
 
     db.commit()
     return logs

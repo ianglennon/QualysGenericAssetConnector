@@ -15,7 +15,7 @@ from app.schemas.field_mapping import (
     FieldMappingResponse,
 )
 from app.services.preview import preview_mappings
-from app.services.validation import validate_endpoint_mappings
+from app.services.validation import validate_endpoint_mappings, validate_no_target_collisions
 from app.services.detection import find_base_endpoint
 from app.models.canvas_endpoint import CanvasEndpoint
 from app.models.canvas import Canvas
@@ -110,8 +110,21 @@ def batch_replace_endpoint_mappings(
     if canvas_ids:
         db.commit()
 
+    # D-01/D-03: Check for cross-endpoint target field collisions
+    collision_errors: list[str] = []
+    for cid in canvas_ids:
+        collisions = validate_no_target_collisions(cid, db)
+        for c in collisions:
+            collision_errors.append(
+                f"Target field \"{c['field']}\" is mapped on multiple endpoints: {', '.join(c['endpoints'])}"
+            )
+
     is_valid, invalid_endpoints = validate_endpoint_mappings(connector_id, db)
     validation_errors = [ep.get("error", ep.get("name", "Unknown")) for ep in invalid_endpoints]
+    # Merge collision errors
+    validation_errors.extend(collision_errors)
+    if collision_errors:
+        is_valid = False
 
     # Persist validity to connector row so UI badge updates immediately
     connector = db.query(Connector).filter_by(id=connector_id).first()

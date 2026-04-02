@@ -25,6 +25,10 @@ from app.services.qualys_adapter import QualysAdapterError, QualysFailure, submi
 from app.services.connector_service import HTTPX_TIMEOUT
 from app.services.payload_capture import cleanup_old_payloads
 from app.services.exclusion_filter import apply_exclusion_rules
+from app.services.event_collector import (
+    EventCollector, STAGE_FETCH, STAGE_TRANSFORM, STAGE_EXCLUSION, STAGE_QUALYS,
+    API_CALL, TRANSFORM_DECISION, EXCLUSION_RESULT, QUALYS_BATCH, QUALYS_REJECTION,
+)
 from app.schemas.exclusion_rule import ExclusionRule
 
 QUALYS_BATCH_SIZE = 100
@@ -112,6 +116,7 @@ async def _run_endpoint(
     qualys_config,
     client: httpx.AsyncClient,
     idx: int,
+    collector: EventCollector | None = None,
 ) -> EndpointRunLog:
     records_fetched = 0
     records_submitted = 0
@@ -124,16 +129,34 @@ async def _run_endpoint(
         logger.debug(
             "Endpoint %s: fetching from %s", endpoint.path, resolved_url,
         )
+
+        # --- Source fetch stage ---
+        if collector:
+            collector.start_stage(STAGE_FETCH)
+
         source_result = await fetch_all_pages(
             connector, url=resolved_url, client=client,
             data_root=endpoint.data_root,
             pagination_strategies=resolve_pagination_config(endpoint.pagination_config),
         )
         records_fetched = source_result.records_fetched
+
+        if collector:
+            collector.end_stage(STAGE_FETCH, records_in=0, records_out=records_fetched)
+            collector.add_detail(API_CALL, STAGE_FETCH,
+                f"GET {resolved_url} -> {records_fetched} records",
+                {"url": resolved_url, "records": records_fetched,
+                 "http_request": source_result.http_request,
+                 "http_response": source_result.http_response})
+
         logger.debug(
             "Endpoint %s: fetched %d records (partial=%s)",
             endpoint.path, records_fetched, source_result.partial,
         )
+
+        # --- Transform stage ---
+        if collector:
+            collector.start_stage(STAGE_TRANSFORM)
 
         mappings = (
             db.query(FieldMapping)
@@ -144,21 +167,47 @@ async def _run_endpoint(
         mapping_rules = _build_mapping_rules(mappings)
         transformed_records = [apply_mappings(record, mapping_rules) for record in source_result.records]
 
+        if collector:
+            collector.end_stage(STAGE_TRANSFORM, records_in=records_fetched, records_out=len(transformed_records))
+
+        # --- Qualys submit stage ---
+        if collector:
+            collector.start_stage(STAGE_QUALYS)
+
         failures: list[QualysFailure] = []
         batches = _chunk_records(transformed_records, QUALYS_BATCH_SIZE)
         logger.debug(
             "Endpoint %s: submitting %d records in %d batches",
             endpoint.path, len(transformed_records), len(batches),
         )
-        for batch in batches:
+        for batch_idx, batch in enumerate(batches):
             if not batch:
                 continue
             current_batch_size = len(batch)
             result = await submit_batch(batch, connector, qualys_config)
             records_submitted += result.submitted_count
             failures.extend(result.failures)
+            if collector:
+                collector.add_detail(QUALYS_BATCH, STAGE_QUALYS,
+                    f"Batch {batch_idx+1}/{len(batches)}: {result.submitted_count} accepted, {len(result.failures)} rejected",
+                    {"batch": batch_idx+1, "total_batches": len(batches),
+                     "accepted": result.submitted_count, "rejected": len(result.failures)})
 
         records_failed = len(failures)
+
+        if collector:
+            status = "success" if records_failed == 0 else "partial_success"
+            collector.end_stage(STAGE_QUALYS, records_in=len(transformed_records), records_out=records_submitted, status=status)
+
+            # Group failures by error_message for rejection detail (per D-07)
+            if failures:
+                reason_groups: dict[str, list[str]] = {}
+                for f in failures:
+                    reason_groups.setdefault(f.error_message, []).append(f.record_identifier)
+                for reason, record_ids in reason_groups.items():
+                    collector.add_detail(QUALYS_REJECTION, STAGE_QUALYS,
+                        f"{len(record_ids)} records: {reason}",
+                        {"reason": reason, "count": len(record_ids), "record_ids": record_ids})
 
         log = EndpointRunLog(
             run_id=run.id,
@@ -177,6 +226,8 @@ async def _run_endpoint(
         return log
 
     except QualysAdapterError as exc:
+        if collector:
+            collector.end_stage(STAGE_QUALYS, records_in=len(transformed_records) if source_result else 0, records_out=records_submitted, status="failed", error=str(exc))
         http_req = exc.error_context.get("http_request")
         http_resp = exc.error_context.get("http_response")
         log = EndpointRunLog(
@@ -198,6 +249,8 @@ async def _run_endpoint(
 
     except Exception as exc:
         failure_stage = "source_fetch" if source_result is None else "transformation"
+        if collector:
+            collector.end_stage(STAGE_FETCH if source_result is None else STAGE_TRANSFORM, records_in=0, records_out=0, status="failed", error=str(exc))
         log = EndpointRunLog(
             run_id=run.id,
             endpoint_id=endpoint.id,
@@ -224,6 +277,7 @@ async def _run_canvas(
     qualys_config,
     client: httpx.AsyncClient,
     execution_offset: int,
+    collector: EventCollector | None = None,
 ) -> list[EndpointRunLog]:
     """Execute a canvas endpoint tree and create EndpointRunLogs.
 
@@ -286,12 +340,26 @@ async def _run_canvas(
 
     root_url = connector.base_url.rstrip("/") + "/" + root_ep.path.lstrip("/")
     try:
+        if collector:
+            collector.start_stage(STAGE_FETCH)
+
         source_result = await fetch_all_pages(
             connector, url=root_url, client=client,
             data_root=root_ep.data_root,
             pagination_strategies=resolve_pagination_config(root_ep.pagination_config),
         )
+
+        if collector:
+            collector.end_stage(STAGE_FETCH, records_in=0, records_out=source_result.records_fetched)
+            collector.add_detail(API_CALL, STAGE_FETCH,
+                f"GET {root_url} -> {source_result.records_fetched} records (root)",
+                {"url": root_url, "records": source_result.records_fetched,
+                 "http_request": source_result.http_request,
+                 "http_response": source_result.http_response})
+
     except Exception as exc:
+        if collector:
+            collector.end_stage(STAGE_FETCH, records_in=0, records_out=0, status="failed", error=str(exc))
         # Root fetch failed -- log and return
         log = EndpointRunLog(
             run_id=run.id,
@@ -357,6 +425,10 @@ async def _run_canvas(
             source_result.records, root_rules
         )
         root_log.records_filtered = root_filtered
+        if collector and root_filtered > 0:
+            collector.add_detail(EXCLUSION_RESULT, STAGE_EXCLUSION,
+                f"Root exclusion: {root_filtered} records excluded",
+                {"excluded_count": root_filtered, "remaining": len(filtered_root_records)})
     else:
         filtered_root_records = source_result.records
 
@@ -367,6 +439,12 @@ async def _run_canvas(
         connector=connector,
         client=client,
     )
+
+    if collector and fan_out_result.level_stats:
+        total_child_fetched = sum(s.records_fetched for s in fan_out_result.level_stats)
+        collector.add_detail(API_CALL, STAGE_FETCH,
+            f"Fan-out: {total_child_fetched} child records from {len(fan_out_result.level_stats)} levels",
+            {"child_records": total_child_fetched, "levels": len(fan_out_result.level_stats)})
 
     # Create EndpointRunLog per child canvas-endpoint from LevelStats
     # PITFALL 1: LevelStats.endpoint_id is canvas_endpoint.id, not connector_endpoint.id
@@ -404,8 +482,13 @@ async def _run_canvas(
             continue
 
         # --- D-10: Apply leaf exclusion rules to merged records ---
+        records_before_exclusion = len(fan_out_result.merged_records)
         leaf_rules_raw = leaf_ce.exclusion_rules or []
         leaf_filtered = 0
+
+        if collector:
+            collector.start_stage(STAGE_EXCLUSION)
+
         if leaf_rules_raw:
             leaf_rules = rule_adapter.validate_python(leaf_rules_raw)
             records_to_map, leaf_filtered = apply_exclusion_rules(
@@ -419,6 +502,17 @@ async def _run_canvas(
         else:
             records_to_map = fan_out_result.merged_records
 
+        if collector:
+            collector.end_stage(STAGE_EXCLUSION, records_in=records_before_exclusion, records_out=len(records_to_map))
+            if leaf_filtered > 0:
+                collector.add_detail(EXCLUSION_RESULT, STAGE_EXCLUSION,
+                    f"Leaf exclusion: {leaf_filtered} records excluded",
+                    {"excluded_count": leaf_filtered, "remaining": len(records_to_map)})
+
+        # --- Transform stage ---
+        if collector:
+            collector.start_stage(STAGE_TRANSFORM)
+
         mappings = (
             db.query(FieldMapping)
             .filter(FieldMapping.endpoint_id == leaf_ep.id)
@@ -428,18 +522,32 @@ async def _run_canvas(
         mapping_rules = _build_mapping_rules(mappings)
         transformed = [apply_mappings(rec, mapping_rules) for rec in records_to_map]
 
+        if collector:
+            collector.end_stage(STAGE_TRANSFORM, records_in=len(records_to_map), records_out=len(transformed))
+
+        # --- Qualys submit stage ---
+        if collector:
+            collector.start_stage(STAGE_QUALYS)
+
         # Submit to Qualys in batches
         failures: list[QualysFailure] = []
         batches = _chunk_records(transformed, QUALYS_BATCH_SIZE)
         submitted_count = 0
         try:
-            for batch in batches:
+            for batch_idx, batch in enumerate(batches):
                 if not batch:
                     continue
                 result = await submit_batch(batch, connector, qualys_config)
                 submitted_count += result.submitted_count
                 failures.extend(result.failures)
+                if collector:
+                    collector.add_detail(QUALYS_BATCH, STAGE_QUALYS,
+                        f"Batch {batch_idx+1}/{len(batches)}: {result.submitted_count} accepted, {len(result.failures)} rejected",
+                        {"batch": batch_idx+1, "total_batches": len(batches),
+                         "accepted": result.submitted_count, "rejected": len(result.failures)})
         except QualysAdapterError as exc:
+            if collector:
+                collector.end_stage(STAGE_QUALYS, records_in=len(transformed), records_out=submitted_count, status="failed", error=str(exc))
             # Find the leaf's log (it's in the child logs from LevelStats)
             for log in logs:
                 if log.canvas_endpoint_id == leaf_ce.id and log != root_log:
@@ -451,6 +559,20 @@ async def _run_canvas(
                     break
             db.commit()
             continue
+
+        if collector:
+            qualys_status = "success" if not failures else "partial_success"
+            collector.end_stage(STAGE_QUALYS, records_in=len(transformed), records_out=submitted_count, status=qualys_status)
+
+            # Group failures by error_message for rejection detail (per D-07)
+            if failures:
+                reason_groups: dict[str, list[str]] = {}
+                for f in failures:
+                    reason_groups.setdefault(f.error_message, []).append(f.record_identifier)
+                for reason, record_ids in reason_groups.items():
+                    collector.add_detail(QUALYS_REJECTION, STAGE_QUALYS,
+                        f"{len(record_ids)} records: {reason}",
+                        {"reason": reason, "count": len(record_ids), "record_ids": record_ids})
 
         # Update leaf log with submission counts
         for log in logs:
@@ -483,6 +605,11 @@ async def run_ingestion(run_id: str, canvas_id: str | None = None) -> None:
                 {"connector_id": run.connector_id},
             )
             return
+
+        collector = EventCollector(
+            run_id=run.id,
+            fault_diagnosis=bool(getattr(connector, 'fault_diagnosis', False)),
+        )
 
         qualys_config = db.query(QualysConfig).first()
         if not qualys_config:
@@ -541,7 +668,7 @@ async def run_ingestion(run_id: str, canvas_id: str | None = None) -> None:
             execution_idx = 0
             for canvas in canvases:
                 canvas_logs = await _run_canvas(
-                    db, run, connector, canvas, qualys_config, client, execution_idx,
+                    db, run, connector, canvas, qualys_config, client, execution_idx, collector,
                 )
                 logs.extend(canvas_logs)
                 for cl in canvas_logs:
@@ -568,7 +695,7 @@ async def run_ingestion(run_id: str, canvas_id: str | None = None) -> None:
 
                 for idx, endpoint in enumerate(orphan_endpoints):
                     log = await _run_endpoint(
-                        db, run, connector, endpoint, qualys_config, client, execution_idx + idx,
+                        db, run, connector, endpoint, qualys_config, client, execution_idx + idx, collector,
                     )
                     logs.append(log)
                     total_fetched += log.records_fetched
@@ -584,9 +711,14 @@ async def run_ingestion(run_id: str, canvas_id: str | None = None) -> None:
             "Ingestion run_id=%s complete: status=%s fetched=%d submitted=%d failed=%d",
             run_id, run.status.value, total_fetched, total_submitted, total_failed,
         )
+        collector.flush(db)
         db.commit()
 
     except QualysAdapterError as exc:
+        try:
+            collector.flush(db)
+        except Exception:
+            pass  # Don't let event flush failure mask the original error
         _mark_failed(
             db,
             run,
@@ -595,6 +727,10 @@ async def run_ingestion(run_id: str, canvas_id: str | None = None) -> None:
             {**exc.error_context, "status_code": exc.status_code},
         )
     except Exception as exc:
+        try:
+            collector.flush(db)
+        except Exception:
+            pass  # Don't let event flush failure mask the original error
         _mark_failed(
             db,
             run,

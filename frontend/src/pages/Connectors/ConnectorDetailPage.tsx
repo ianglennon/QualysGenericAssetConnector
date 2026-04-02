@@ -4,11 +4,12 @@ import { PageContainer } from '@/components/layout/PageContainer'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
-import { useConnector } from '@/hooks/queries/useConnectors'
+import { useConnector, useUpdateConnector } from '@/hooks/queries/useConnectors'
 import { useTriggerRun } from '@/hooks/queries/useRuns'
 import { useToast } from '@/hooks/use-toast'
 import { EndpointList } from '@/components/connectors/EndpointList'
 import { CanvasGrid } from '@/components/connectors/CanvasGrid'
+import { FaultDiagnosisToggle } from '@/components/connectors/FaultDiagnosisToggle'
 
 export function ConnectorDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -32,6 +33,21 @@ export function ConnectorDetailPage() {
       })
     }
   }
+  const updateConnector = useUpdateConnector()
+
+  const handleFaultDiagnosisToggle = async (enabled: boolean) => {
+    if (!id) return
+    try {
+      await updateConnector.mutateAsync({ id, connector: { fault_diagnosis: enabled } })
+    } catch {
+      toast({
+        title: 'Failed to update',
+        description: 'Could not update Fault Diagnosis setting.',
+        variant: 'destructive',
+      })
+    }
+  }
+
   const { data: connector, isLoading } = useConnector(id)
 
   if (isLoading) {
@@ -55,7 +71,14 @@ export function ConnectorDetailPage() {
 
   return (
     <PageContainer
-      title={connector.name}
+      title={
+        <span className="flex items-center gap-2">
+          {connector.name}
+          {connector.fault_diagnosis && (
+            <Badge className="bg-yellow-600 text-xs">Fault Diagnosis Active</Badge>
+          )}
+        </span>
+      }
       actions={
         <div className="flex gap-2">
           <Button variant="outline">Edit</Button>
@@ -108,6 +131,13 @@ export function ConnectorDetailPage() {
             </div>
           </div>
         </div>
+
+        <FaultDiagnosisToggle
+          connectorId={connector.id}
+          enabled={connector.fault_diagnosis}
+          onToggle={handleFaultDiagnosisToggle}
+          isPending={updateConnector.isPending}
+        />
 
         <CanvasGrid connectorId={connector.id} />
 

@@ -223,6 +223,7 @@ export interface ConnectorCreate {
   source_retry_limit?: number
   qualys_retry_limit?: number
   verify_ssl?: boolean
+  fault_diagnosis?: boolean
 }
 
 export interface TestConnectionResponse {

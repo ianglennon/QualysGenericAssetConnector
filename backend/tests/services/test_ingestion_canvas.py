@@ -266,3 +266,122 @@ class TestRunCanvasBaseAwareWiring:
         assert call_kwargs["base_canvas_endpoint_id"] is None
         # mappings_by_ce should still be passed
         assert isinstance(call_kwargs["mappings_by_ce"], dict)
+
+
+class TestEnrichmentGapStatusPropagation:
+    """Tests that enrichment_gaps > 0 propagates to root_log.status."""
+
+    @pytest.mark.asyncio
+    @patch("app.services.ingestion_service.submit_batch")
+    @patch("app.services.ingestion_service.execute_tree")
+    @patch("app.services.ingestion_service.fetch_all_pages")
+    async def test_enrichment_gaps_set_root_log_partial_success(
+        self, mock_fetch, mock_execute_tree, mock_submit, db_session
+    ):
+        """When base_ce_id is set and enrichment_gaps > 0, root_log.status = partial_success."""
+        connector = _seed_connector(db_session)
+        ep_root = _seed_endpoint(db_session, connector.id, "/nodes", 0)
+        canvas = _seed_canvas(db_session, connector.id)
+        ce_root = _seed_canvas_endpoint(db_session, canvas.id, ep_root.id, tree_order=0)
+
+        # Simulate Phase 57: set base_canvas_endpoint_id on canvas
+        canvas.base_canvas_endpoint_id = ce_root.id
+
+        # Create a mapping so submission path is exercised
+        _seed_mapping(db_session, ep_root.id, "hostname", "hostName")
+
+        run = _seed_run(db_session, connector.id)
+
+        mock_fetch.return_value = SourceFetchResult(
+            records=[{"hostname": "test-host"}],
+            records_fetched=1,
+            pages_fetched=1,
+            partial=False,
+        )
+
+        mock_execute_tree.return_value = FanOutResult(
+            enrichment_gaps=2,
+            has_failures=True,
+            merged_records=[{"hostName": "test"}],
+            record_outputs=[],
+            base_records_total=1,
+            base_records_excluded=0,
+        )
+
+        mock_submit.return_value = QualysSubmitResult(
+            submitted_count=1,
+            failed_count=0,
+            failures=[],
+        )
+
+        mock_client = AsyncMock()
+
+        logs = await _run_canvas(
+            db_session, run, connector, canvas,
+            SimpleNamespace(), mock_client, 0,
+        )
+
+        # Find root_log (execution_order=0)
+        root_log = next(l for l in logs if l.execution_order == 0)
+        assert root_log.status == "partial_success", (
+            f"Expected root_log.status='partial_success' but got '{root_log.status}'"
+        )
+
+        # Verify _rollup_status would produce partial_success
+        from app.services.ingestion_service import _rollup_status
+        assert _rollup_status(logs) == RunStatus.partial_success
+
+    @pytest.mark.asyncio
+    @patch("app.services.ingestion_service.submit_batch")
+    @patch("app.services.ingestion_service.execute_tree")
+    @patch("app.services.ingestion_service.fetch_all_pages")
+    async def test_no_enrichment_gaps_keeps_root_log_success(
+        self, mock_fetch, mock_execute_tree, mock_submit, db_session
+    ):
+        """When base_ce_id is set and enrichment_gaps == 0, root_log.status stays success."""
+        connector = _seed_connector(db_session)
+        ep_root = _seed_endpoint(db_session, connector.id, "/nodes", 0)
+        canvas = _seed_canvas(db_session, connector.id)
+        ce_root = _seed_canvas_endpoint(db_session, canvas.id, ep_root.id, tree_order=0)
+
+        # Simulate Phase 57: set base_canvas_endpoint_id on canvas
+        canvas.base_canvas_endpoint_id = ce_root.id
+
+        _seed_mapping(db_session, ep_root.id, "hostname", "hostName")
+
+        run = _seed_run(db_session, connector.id)
+
+        mock_fetch.return_value = SourceFetchResult(
+            records=[{"hostname": "test-host"}],
+            records_fetched=1,
+            pages_fetched=1,
+            partial=False,
+        )
+
+        mock_execute_tree.return_value = FanOutResult(
+            enrichment_gaps=0,
+            has_failures=False,
+            merged_records=[{"hostName": "test"}],
+            record_outputs=[],
+            base_records_total=1,
+            base_records_excluded=0,
+        )
+
+        mock_submit.return_value = QualysSubmitResult(
+            submitted_count=1,
+            failed_count=0,
+            failures=[],
+        )
+
+        mock_client = AsyncMock()
+
+        logs = await _run_canvas(
+            db_session, run, connector, canvas,
+            SimpleNamespace(), mock_client, 0,
+        )
+
+        # Find root_log (execution_order=0)
+        root_log = next(l for l in logs if l.execution_order == 0)
+        assert root_log.status == "success", (
+            f"Expected root_log.status='success' but got '{root_log.status}'"
+        )

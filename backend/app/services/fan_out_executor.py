@@ -62,21 +62,17 @@ class TraversalRecord:
     ancestor_context: dict  # Accumulated _parent.* context for template resolution
     endpoint_outputs: dict[str, list[dict]] = field(
         default_factory=dict
-    )  # {endpoint_id: [transformed_fields...]}
+    )  # {canvas_endpoint_id: [transformed_fields_dict...]}
 
 
 @dataclass
 class FanOutResult:
     """Accumulated result of a fan-out tree traversal."""
 
-    # New: per-base-record traversal outputs
     record_outputs: list[TraversalRecord] = field(default_factory=list)
-    # New: base-level counters
     base_records_total: int = 0
     base_records_excluded: int = 0
-    # New: downstream enrichment gap counter
     enrichment_gaps: int = 0
-    # Preserved: existing fields for backward compat
     merged_records: list[dict] = field(default_factory=list)
     level_stats: list[LevelStats] = field(default_factory=list)
     has_failures: bool = False

@@ -24,6 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { useQueryClient } from '@tanstack/react-query'
 import { useToast } from '@/hooks/use-toast'
 import { useQualysSchema } from '@/hooks/queries/useQualysSchema'
 import { useCanvases, useCreateCanvas } from '@/hooks/queries/useCanvases'
@@ -95,6 +96,7 @@ const TARGET_PANEL_ID = 'target-panel'
 
 function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: ChainCanvasProps) {
   const { toast } = useToast()
+  const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { screenToFlowPosition, getNode, fitView } = useReactFlow()
 
@@ -316,6 +318,20 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
     // Auto-layout after a brief delay to let nodes render
     setTimeout(() => fitView({ padding: 0.2 }), 100)
   }, [canvasEndpointsData, endpointsData, qualysSchema, initialized, setNodes, setEdges, fitView, connectorId])
+
+  // Sync isBase flag when canvasesData updates (e.g. after save triggers base detection)
+  useEffect(() => {
+    if (!canvasesData || !canvasId || !initialized) return
+    const canvas = canvasesData.find(c => c.id === canvasId)
+    const baseId = canvas?.base_canvas_endpoint_id ?? null
+    setNodes(nds => nds.map(n => {
+      if (n.type !== 'endpointNode') return n
+      const d = n.data as EndpointNodeData
+      const shouldBeBase = d.canvasEndpointId === baseId
+      if (d.isBase === shouldBeBase) return n
+      return { ...n, data: { ...n.data, isBase: shouldBeBase } }
+    }))
+  }, [canvasesData, canvasId, initialized, setNodes])
 
   // Update target panel and endpoint node linked-field data when edges change
   useEffect(() => {
@@ -908,6 +924,8 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
         })
       }
 
+      // Invalidate canvases query so base_canvas_endpoint_id updates in node data
+      await queryClient.invalidateQueries({ queryKey: ['canvases', connectorId] })
       toast({ title: 'Canvas saved', description: 'All endpoints and mappings have been saved.' })
     } catch {
       toast({
@@ -929,6 +947,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
     batchReplaceMappings,
     setNodes,
     toast,
+    queryClient,
   ])
 
   // Delete endpoint with cascade (IC-07, D-05, D-06)

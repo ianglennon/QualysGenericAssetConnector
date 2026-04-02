@@ -111,7 +111,7 @@ def batch_replace_endpoint_mappings(
         db.commit()
 
     is_valid, invalid_endpoints = validate_endpoint_mappings(connector_id, db)
-    validation_errors = [ep["name"] for ep in invalid_endpoints]
+    validation_errors = [ep.get("error", ep.get("name", "Unknown")) for ep in invalid_endpoints]
 
     # Persist validity to connector row so UI badge updates immediately
     connector = db.query(Connector).filter_by(id=connector_id).first()

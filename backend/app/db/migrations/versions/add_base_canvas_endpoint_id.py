@@ -1,6 +1,6 @@
 """Add base_canvas_endpoint_id column to canvases table.
 
-Revision ID: f7a8b9c0d1e2
+Revision ID: g8b9c0d1e2f3
 Revises: e6f7a8b9c0d1
 Create Date: 2026-04-02
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'f7a8b9c0d1e2'
+revision: str = 'g8b9c0d1e2f3'
 down_revision: Union[str, None] = 'e6f7a8b9c0d1'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

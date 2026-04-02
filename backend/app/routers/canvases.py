@@ -78,6 +78,7 @@ def list_canvases(
             name=c.name,
             description=c.description,
             is_enabled=c.is_enabled,
+            base_canvas_endpoint_id=c.base_canvas_endpoint_id,
             endpoint_count=ep_counts.get(c.id, 0),
             field_mapping_count=fm_counts.get(c.id, 0),
             last_run_status=last_runs.get(c.id, (None, None))[0],

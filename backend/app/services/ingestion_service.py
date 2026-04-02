@@ -134,10 +134,12 @@ async def _run_endpoint(
         if collector:
             collector.start_stage(STAGE_FETCH)
 
+        should_capture = collector is not None and collector.fault_diagnosis
         source_result = await fetch_all_pages(
             connector, url=resolved_url, client=client,
             data_root=endpoint.data_root,
             pagination_strategies=resolve_pagination_config(endpoint.pagination_config),
+            capture_on_success=should_capture,
         )
         records_fetched = source_result.records_fetched
 
@@ -343,10 +345,12 @@ async def _run_canvas(
         if collector:
             collector.start_stage(STAGE_FETCH)
 
+        should_capture = collector is not None and collector.fault_diagnosis
         source_result = await fetch_all_pages(
             connector, url=root_url, client=client,
             data_root=root_ep.data_root,
             pagination_strategies=resolve_pagination_config(root_ep.pagination_config),
+            capture_on_success=should_capture,
         )
 
         if collector:
@@ -419,18 +423,26 @@ async def _run_canvas(
     rule_adapter = TypeAdapter(list[ExclusionRule])
     root_rules_raw = root_ce.exclusion_rules or []
     root_filtered = 0
+    records_before_root_exclusion = len(source_result.records)
+
+    if collector:
+        collector.start_stage(STAGE_EXCLUSION)
+
     if root_rules_raw:
         root_rules = rule_adapter.validate_python(root_rules_raw)
         filtered_root_records, root_filtered = apply_exclusion_rules(
             source_result.records, root_rules
         )
         root_log.records_filtered = root_filtered
-        if collector and root_filtered > 0:
+    else:
+        filtered_root_records = source_result.records
+
+    if collector:
+        collector.end_stage(STAGE_EXCLUSION, records_in=records_before_root_exclusion, records_out=len(filtered_root_records))
+        if root_filtered > 0:
             collector.add_detail(EXCLUSION_RESULT, STAGE_EXCLUSION,
                 f"Root exclusion: {root_filtered} records excluded",
                 {"excluded_count": root_filtered, "remaining": len(filtered_root_records)})
-    else:
-        filtered_root_records = source_result.records
 
     # Execute tree (fan-out children)
     fan_out_result = await execute_tree(

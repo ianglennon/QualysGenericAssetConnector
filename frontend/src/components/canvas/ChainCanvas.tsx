@@ -196,6 +196,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
           isDiscovering: false,
           discoveryError: null,
           exclusionRules: ce.exclusion_rules ?? [],
+          isBase: ce.id === canvasesData?.find(c => c.id === canvasId)?.base_canvas_endpoint_id,
         } satisfies EndpointNodeData,
       }
     })
@@ -683,6 +684,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
         isDiscovering: false,
         discoveryError: null,
         exclusionRules: [],
+        isBase: false,
       } satisfies EndpointNodeData,
     }
 
@@ -736,6 +738,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
         isDiscovering: false,
         discoveryError: null,
         exclusionRules: [],
+        isBase: false,
       } satisfies EndpointNodeData,
     }
     setNodes((nds) => [...nds, newNode])

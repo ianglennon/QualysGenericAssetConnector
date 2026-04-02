@@ -224,16 +224,32 @@ class TestRunCanvasBaseAwareWiring:
     @patch("app.services.ingestion_service.submit_batch")
     @patch("app.services.ingestion_service.execute_tree")
     @patch("app.services.ingestion_service.fetch_all_pages")
+    @patch("app.services.ingestion_service.find_base_endpoint")
     async def test_run_canvas_legacy_when_no_base(
-        self, mock_fetch, mock_execute_tree, mock_submit, db_session
+        self, mock_find_base, mock_fetch, mock_execute_tree, mock_submit, db_session
     ):
-        """When canvas has no base_canvas_endpoint_id, execute_tree gets None."""
+        """Legacy canvas (no base_canvas_endpoint_id) auto-migrates via find_base_endpoint.
+
+        Phase 59 added D-09 auto-migration: when canvas.base_canvas_endpoint_id is None,
+        _run_canvas calls find_base_endpoint. If detection succeeds, the detected
+        base_canvas_endpoint_id is passed to execute_tree (not None). This test verifies
+        that the legacy canvas path still results in a successful execute_tree call after
+        auto-migration.
+        """
+        from app.services.detection import BaseDetectionResult
+
         connector = _seed_connector(db_session)
         ep_root = _seed_endpoint(db_session, connector.id, "/nodes", 0)
         canvas = _seed_canvas(db_session, connector.id)
         ce_root = _seed_canvas_endpoint(db_session, canvas.id, ep_root.id, tree_order=0)
 
-        # Canvas does NOT have base_canvas_endpoint_id attribute
+        # Canvas does NOT have base_canvas_endpoint_id set (legacy state)
+        # Phase 59 D-09: auto-migration will call find_base_endpoint and use its result
+        mock_find_base.return_value = BaseDetectionResult(
+            is_valid=True,
+            base_canvas_endpoint_id=ce_root.id,
+        )
+
         run = _seed_run(db_session, connector.id)
 
         mock_fetch.return_value = SourceFetchResult(
@@ -260,10 +276,16 @@ class TestRunCanvasBaseAwareWiring:
             SimpleNamespace(), mock_client, 0,
         )
 
-        # Verify execute_tree was called with base_canvas_endpoint_id=None
+        # D-09: auto-migration should have been attempted
+        mock_find_base.assert_called_once_with(canvas.id, db_session)
+
+        # execute_tree should be called with the auto-detected base_canvas_endpoint_id
         mock_execute_tree.assert_called_once()
         call_kwargs = mock_execute_tree.call_args.kwargs
-        assert call_kwargs["base_canvas_endpoint_id"] is None
+        assert call_kwargs["base_canvas_endpoint_id"] == ce_root.id, (
+            "After D-09 auto-migration, execute_tree must receive the detected "
+            "base_canvas_endpoint_id, not None"
+        )
         # mappings_by_ce should still be passed
         assert isinstance(call_kwargs["mappings_by_ce"], dict)
 

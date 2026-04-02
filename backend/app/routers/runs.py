@@ -14,7 +14,9 @@ from app.db.session import get_db
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
 from app.models.run_history import RunHistory, RunFailure, RunStatus, EndpointRunLog
+from app.models.run_event import RunEvent
 from app.schemas.run_history import RunHistoryResponse, RunFailureSummary, EndpointRunLogResponse, RunStatsResponse
+from app.schemas.run_event import StageEntry, EventEntry, RunEventsResponse
 from app.services.ingestion_service import create_run, run_ingestion
 from app.services.validation import validate_endpoint_mappings
 
@@ -217,6 +219,65 @@ def get_runs_stats(
         last_sync_at=last_sync_at,
         recent_runs_24h=recent_runs_24h,
     )
+
+
+@router.get("/runs/{run_id}/events", response_model=RunEventsResponse)
+def get_run_events(
+    run_id: str,
+    db: Session = Depends(get_db),
+    _user=Depends(require_role("admin", "operator")),
+    limit: int = Query(200, ge=1, le=1000),
+):
+    """Return pipeline event timeline for a run (stage summaries + detail events)."""
+    run = db.query(RunHistory).filter(RunHistory.id == run_id).first()
+    if not run:
+        raise HTTPException(
+            status_code=404,
+            detail=make_error("RUN_NOT_FOUND", "Run not found", {"run_id": run_id}),
+        )
+
+    all_events = (
+        db.query(RunEvent)
+        .filter(RunEvent.run_id == run_id)
+        .order_by(RunEvent.timestamp.asc())
+        .all()
+    )
+
+    # Separate stage summaries from detail events
+    stages: list[StageEntry] = []
+    detail_events: list[RunEvent] = []
+    for ev in all_events:
+        if ev.event_type == "stage_summary":
+            d = ev.detail or {}
+            stages.append(
+                StageEntry(
+                    stage=ev.stage,
+                    records_in=d.get("records_in", 0),
+                    records_out=d.get("records_out", 0),
+                    duration_ms=d.get("duration_ms", 0),
+                    status=d.get("status", "unknown"),
+                    error=d.get("error"),
+                )
+            )
+        else:
+            detail_events.append(ev)
+
+    total_events = len(detail_events)
+    limited_events = detail_events[:limit]
+
+    events = [
+        EventEntry(
+            id=ev.id,
+            timestamp=ev.timestamp,
+            event_type=ev.event_type,
+            stage=ev.stage,
+            message=ev.message,
+            detail=ev.detail,
+        )
+        for ev in limited_events
+    ]
+
+    return RunEventsResponse(stages=stages, events=events, total_events=total_events)
 
 
 @router.get("/runs/{run_id}", response_model=RunHistoryResponse)

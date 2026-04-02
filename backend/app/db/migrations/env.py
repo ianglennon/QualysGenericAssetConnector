@@ -18,6 +18,7 @@ from app.models import field_mapping  # noqa: F401 — registers FieldMapping wi
 from app.models import connector_endpoint  # noqa: F401 — registers ConnectorEndpoint with Base.metadata
 from app.models import canvas  # noqa: F401 — registers Canvas with Base.metadata
 from app.models import canvas_endpoint  # noqa: F401 — registers CanvasEndpoint with Base.metadata
+from app.models import run_event  # noqa: F401 — registers RunEvent with Base.metadata
 
 config = context.config
 settings = get_settings()

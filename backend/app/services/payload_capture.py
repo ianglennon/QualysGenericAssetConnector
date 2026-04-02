@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import httpx
 
 from app.models.run_history import EndpointRunLog
+from app.models.run_event import RunEvent
 
 logger = logging.getLogger(__name__)
 
@@ -100,4 +101,14 @@ def cleanup_old_payloads(db) -> int:
         )
     )
     db.commit()
+
+    # Also delete old run_events rows beyond retention period
+    events_deleted = (
+        db.query(RunEvent)
+        .filter(RunEvent.timestamp < cutoff)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    logger.info("Cleaned %d payload rows, %d event rows", rows_updated, events_deleted)
+
     return rows_updated

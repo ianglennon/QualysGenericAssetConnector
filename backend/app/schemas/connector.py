@@ -42,6 +42,7 @@ class ConnectorUpdate(BaseModel):
     source_retry_limit: Optional[int] = None
     qualys_retry_limit: Optional[int] = None
     verify_ssl: Optional[bool] = None
+    fault_diagnosis: Optional[bool] = None
 
 
 class ConnectorResponse(BaseModel):
@@ -61,6 +62,7 @@ class ConnectorResponse(BaseModel):
     source_retry_limit: Optional[int]
     qualys_retry_limit: Optional[int]
     verify_ssl: bool
+    fault_diagnosis: bool
     has_valid_endpoints: bool
     created_at: datetime
     updated_at: datetime

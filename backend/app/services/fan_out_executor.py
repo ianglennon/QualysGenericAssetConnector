@@ -205,7 +205,7 @@ async def _fan_out_level(
                 try:
                     resolved_path = resolve_path(
                         ep_path,
-                        parent_record,
+                        current_ancestor,
                         ep.variable_extractions or {},
                     )
                 except TemplateResolutionError as exc:

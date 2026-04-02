@@ -15,11 +15,11 @@ services:
     volumes:
       - qualys-data:/data
     expose:
-      - "8000"
+      - "8080"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c",
-             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=4)"]
+             "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=4)"]
       interval: 10s
       timeout: 5s
       retries: 5

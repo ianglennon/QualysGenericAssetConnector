@@ -515,6 +515,10 @@ async def _run_canvas(
             fan_out_result.enrichment_gaps,
             len(fan_out_result.record_outputs),
         )
+        # D-04: Downstream enrichment gaps escalate root_log to partial_success
+        # so _rollup_status returns partial_success for the overall run
+        if fan_out_result.enrichment_gaps > 0:
+            root_log.status = "partial_success"
 
     # Create EndpointRunLog per child canvas-endpoint from LevelStats
     # PITFALL 1: LevelStats.endpoint_id is canvas_endpoint.id, not connector_endpoint.id

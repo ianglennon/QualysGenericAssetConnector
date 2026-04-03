@@ -652,13 +652,11 @@ async def _run_canvas(
         logger.warning("Canvas %s: no base_ce_id, skipping submission", canvas.id)
 
     # --- Phase 60 D-01/D-03: Compute base-anchored stats and enrichment breakdown ---
-    # Sum submission counts across all leaf logs for this canvas
-    submitted_total = sum(
-        log.records_submitted for log in logs if log != root_log
-    )
-    failed_total = sum(
-        log.records_failed for log in logs if log != root_log
-    )
+    # Gap closure: root_log holds the actual Qualys submission count (set at line 646).
+    # Child/downstream logs have records_submitted=0 because only the base-anchored
+    # submission path writes to Qualys. Use root_log directly instead of summing non-root logs.
+    submitted_total = root_log.records_submitted if root_log else 0
+    failed_total = root_log.records_failed if root_log else 0
 
     full_count = fan_out_result.enrichment_full
     partial_count = fan_out_result.enrichment_partial

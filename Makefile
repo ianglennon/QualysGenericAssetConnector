@@ -15,6 +15,6 @@ shell:
 down:
 	docker compose down
 
-# WARNING: destroys the qualys-data volume — all database data will be lost
+# WARNING: destroys the pgdata volume — all database data will be lost
 clean:
 	docker compose down -v

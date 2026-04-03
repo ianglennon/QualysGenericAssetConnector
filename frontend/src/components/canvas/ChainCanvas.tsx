@@ -48,6 +48,8 @@ import { TargetPanelNode } from '@/components/mappings/MappingCanvas/TargetPanel
 import { DashedConnectionLine } from '@/components/mappings/MappingCanvas/DashedConnectionLine'
 import { CanvasContextMenu } from './CanvasContextMenu'
 import { CanvasToolbar } from './CanvasToolbar'
+import { useBaseDetection } from '@/hooks/useBaseDetection'
+import { CanvasWarningBanner } from '@/components/canvas/CanvasWarningBanner'
 import { wouldCreateCycle } from './cycle-detection'
 import { getLayoutedPositions } from './dagre-layout'
 import type {
@@ -201,6 +203,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
           discoveryError: null,
           exclusionRules: ce.exclusion_rules ?? [],
           isBase: ce.id === canvasesData?.find(c => c.id === canvasId)?.base_canvas_endpoint_id,
+          treeOrder: ce.tree_order ?? i,
         } satisfies EndpointNodeData,
       }
     })
@@ -334,6 +337,20 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
       return { ...n, data: { ...n.data, isBase: shouldBeBase } }
     }))
   }, [canvasesData, canvasId, initialized, setNodes])
+
+  // Client-side base detection for real-time badge updates (D-01, D-02)
+  const { baseNodeId, hasIdentityFields } = useBaseDetection(nodes, edges)
+
+  // Optimistic isBase update from client-side detection (D-01, D-04)
+  useEffect(() => {
+    if (!initialized) return
+    setNodes(nds => nds.map(n => {
+      if (n.type !== 'endpointNode') return n
+      const shouldBeBase = n.id === baseNodeId
+      if ((n.data as EndpointNodeData).isBase === shouldBeBase) return n
+      return { ...n, data: { ...n.data, isBase: shouldBeBase } }
+    }))
+  }, [baseNodeId, initialized, setNodes])
 
   // Update target panel and endpoint node linked-field data when edges change
   useEffect(() => {
@@ -1082,6 +1099,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
         isDryRunning={dryRun.isPending}
       />
       <div className="flex-1 relative">
+        <CanvasWarningBanner visible={!hasIdentityFields} />
         {endpointNodes.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
             <div className="text-center text-muted-foreground p-8">

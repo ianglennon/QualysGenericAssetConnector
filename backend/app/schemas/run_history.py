@@ -44,6 +44,7 @@ class EndpointRunLogResponse(BaseModel):
     child_requests_failed: Optional[int] = None
     child_requests_skipped: Optional[int] = None
     depth: Optional[int] = None
+    endpoint_role: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -66,6 +67,13 @@ class RunHistoryResponse(BaseModel):
     records_fetched: int
     records_submitted: int
     records_failed: int
+    base_records_total: Optional[int] = None
+    base_records_enriched: Optional[int] = None
+    base_records_submitted: Optional[int] = None
+    base_records_failed: Optional[int] = None
+    base_records_full: Optional[int] = None
+    base_records_partial: Optional[int] = None
+    base_records_base_only: Optional[int] = None
     error_type: Optional[str]
     error_message: Optional[str]
     error_context: Optional[dict]

@@ -122,6 +122,7 @@ export interface EndpointRunLog {
   child_requests_failed?: number | null
   child_requests_skipped?: number | null
   depth?: number | null
+  endpoint_role?: 'upstream' | 'base' | 'downstream' | null
   records_filtered?: number
 }
 
@@ -246,6 +247,14 @@ export interface RunHistory {
   records_fetched: number
   records_submitted: number
   records_failed: number
+  // Phase 60: Base-anchored stats (null for pre-v1.6 runs)
+  base_records_total?: number | null
+  base_records_enriched?: number | null
+  base_records_submitted?: number | null
+  base_records_failed?: number | null
+  base_records_full?: number | null
+  base_records_partial?: number | null
+  base_records_base_only?: number | null
   error_message?: string
   endpoint_logs: EndpointRunLog[]
 }

@@ -77,6 +77,11 @@ class FanOutResult:
     level_stats: list[LevelStats] = field(default_factory=list)
     has_failures: bool = False
     has_skipped: bool = False
+    # Phase 60: per-root-record enrichment tracking
+    base_records_total: int = 0
+    enrichment_full: int = 0
+    enrichment_partial: int = 0
+    enrichment_base_only: int = 0
 
 
 def _merge_parent_context(child_record: dict, ancestor_context: dict) -> dict:
@@ -244,15 +249,20 @@ async def execute_tree(
     # Legacy path: leaf-centric traversal (backward compat)
     children_map = _build_tree(canvas_endpoints)
     result = FanOutResult()
+    result.base_records_total = len(root_records)
 
     # Find root canvas endpoints (parent_ref_id is None)
     root_endpoints = children_map.get(None, [])
+
+    # Determine if tree has children (for enrichment tracking)
+    has_children = any(children_map.get(ep.id) for ep in root_endpoints) if root_endpoints else False
 
     # DFS per root record (D-03, D-04)
     for root_record in root_records:
         if not root_endpoints:
             # No canvas endpoints at all -- root records are the leaf output
             result.merged_records.append(dict(root_record))
+            result.enrichment_full += 1
             continue
 
         for root_ep in root_endpoints:
@@ -261,8 +271,11 @@ async def execute_tree(
             if not child_endpoints:
                 # Root has no children -- root records are leaf output
                 result.merged_records.append(dict(root_record))
+                # Phase 60 Pitfall 2: Single-endpoint canvas -- all records are "full"
+                result.enrichment_full += 1
             else:
                 # Fan out to children of this root endpoint
+                pre_count = len(result.merged_records)
                 await _fan_out_level(
                     parent_records=[root_record],
                     parent_context={},
@@ -274,6 +287,15 @@ async def execute_tree(
                     depth=1,
                     collector=collector,
                 )
+                post_count = len(result.merged_records)
+                # Phase 60 D-03: Track enrichment per root record
+                records_produced = post_count - pre_count
+                if records_produced > 0:
+                    # At least some downstream data merged
+                    result.enrichment_full += 1
+                else:
+                    # No downstream records merged for this root
+                    result.enrichment_base_only += 1
 
     return result
 

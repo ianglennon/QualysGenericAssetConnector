@@ -69,6 +69,7 @@ def _to_response(
             child_requests_failed=log.child_requests_failed,
             child_requests_skipped=log.child_requests_skipped,
             depth=getattr(log, 'depth', None),
+            endpoint_role=getattr(log, 'endpoint_role', None),
         )
 
     return RunHistoryResponse(
@@ -80,6 +81,13 @@ def _to_response(
         records_fetched=run.records_fetched,
         records_submitted=run.records_submitted,
         records_failed=run.records_failed,
+        base_records_total=getattr(run, 'base_records_total', None),
+        base_records_enriched=getattr(run, 'base_records_enriched', None),
+        base_records_submitted=getattr(run, 'base_records_submitted', None),
+        base_records_failed=getattr(run, 'base_records_failed', None),
+        base_records_full=getattr(run, 'base_records_full', None),
+        base_records_partial=getattr(run, 'base_records_partial', None),
+        base_records_base_only=getattr(run, 'base_records_base_only', None),
         error_type=run.error_type,
         error_message=run.error_message,
         error_context=run.error_context,

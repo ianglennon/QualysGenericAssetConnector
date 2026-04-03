@@ -191,6 +191,7 @@ export interface EndpointNodeData extends Record<string, unknown> {
   discoveryError: string | null
   exclusionRules: ExclusionRule[]
   isBase: boolean  // true if this endpoint is the detected base (Phase 57)
+  treeOrder: number  // tree_order from API, used by useBaseDetection for BFS ordering
   linkedSourceFields?: Set<string>
   linkedFieldOrder?: Map<string, number>
 }

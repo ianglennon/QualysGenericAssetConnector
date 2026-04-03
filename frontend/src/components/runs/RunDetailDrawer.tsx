@@ -11,7 +11,7 @@ import {
 } from '@/components/ui/drawer'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { ExternalLink, AlertCircle } from 'lucide-react'
-import type { RunHistory } from '@/types/api'
+import type { RunHistory, EndpointRunLog } from '@/types/api'
 import { format } from 'date-fns'
 import { Link } from 'react-router-dom'
 import { ROUTES } from '@/routes/constants'
@@ -36,6 +36,18 @@ export const RunDetailDrawer = ({ run, isOpen, onClose }: RunDetailDrawerProps) 
       default:
         return <Badge variant="secondary">{status}</Badge>
     }
+  }
+
+  const getEndpointBadge = (log: EndpointRunLog) => {
+    if (log.endpoint_role === 'downstream') {
+      if (log.status === 'failed') {
+        return <Badge className="bg-yellow-600">Enrichment Gap</Badge>
+      }
+      if (log.records_fetched === 0 && log.status === 'success') {
+        return <Badge variant="secondary">No Data</Badge>
+      }
+    }
+    return getStatusBadge(log.status)
   }
 
   const formatDuration = () => {
@@ -85,25 +97,52 @@ export const RunDetailDrawer = ({ run, isOpen, onClose }: RunDetailDrawerProps) 
               </div>
             </div>
 
-            {/* Record Counts */}
-            <div className="grid grid-cols-3 gap-4 p-4 border rounded-lg bg-muted/50">
-              <div className="text-center">
-                <div className="text-2xl font-bold">{run.records_fetched}</div>
-                <div className="text-xs text-muted-foreground">Fetched</div>
-              </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-600">
-                  {run.records_submitted}
+            {/* Record Counts - Phase 60 D-07 */}
+            {run.base_records_total != null ? (
+              <div className="grid grid-cols-4 gap-4 p-4 border rounded-lg bg-muted/50">
+                <div className="text-center">
+                  <div className="text-2xl font-semibold">{run.base_records_total}</div>
+                  <div className="text-xs text-muted-foreground">Base Records</div>
                 </div>
-                <div className="text-xs text-muted-foreground">Submitted</div>
-              </div>
-              <div className="text-center">
-                <div className={`text-2xl font-bold ${run.records_failed > 0 ? 'text-destructive' : ''}`}>
-                  {run.records_failed}
+                <div className="text-center">
+                  <div className="text-2xl font-semibold text-green-600">
+                    {run.base_records_enriched ?? '-'}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Enriched</div>
                 </div>
-                <div className="text-xs text-muted-foreground">Failed</div>
+                <div className="text-center">
+                  <div className="text-2xl font-semibold text-green-600">
+                    {run.base_records_submitted ?? run.records_submitted}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Submitted</div>
+                </div>
+                <div className="text-center">
+                  <div className={`text-2xl font-semibold ${
+                    (run.base_records_failed ?? run.records_failed) > 0 ? 'text-destructive' : ''
+                  }`}>
+                    {run.base_records_failed ?? run.records_failed}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Failed</div>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-4 p-4 border rounded-lg bg-muted/50">
+                <div className="text-center">
+                  <div className="text-2xl font-semibold">{run.records_fetched}</div>
+                  <div className="text-xs text-muted-foreground">Fetched</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-2xl font-semibold text-green-600">{run.records_submitted}</div>
+                  <div className="text-xs text-muted-foreground">Submitted</div>
+                </div>
+                <div className="text-center">
+                  <div className={`text-2xl font-semibold ${run.records_failed > 0 ? 'text-destructive' : ''}`}>
+                    {run.records_failed}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Failed</div>
+                </div>
+              </div>
+            )}
 
             {/* Error Message */}
             {run.error_message && (
@@ -123,7 +162,12 @@ export const RunDetailDrawer = ({ run, isOpen, onClose }: RunDetailDrawerProps) 
                 {run.endpoint_logs.map((log) => (
                   <div key={log.id} className="flex items-center justify-between text-sm">
                     <span className="truncate mr-2">{log.endpoint_name || log.endpoint_id}</span>
-                    {getStatusBadge(log.status)}
+                    <div className="flex items-center gap-1">
+                      {getEndpointBadge(log)}
+                      {log.endpoint_role === 'base' && (
+                        <Badge variant="outline">Base</Badge>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

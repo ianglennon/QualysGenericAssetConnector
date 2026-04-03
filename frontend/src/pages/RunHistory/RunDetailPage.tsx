@@ -10,6 +10,7 @@ import { useRun } from '@/hooks/queries/useRuns'
 import { useRunEvents } from '@/hooks/queries/useRunEvents'
 import { HttpDetailPanel } from './HttpDetailPanel'
 import { PipelineLogSection, hasFaultDiagnosisData } from './PipelineLogSection'
+import { EnrichmentBar } from '@/components/runs/EnrichmentBar'
 import { format } from 'date-fns'
 import type { EndpointRunLog } from '@/types/api'
 
@@ -119,28 +120,63 @@ export default function RunDetailPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-4 p-4 border rounded-lg bg-muted/50">
-                <div className="text-center">
-                  <div className="text-3xl font-bold">{run.records_fetched}</div>
-                  <div className="text-sm text-muted-foreground">Records Fetched</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-green-600">
-                    {run.records_submitted}
+              {run.base_records_total != null ? (
+                <>
+                  {/* Phase 60 D-07: 4-stat base-anchored grid */}
+                  <div className="grid grid-cols-4 gap-4 p-4 border rounded-lg bg-muted/50">
+                    <div className="text-center">
+                      <div className="text-3xl font-semibold">{run.base_records_total}</div>
+                      <div className="text-xs text-muted-foreground">Base Records</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-3xl font-semibold text-green-600">
+                        {run.base_records_enriched ?? '-'}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Enriched</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-3xl font-semibold text-green-600">
+                        {run.base_records_submitted ?? run.records_submitted}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Submitted</div>
+                    </div>
+                    <div className="text-center">
+                      <div className={`text-3xl font-semibold ${
+                        (run.base_records_failed ?? run.records_failed) > 0 ? 'text-destructive' : ''
+                      }`}>
+                        {run.base_records_failed ?? run.records_failed}
+                      </div>
+                      <div className="text-xs text-muted-foreground">Failed</div>
+                    </div>
                   </div>
-                  <div className="text-sm text-muted-foreground">Records Submitted</div>
-                </div>
-                <div className="text-center">
-                  <div
-                    className={`text-3xl font-bold ${
-                      run.records_failed > 0 ? 'text-destructive' : ''
-                    }`}
-                  >
-                    {run.records_failed}
+                  {/* Phase 60 D-04: Enrichment bar below stats */}
+                  {run.base_records_full != null && (
+                    <EnrichmentBar
+                      full={run.base_records_full ?? 0}
+                      partial={run.base_records_partial ?? 0}
+                      baseOnly={run.base_records_base_only ?? 0}
+                    />
+                  )}
+                </>
+              ) : (
+                /* Legacy fallback: original 3-stat grid for pre-v1.6 runs */
+                <div className="grid grid-cols-3 gap-4 p-4 border rounded-lg bg-muted/50">
+                  <div className="text-center">
+                    <div className="text-3xl font-semibold">{run.records_fetched}</div>
+                    <div className="text-xs text-muted-foreground">Records Fetched</div>
                   </div>
-                  <div className="text-sm text-muted-foreground">Records Failed</div>
+                  <div className="text-center">
+                    <div className="text-3xl font-semibold text-green-600">{run.records_submitted}</div>
+                    <div className="text-xs text-muted-foreground">Records Submitted</div>
+                  </div>
+                  <div className="text-center">
+                    <div className={`text-3xl font-semibold ${run.records_failed > 0 ? 'text-destructive' : ''}`}>
+                      {run.records_failed}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Records Failed</div>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {run.error_message && (
                 <Alert variant="destructive">
@@ -172,6 +208,20 @@ export default function RunDetailPage() {
               canvasGroups.get(key)!.logs.push(log)
             }
 
+            const getEndpointBadge = (log: EndpointRunLog) => {
+              if (log.endpoint_role === 'downstream') {
+                if (log.status === 'failed') {
+                  // D-05: Non-fatal enrichment gap badge
+                  return <Badge className="bg-yellow-600">Enrichment Gap</Badge>
+                }
+                if (log.records_fetched === 0 && log.status === 'success') {
+                  // D-06: Normal zero-data downstream
+                  return <Badge variant="secondary">No Data</Badge>
+                }
+              }
+              return getStatusBadge(log.status)
+            }
+
             const renderLogCard = (log: EndpointRunLog, indent: boolean) => (
               <div
                 key={log.id}
@@ -184,7 +234,10 @@ export default function RunDetailPage() {
                         {log.endpoint_name || log.endpoint_id}
                       </CardTitle>
                       <div className="flex items-center gap-2">
-                        {getStatusBadge(log.status)}
+                        {getEndpointBadge(log)}
+                        {log.endpoint_role === 'base' && (
+                          <Badge variant="outline">Base</Badge>
+                        )}
                         {log.failure_stage && (
                           <Badge variant="destructive">
                             {STAGE_LABELS[log.failure_stage] ?? log.failure_stage}
@@ -199,22 +252,22 @@ export default function RunDetailPage() {
                   <CardContent className="space-y-3">
                     <div className={`grid ${(log.records_filtered ?? 0) > 0 ? 'grid-cols-4' : 'grid-cols-3'} gap-4 p-3 border rounded-lg bg-muted/50`}>
                       <div className="text-center">
-                        <div className="text-xl font-bold">{log.records_fetched}</div>
+                        <div className="text-lg font-semibold">{log.records_fetched}</div>
                         <div className="text-xs text-muted-foreground">Records Fetched</div>
                       </div>
                       <div className="text-center">
-                        <div className="text-xl font-bold text-green-600">{log.records_submitted}</div>
+                        <div className="text-lg font-semibold text-green-600">{log.records_submitted}</div>
                         <div className="text-xs text-muted-foreground">Records Submitted</div>
                       </div>
                       <div className="text-center">
-                        <div className={`text-xl font-bold ${log.records_failed > 0 ? 'text-destructive' : ''}`}>
+                        <div className={`text-lg font-semibold ${log.records_failed > 0 ? 'text-destructive' : ''}`}>
                           {log.records_failed}
                         </div>
                         <div className="text-xs text-muted-foreground">Records Failed</div>
                       </div>
                       {(log.records_filtered ?? 0) > 0 && (
                         <div className="text-center">
-                          <div className="text-xl font-bold text-muted-foreground">
+                          <div className="text-lg font-semibold text-muted-foreground">
                             {log.records_filtered}
                           </div>
                           <div className="text-xs text-muted-foreground">Filtered</div>

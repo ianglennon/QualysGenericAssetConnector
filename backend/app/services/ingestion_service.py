@@ -318,7 +318,11 @@ async def _run_canvas(
         db.commit()
         return [log]
 
+    # Determine if root is also the sole endpoint (single-endpoint canvas)
+    has_children = any(ce.parent_ref_id == root_ce.id for ce in canvas_endpoints)
+
     # Create root EndpointRunLog (D-14: records_submitted=0, data source only)
+    # Phase 60 D-05/D-06: endpoint_role="base" for root endpoint
     root_log = EndpointRunLog(
         run_id=run.id,
         endpoint_id=root_ep.id,
@@ -330,6 +334,7 @@ async def _run_canvas(
         status="success",
         http_request=source_result.http_request,
         http_response=source_result.http_response,
+        endpoint_role="base",
     )
     db.add(root_log)
     logs.append(root_log)
@@ -361,6 +366,8 @@ async def _run_canvas(
         ce = ce_map.get(stats.endpoint_id)
         if not ce:
             continue
+        # Phase 60 D-05/D-06: downstream role for child endpoints
+        child_role = "downstream"
         child_log = EndpointRunLog(
             run_id=run.id,
             endpoint_id=ce.endpoint_id,  # FK to connector_endpoints
@@ -373,6 +380,7 @@ async def _run_canvas(
             child_requests_failed=stats.children_failed,
             child_requests_skipped=stats.children_skipped,
             status="success" if stats.children_failed == 0 else "partial_success",
+            endpoint_role=child_role,
         )
         db.add(child_log)
         logs.append(child_log)
@@ -444,6 +452,30 @@ async def _run_canvas(
                 log.records_submitted = submitted_count
                 log.records_failed = len(failures)
                 break
+
+    # --- Phase 60 D-01/D-03: Compute base-anchored stats and enrichment breakdown ---
+    # Sum submission counts across all leaf logs for this canvas
+    submitted_total = sum(
+        log.records_submitted for log in logs if log != root_log
+    )
+    failed_total = sum(
+        log.records_failed for log in logs if log != root_log
+    )
+
+    full_count = fan_out_result.enrichment_full
+    partial_count = fan_out_result.enrichment_partial
+    base_only_count = fan_out_result.enrichment_base_only
+
+    # Store canvas-level stats on root_log for run_ingestion aggregation
+    root_log._canvas_base_stats = {
+        'base_records_total': fan_out_result.base_records_total,
+        'base_records_enriched': full_count + partial_count,
+        'base_records_submitted': submitted_total,
+        'base_records_failed': failed_total,
+        'base_records_full': full_count,
+        'base_records_partial': partial_count,
+        'base_records_base_only': base_only_count,
+    }
 
     db.commit()
     return logs
@@ -560,6 +592,37 @@ async def run_ingestion(run_id: str, canvas_id: str | None = None) -> None:
                     total_fetched += log.records_fetched
                     total_submitted += log.records_submitted
                     total_failed += log.records_failed
+
+        # Phase 60: Aggregate base-anchored stats across canvases (Pitfall 5)
+        base_total = 0
+        base_enriched = 0
+        base_submitted = 0
+        base_failed_count = 0
+        base_full = 0
+        base_partial = 0
+        base_base_only = 0
+        has_base_stats = False
+
+        for cl in logs:
+            canvas_stats = getattr(cl, '_canvas_base_stats', None)
+            if canvas_stats:
+                has_base_stats = True
+                base_total += canvas_stats['base_records_total']
+                base_enriched += canvas_stats['base_records_enriched']
+                base_submitted += canvas_stats['base_records_submitted']
+                base_failed_count += canvas_stats['base_records_failed']
+                base_full += canvas_stats['base_records_full']
+                base_partial += canvas_stats['base_records_partial']
+                base_base_only += canvas_stats['base_records_base_only']
+
+        if has_base_stats:
+            run.base_records_total = base_total
+            run.base_records_enriched = base_enriched
+            run.base_records_submitted = base_submitted
+            run.base_records_failed = base_failed_count
+            run.base_records_full = base_full
+            run.base_records_partial = base_partial
+            run.base_records_base_only = base_base_only
 
         run.records_fetched = total_fetched
         run.records_submitted = total_submitted

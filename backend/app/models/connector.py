@@ -1,7 +1,7 @@
 import enum
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, Integer
+from sqlalchemy import String, DateTime, Integer, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
@@ -40,11 +40,11 @@ class Connector(Base):
     qualys_retry_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Scheduling fields — to be migrated in 04-02
     cron_schedule: Mapped[str | None] = mapped_column(String, nullable=True)
-    schedule_enabled: Mapped[bool] = mapped_column(Integer, nullable=False, default=False)
+    schedule_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     execution_timeout: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # SSL certificate verification — False allows self-signed certs on source APIs
-    verify_ssl: Mapped[bool] = mapped_column(Integer, nullable=False, default=True)
+    verify_ssl: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Field mapping validation tracking
-    is_valid_mappings: Mapped[bool] = mapped_column(Integer, nullable=False, default=False)
+    is_valid_mappings: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

@@ -85,7 +85,7 @@ export const RunHistoryTable = ({
               <TableHead>Status</TableHead>
               <TableHead>Started</TableHead>
               <TableHead>Duration</TableHead>
-              <TableHead className="text-right">Fetched</TableHead>
+              <TableHead className="text-right">Base Records</TableHead>
               <TableHead className="text-right">Submitted</TableHead>
               <TableHead className="text-right">Failed</TableHead>
             </TableRow>
@@ -126,15 +126,15 @@ export const RunHistoryTable = ({
                   <TableCell>
                     {formatDuration(run.started_at, run.finished_at)}
                   </TableCell>
-                  <TableCell className="text-right">{run.records_fetched}</TableCell>
-                  <TableCell className="text-right">{run.records_submitted}</TableCell>
+                  <TableCell className="text-right">{run.base_records_total ?? run.records_fetched}</TableCell>
+                  <TableCell className="text-right">{run.base_records_submitted ?? run.records_submitted}</TableCell>
                   <TableCell className="text-right">
-                    {run.records_failed > 0 ? (
+                    {(run.base_records_failed ?? run.records_failed) > 0 ? (
                       <span className="text-destructive font-medium">
-                        {run.records_failed}
+                        {run.base_records_failed ?? run.records_failed}
                       </span>
                     ) : (
-                      run.records_failed
+                      run.base_records_failed ?? run.records_failed
                     )}
                   </TableCell>
                 </TableRow>

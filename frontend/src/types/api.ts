@@ -221,6 +221,13 @@ export interface RunHistory {
   records_failed: number
   error_message?: string
   endpoint_logs: EndpointRunLog[]
+  base_records_total?: number | null
+  base_records_enriched?: number | null
+  base_records_submitted?: number | null
+  base_records_failed?: number | null
+  base_records_full?: number | null
+  base_records_partial?: number | null
+  base_records_base_only?: number | null
 }
 
 export interface RunHistoryList {

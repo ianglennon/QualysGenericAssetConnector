@@ -1,3 +1,5 @@
+// Phase 60: Calendar shows per-day run status counts only (not record counts).
+// base_records_submitted would apply if record counts were displayed per-day.
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useRuns } from '@/hooks/queries/useRuns'

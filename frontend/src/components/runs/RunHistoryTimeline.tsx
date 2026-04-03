@@ -131,10 +131,10 @@ export const RunHistoryTimeline = ({ filters, onRunClick }: RunHistoryTimelinePr
                         )}
                       </div>
                       <div className="text-xs text-muted-foreground mt-1">
-                        Fetched: {run.records_fetched} • Submitted: {run.records_submitted}
-                        {run.records_failed > 0 && (
+                        Base Records: {run.base_records_total ?? run.records_fetched} • Submitted: {run.base_records_submitted ?? run.records_submitted}
+                        {(run.base_records_failed ?? run.records_failed) > 0 && (
                           <span className="text-destructive font-medium ml-1">
-                            • Failed: {run.records_failed}
+                            • Failed: {run.base_records_failed ?? run.records_failed}
                           </span>
                         )}
                       </div>

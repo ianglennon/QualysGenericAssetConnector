@@ -353,6 +353,9 @@ async def _execute_tree_base_aware(
             # Backward compat
             result.merged_records.append(dict(rec))
 
+        # Phase 60 gap closure: single-endpoint canvas = all records "full"
+        result.enrichment_full = len(result.record_outputs)
+
         return result
 
     # --- Multi-endpoint canvas ---
@@ -468,6 +471,24 @@ async def _execute_tree_base_aware(
             endpoint_outputs=ep_outputs,
         )
         result.record_outputs.append(tr)
+
+        # Phase 60 gap closure: classify enrichment per base record
+        if not downstream_ids:
+            # No downstream endpoints -- record is fully enriched by definition
+            result.enrichment_full += 1
+        else:
+            has_any_ds = any(
+                ep_outputs.get(ds_id) for ds_id in downstream_ids
+            )
+            has_all_ds = all(
+                ep_outputs.get(ds_id) for ds_id in downstream_ids
+            )
+            if has_all_ds:
+                result.enrichment_full += 1
+            elif has_any_ds:
+                result.enrichment_partial += 1
+            else:
+                result.enrichment_base_only += 1
 
         # Backward compat: flat merged record
         result.merged_records.append(_merge_parent_context(base_rec, current_context))

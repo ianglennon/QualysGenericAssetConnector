@@ -720,6 +720,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
         discoveryError: null,
         exclusionRules: [],
         isBase: false,
+        treeOrder: Infinity,
       } satisfies EndpointNodeData,
     }
 
@@ -774,6 +775,7 @@ function ChainCanvasInner({ connectorId, connectorName, initialCanvasId }: Chain
         discoveryError: null,
         exclusionRules: [],
         isBase: false,
+        treeOrder: Infinity,
       } satisfies EndpointNodeData,
     }
     setNodes((nds) => [...nds, newNode])

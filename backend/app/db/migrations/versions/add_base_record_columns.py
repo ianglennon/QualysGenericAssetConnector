@@ -3,7 +3,7 @@
 Per Phase 60 D-01, D-03: submission statistics and enrichment counters.
 
 Revision ID: d6e7f8a9b0c1
-Revises: c4d5e6f7a8b9
+Revises: g8b9c0d1e2f3
 Create Date: 2026-04-03 11:46:00.000000
 
 """
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'd6e7f8a9b0c1'
-down_revision: Union[str, None] = 'c4d5e6f7a8b9'
+down_revision: Union[str, None] = 'g8b9c0d1e2f3'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

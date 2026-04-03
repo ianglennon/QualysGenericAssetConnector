@@ -8,7 +8,27 @@ Requirements covered:
   - DEG-03: _run_canvas populates enrichment counters (full/partial/base_only)
   - RUN-02: EndpointRunLog includes endpoint_role field
 """
+import os
+
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
+
+from app.db.base import Base
+
+
+@pytest.fixture(autouse=True)
+def db_session(monkeypatch):
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    TestSession = sessionmaker(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    monkeypatch.setattr("app.services.ingestion_service.SessionLocal", TestSession)
+    db = TestSession()
+    yield db
+    db.close()
+    Base.metadata.drop_all(bind=engine)
 
 
 def test_base_anchored_stats(db_session):

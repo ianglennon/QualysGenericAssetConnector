@@ -7,10 +7,29 @@ Requirements covered:
   - RUN-01: API response includes base-anchored fields in run detail
   - RUN-03: List endpoint returns base_records_submitted
 """
+import os
+
 import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
+
+from app.db.base import Base
 
 
-def test_run_detail_base_fields(client, db_session):
+@pytest.fixture(autouse=True)
+def db_session():
+    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+    TestSession = sessionmaker(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    db = TestSession()
+    yield db
+    db.close()
+    Base.metadata.drop_all(bind=engine)
+
+
+def test_run_detail_base_fields(db_session):
     """RUN-01: GET /api/v1/runs/{id} response includes base_records_total,
     base_records_enriched, base_records_submitted, base_records_failed,
     base_records_full, base_records_partial, base_records_base_only fields.
@@ -27,7 +46,7 @@ def test_run_detail_base_fields(client, db_session):
     pytest.fail("STUB: Full API integration test not yet implemented -- Plan 60-01 must make this pass")
 
 
-def test_list_runs_base_submitted(client, db_session):
+def test_list_runs_base_submitted(db_session):
     """RUN-03: GET /api/v1/runs response items include base_records_submitted
     field for use by frontend list views.
 

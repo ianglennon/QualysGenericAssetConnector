@@ -577,6 +577,8 @@ async def _run_canvas(
             child_requests_skipped=stats.children_skipped,
             status="success" if stats.children_failed == 0 else "partial_success",
             endpoint_role=child_role,
+            http_request=stats.http_request,
+            http_response=stats.http_response,
         )
         db.add(child_log)
         logs.append(child_log)

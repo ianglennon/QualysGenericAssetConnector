@@ -40,10 +40,10 @@ export const RunDetailDrawer = ({ run, isOpen, onClose }: RunDetailDrawerProps) 
 
   const getEndpointBadge = (log: EndpointRunLog) => {
     if (log.endpoint_role === 'downstream') {
-      if (log.status === 'failed') {
+      if (log.status !== 'success') {
         return <Badge className="bg-yellow-600">Enrichment Gap</Badge>
       }
-      if (log.records_fetched === 0 && log.status === 'success') {
+      if (log.records_fetched === 0) {
         return <Badge variant="secondary">No Data</Badge>
       }
     }

@@ -37,6 +37,8 @@ class LevelStats:
     children_failed: int = 0
     children_skipped: int = 0
     records_fetched: int = 0
+    http_request: dict | None = None
+    http_response: dict | None = None
     failure_diagnostics: list[dict] = field(default_factory=list)
     MAX_DIAGNOSTICS: int = 50
 
@@ -527,6 +529,8 @@ async def _traverse_downstream(
 
     for ds_ce_id, parent_ctx in queue:
         ds_ce = ce_by_id[ds_ce_id]
+        st = _get_or_create_stats(result, ds_ce_id)
+        st.children_attempted += 1
 
         # Resolve template
         try:
@@ -537,6 +541,7 @@ async def _traverse_downstream(
             )
         except TemplateResolutionError as exc:
             logger.debug("Downstream template skip for %s: %s", ds_ce_id, exc)
+            st.children_skipped += 1
             continue
 
         url = connector.base_url.rstrip("/") + "/" + resolved_path.lstrip("/")
@@ -549,6 +554,7 @@ async def _traverse_downstream(
         except Exception as exc:
             # Both attempts failed — enrichment gap
             result.enrichment_gaps += 1
+            st.children_failed += 1
             logger.debug("Downstream enrichment gap for %s: %s", ds_ce_id, exc)
             if collector:
                 collector.add_detail(
@@ -561,6 +567,11 @@ async def _traverse_downstream(
         if fetch_result is None or fetch_result.partial:
             # Partial after retry — enrichment gap
             result.enrichment_gaps += 1
+            st.children_failed += 1
+            # Capture first failure HTTP details for endpoint run log
+            if fetch_result and st.http_request is None:
+                st.http_request = fetch_result.http_request
+                st.http_response = fetch_result.http_response
             logger.debug("Downstream enrichment gap (partial) for %s", ds_ce_id)
             if collector:
                 collector.add_detail(
@@ -569,6 +580,13 @@ async def _traverse_downstream(
                     {"url": url, "endpoint_id": ds_ce_id},
                 )
             continue
+
+        st.children_succeeded += 1
+        st.records_fetched += len(fetch_result.records)
+        # Capture first HTTP details for endpoint run log
+        if st.http_request is None:
+            st.http_request = fetch_result.http_request
+            st.http_response = fetch_result.http_response
 
         # 0 records from 2xx is normal — no gap, no retry (D-01, D-03)
         if not fetch_result.records:
@@ -679,6 +697,10 @@ async def _fan_out_level(
                         "http_request": fetch_result.http_request,
                         "http_response": fetch_result.http_response,
                     })
+                    # Capture first failure HTTP details for endpoint run log
+                    if st.http_request is None:
+                        st.http_request = fetch_result.http_request
+                        st.http_response = fetch_result.http_response
                     result.has_failures = True
                     if coll:
                         coll.add_detail(API_CALL, STAGE_FETCH,
@@ -691,6 +713,10 @@ async def _fan_out_level(
 
                 st.children_succeeded += 1
                 st.records_fetched += len(fetch_result.records)
+                # Capture first HTTP details for endpoint run log
+                if st.http_request is None:
+                    st.http_request = fetch_result.http_request
+                    st.http_response = fetch_result.http_response
 
                 if coll:
                     coll.add_detail(API_CALL, STAGE_FETCH,

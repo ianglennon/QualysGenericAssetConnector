@@ -210,11 +210,11 @@ export default function RunDetailPage() {
 
             const getEndpointBadge = (log: EndpointRunLog) => {
               if (log.endpoint_role === 'downstream') {
-                if (log.status === 'failed') {
-                  // D-05: Non-fatal enrichment gap badge
+                if (log.status !== 'success') {
+                  // D-05: Non-fatal enrichment gap badge for any downstream issue
                   return <Badge className="bg-yellow-600">Enrichment Gap</Badge>
                 }
-                if (log.records_fetched === 0 && log.status === 'success') {
+                if (log.records_fetched === 0) {
                   // D-06: Normal zero-data downstream
                   return <Badge variant="secondary">No Data</Badge>
                 }

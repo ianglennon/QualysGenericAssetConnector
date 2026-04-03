@@ -1,10 +1,29 @@
 services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: qualys
+      POSTGRES_USER: ${POSTGRES_USER:-qualys}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/scripts/init-test-db.sql:/docker-entrypoint-initdb.d/create-test-db.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-qualys} -d qualys"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+    expose:
+      - "5432"
+
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      - DATABASE_URL=${DATABASE_URL}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-qualys}:${POSTGRES_PASSWORD}@db:5432/qualys
+      - TEST_DATABASE_URL=postgresql://${POSTGRES_USER:-qualys}:${POSTGRES_PASSWORD}@db:5432/qualys_test
       - SECRET_KEY=${SECRET_KEY}
       - FERNET_KEY=${FERNET_KEY}
       - DOCS_ENABLED=${DOCS_ENABLED:-false}
@@ -12,8 +31,9 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - ACCESS_TOKEN_EXPIRE_MINUTES=${ACCESS_TOKEN_EXPIRE_MINUTES:-15}
       - REFRESH_TOKEN_EXPIRE_DAYS=${REFRESH_TOKEN_EXPIRE_DAYS:-7}
-    volumes:
-      - qualys-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
     expose:
       - "8080"
     restart: unless-stopped
@@ -37,4 +57,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  qualys-data:
+  pgdata:

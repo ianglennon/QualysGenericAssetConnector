@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, Integer, ForeignKey
+from sqlalchemy import String, DateTime, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 from app.db.base import Base
 
@@ -16,7 +16,7 @@ class Canvas(Base):
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
-    is_enabled: Mapped[bool] = mapped_column(Integer, nullable=False, default=True)
+    is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     base_canvas_endpoint_id: Mapped[str | None] = mapped_column(
         String,

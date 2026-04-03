@@ -13,10 +13,11 @@ beforeAll(() => {
   global.ResizeObserver = MockResizeObserver as any
 })
 
-// Mock @xyflow/react — EndpointNode uses useNodeId, useUpdateNodeInternals, Handle, Position
+// Mock @xyflow/react — EndpointNode uses useNodeId, useUpdateNodeInternals, useReactFlow, Handle, Position
 vi.mock('@xyflow/react', () => ({
   useUpdateNodeInternals: () => vi.fn(),
   useNodeId: () => 'test-node-id',
+  useReactFlow: () => ({ setNodes: vi.fn() }),
   Handle: ({ id, type }: { id?: string; type?: string }) => (
     <div data-testid="handle" data-id={id} data-type={type} />
   ),
@@ -98,6 +99,22 @@ describe('EndpointNode', () => {
 
       // onMaxConcurrencyChange should NOT be called because 1 - 1 = 0 < 1
       expect(onMaxConcurrencyChange).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('DET-01 / DET-02: Base badge visibility', () => {
+    it('renders a Base badge in the header when isBase is true', () => {
+      const data = makeData({ isBase: true })
+      render(<EndpointNode {...(baseNodeProps as any)} data={data} />)
+
+      expect(screen.getByText('Base')).toBeInTheDocument()
+    })
+
+    it('does not render a Base badge when isBase is false', () => {
+      const data = makeData({ isBase: false })
+      render(<EndpointNode {...(baseNodeProps as any)} data={data} />)
+
+      expect(screen.queryByText('Base')).not.toBeInTheDocument()
     })
   })
 

@@ -203,6 +203,10 @@ export interface Connector {
   qualys_retry_limit?: number
   verify_ssl: boolean
   fault_diagnosis: boolean
+  interval_type: string | null
+  interval_value: number | null
+  schedule_enabled: boolean
+  next_run_at: string | null
   created_at: string
   updated_at: string
 }

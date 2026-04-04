@@ -1,19 +1,11 @@
+"""Tests for authentication endpoints.
+
+Uses shared conftest.py fixtures for DB and client.
+Each test is self-contained (no cross-test state dependency).
+"""
 import pytest
-from fastapi.testclient import TestClient
-from app.main import create_app
-from app.db.session import SessionLocal, engine
-from app.db.base import Base
 from app.services.auth_service import create_user
-
-
-@pytest.fixture(scope="module")
-def client():
-    # Use in-memory SQLite for tests
-    Base.metadata.create_all(bind=engine)
-    app = create_app()
-    with TestClient(app) as c:
-        yield c
-    Base.metadata.drop_all(bind=engine)
+from app.models.user import UserRole
 
 
 def test_login_invalid_credentials(client):
@@ -23,12 +15,10 @@ def test_login_invalid_credentials(client):
     assert data["error"]["code"] == "AUTH_INVALID_CREDENTIALS"
 
 
-def test_login_success_and_refresh(client):
+def test_login_success_and_refresh(client, db_session):
     # Create a user first (use auth_service directly)
-    from app.models.user import UserRole
-    db = SessionLocal()
-    create_user(db, "test@example.com", "SecurePass1!", UserRole.admin)
-    db.close()
+    create_user(db_session, "test@example.com", "SecurePass1!", UserRole.admin)
+    db_session.flush()
 
     # Login
     resp = client.post("/api/v1/auth/login", json={"email": "test@example.com", "password": "SecurePass1!"})
@@ -43,13 +33,11 @@ def test_login_success_and_refresh(client):
     assert "access_token" in resp2.json()
 
 
-def test_operator_cannot_access_admin_only_endpoint(client):
+def test_operator_cannot_access_admin_only_endpoint(client, db_session):
     """Verify AUTH-05: Operator gets 403 on admin-only endpoint."""
     # Create operator user
-    from app.models.user import UserRole
-    db = SessionLocal()
-    create_user(db, "operator@test.com", "OperatorPass1!", UserRole.operator)
-    db.close()
+    create_user(db_session, "operator@test.com", "OperatorPass1!", UserRole.operator)
+    db_session.flush()
 
     # Login as operator
     op_resp = client.post("/api/v1/auth/login", json={"email": "operator@test.com", "password": "OperatorPass1!"})
@@ -62,12 +50,10 @@ def test_operator_cannot_access_admin_only_endpoint(client):
     assert resp.json()["error"]["code"] == "AUTH_FORBIDDEN"
 
 
-def test_admin_can_access_admin_only_endpoint(client):
+def test_admin_can_access_admin_only_endpoint(client, db_session):
     """Verify AUTH-03: Admin can access admin-only endpoints."""
-    from app.models.user import UserRole
-    db = SessionLocal()
-    create_user(db, "admin2@test.com", "AdminPass2!", UserRole.admin)
-    db.close()
+    create_user(db_session, "admin2@test.com", "AdminPass2!", UserRole.admin)
+    db_session.flush()
 
     admin_resp = client.post("/api/v1/auth/login", json={"email": "admin2@test.com", "password": "AdminPass2!"})
     admin_token = admin_resp.json()["access_token"]

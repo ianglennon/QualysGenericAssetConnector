@@ -12,6 +12,5 @@ httpx
 pytest
 pytest-asyncio
 apscheduler>=3.11.0,<4.0.0
-croniter>=2.0.0
 pytz
 fastapi-pagination>=0.12.0

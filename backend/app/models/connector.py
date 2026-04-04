@@ -38,9 +38,11 @@ class Connector(Base):
     encrypted_api_key: Mapped[str | None] = mapped_column(String, nullable=True)     # api_key_header auth
     source_retry_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     qualys_retry_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    # Scheduling fields — to be migrated in 04-02
-    cron_schedule: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Scheduling fields — interval-based scheduling (Phase 64)
     schedule_enabled: Mapped[bool] = mapped_column(Integer, nullable=False, default=False)
+    interval_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    interval_value: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     execution_timeout: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # SSL certificate verification — False allows self-signed certs on source APIs
     verify_ssl: Mapped[bool] = mapped_column(Integer, nullable=False, default=True)

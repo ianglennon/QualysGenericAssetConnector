@@ -186,7 +186,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
 
-    from app.routers import auth, qualys, connectors, runs, schedules, field_mappings, endpoints, canvases, canvas_endpoints
+    from app.routers import auth, qualys, connectors, runs, schedules, field_mappings, endpoints, canvases, canvas_endpoints, users, roles
     app.include_router(auth.router, prefix="/api/v1")
     app.include_router(qualys.router, prefix="/api/v1")
     app.include_router(connectors.router, prefix="/api/v1")
@@ -196,6 +196,8 @@ def create_app() -> FastAPI:
     app.include_router(endpoints.router, prefix="/api/v1")
     app.include_router(canvases.router, prefix="/api/v1")
     app.include_router(canvas_endpoints.router, prefix="/api/v1")
+    app.include_router(users.router, prefix="/api/v1")
+    app.include_router(roles.router, prefix="/api/v1")
 
     @app.get("/health")
     def health_check():

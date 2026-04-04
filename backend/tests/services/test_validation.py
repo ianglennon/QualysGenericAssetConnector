@@ -1,46 +1,29 @@
-"""Unit tests for validation service — validate_endpoint_mappings."""
+"""Unit tests for validation service -- validate_endpoint_mappings.
+
+Uses shared conftest.py fixtures for DB.
+"""
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-from app.db.base import Base
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
 from app.models.field_mapping import FieldMapping
 from app.services.validation import validate_endpoint_mappings, IDENTITY_ATTRIBUTES
 
 
-@pytest.fixture
-def db_session():
-    """Create an in-memory SQLite database for testing."""
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    session = SessionLocal()
-    yield session
-    session.close()
-    engine.dispose()
-
-
-def _make_connector(db, connector_id="connector-1"):
+def _make_connector(db_session, connector_id="connector-1"):
     connector = Connector(
         id=connector_id,
         name="Test Connector",
         base_url="https://api.example.com",
         auth_method="bearer_token",
     )
-    db.add(connector)
-    db.commit()
+    db_session.add(connector)
+    db_session.flush()
     return connector
 
 
-def _make_endpoint(db, connector_id, endpoint_id, name="Endpoint 1", is_enabled=True):
+def _make_endpoint(db_session, connector_id, endpoint_id, name="Endpoint 1", is_enabled=True):
     endpoint = ConnectorEndpoint(
         id=endpoint_id,
         connector_id=connector_id,
@@ -48,12 +31,12 @@ def _make_endpoint(db, connector_id, endpoint_id, name="Endpoint 1", is_enabled=
         path="/api/resources",
         is_enabled=is_enabled,
     )
-    db.add(endpoint)
-    db.commit()
+    db_session.add(endpoint)
+    db_session.flush()
     return endpoint
 
 
-def _make_mapping(db, endpoint_id, mapping_id, target_field, source_field="field"):
+def _make_mapping(db_session, endpoint_id, mapping_id, target_field, source_field="field"):
     mapping = FieldMapping(
         id=mapping_id,
         endpoint_id=endpoint_id,
@@ -61,13 +44,13 @@ def _make_mapping(db, endpoint_id, mapping_id, target_field, source_field="field
         mapping_type="direct_copy",
         source_field=source_field,
     )
-    db.add(mapping)
-    db.commit()
+    db_session.add(mapping)
+    db_session.flush()
     return mapping
 
 
 def test_no_enabled_endpoints_returns_valid(db_session):
-    """Connector with no enabled endpoints returns (True, []) — guard is in run trigger."""
+    """Connector with no enabled endpoints returns (True, []) -- guard is in run trigger."""
     _make_connector(db_session, "conn-no-endpoints")
 
     is_valid, invalid = validate_endpoint_mappings("conn-no-endpoints", db_session)
@@ -104,7 +87,7 @@ def test_enabled_endpoint_missing_identity_mapping_returns_invalid(db_session):
 
 
 def test_disabled_endpoint_missing_identity_mapping_is_ignored(db_session):
-    """Disabled endpoint with no identity mapping is ignored — connector is valid."""
+    """Disabled endpoint with no identity mapping is ignored -- connector is valid."""
     _make_connector(db_session, "conn-disabled")
     _make_endpoint(db_session, "conn-disabled", "ep-disabled", name="Disabled", is_enabled=False)
     # No identity mapping for the disabled endpoint

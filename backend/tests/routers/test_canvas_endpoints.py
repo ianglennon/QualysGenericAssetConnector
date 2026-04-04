@@ -1,39 +1,17 @@
 """Unit tests for CanvasEndpoint CRUD routes with tree validation.
 
-Uses in-memory SQLite with function-scoped setup/teardown.
 Auth is bypassed by overriding get_current_user with a mock admin user.
+Uses shared conftest.py fixtures for DB and client.
 """
 
-import os
-import sys
 import uuid
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-
-from app.main import app as fastapi_app
-from app.db.session import get_db
 from app.core.security import get_current_user
-from app.db.base import Base
-
-# Import all models so Base.metadata is fully populated before create_all
-from app.models import connector_endpoint as _ce_mod  # noqa: F401
 from app.models.connector import Connector
-from app.models.connector_endpoint import ConnectorEndpoint  # noqa: F401
-from app.models.canvas import Canvas  # noqa: F401
-from app.models.canvas_endpoint import CanvasEndpoint  # noqa: F401
-from app.models.user import User, UserRole  # noqa: F401
-from app.models.run_history import RunHistory, RunFailure  # noqa: F401
-from app.models.field_mapping import FieldMapping  # noqa: F401
-from app.models.qualys_config import QualysConfig  # noqa: F401
-
-SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
+from app.models.connector_endpoint import ConnectorEndpoint
+from app.models.user import UserRole
 
 
 class _MockAdminUser:
@@ -45,75 +23,38 @@ class _MockAdminUser:
 
 
 @pytest.fixture(autouse=True)
-def setup_db():
-    engine = create_engine(
-        SQLALCHEMY_DATABASE_URL,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-
-    # Enable foreign keys for SQLite (needed for SET NULL on delete)
-    @event.listens_for(engine, "connect")
-    def set_sqlite_pragma(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    Base.metadata.create_all(bind=engine)
-
-    def override_get_db():
-        db = TestingSessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
-
-    def override_get_current_user():
-        return _MockAdminUser()
-
-    fastapi_app.dependency_overrides[get_db] = override_get_db
-    fastapi_app.dependency_overrides[get_current_user] = override_get_current_user
-
-    yield TestingSessionLocal
-
-    Base.metadata.drop_all(bind=engine)
-    fastapi_app.dependency_overrides.clear()
+def _mock_admin_auth(client):
+    """Override get_current_user to bypass auth for these tests."""
+    from app.main import app as fastapi_app
+    fastapi_app.dependency_overrides[get_current_user] = lambda: _MockAdminUser()
+    yield
 
 
-def _seed_connector(session_factory) -> str:
+def _seed_connector(db_session) -> str:
     """Insert a Connector row directly and return its ID."""
     conn_id = str(uuid.uuid4())
-    db = session_factory()
-    try:
-        connector = Connector(
-            id=conn_id,
-            name="Test Connector",
-            base_url="https://api.example.com",
-            auth_method="bearer_token",
-        )
-        db.add(connector)
-        db.commit()
-    finally:
-        db.close()
+    connector = Connector(
+        id=conn_id,
+        name="Test Connector",
+        base_url="https://api.example.com",
+        auth_method="bearer_token",
+    )
+    db_session.add(connector)
+    db_session.flush()
     return conn_id
 
 
-def _seed_endpoint(session_factory, connector_id: str, name: str = "Test Endpoint") -> str:
+def _seed_endpoint(db_session, connector_id: str, name: str = "Test Endpoint") -> str:
     """Insert a ConnectorEndpoint and return its ID."""
     ep_id = str(uuid.uuid4())
-    db = session_factory()
-    try:
-        ep = ConnectorEndpoint(
-            id=ep_id,
-            connector_id=connector_id,
-            name=name,
-            path=f"/api/{name.lower().replace(' ', '-')}",
-        )
-        db.add(ep)
-        db.commit()
-    finally:
-        db.close()
+    ep = ConnectorEndpoint(
+        id=ep_id,
+        connector_id=connector_id,
+        name=name,
+        path=f"/api/{name.lower().replace(' ', '-')}",
+    )
+    db_session.add(ep)
+    db_session.flush()
     return ep_id
 
 
@@ -133,16 +74,15 @@ def _base_url(connector_id: str, canvas_id: str) -> str:
 
 # --- Test 1: POST add endpoint to canvas returns 201 ---
 
-def test_create_canvas_endpoint_success(setup_db):
+def test_create_canvas_endpoint_success(client, db_session):
     """POST adds endpoint to canvas with correct fields."""
-    conn_id = _seed_connector(setup_db)
-    ep_id = _seed_endpoint(setup_db, conn_id)
-    with TestClient(fastapi_app) as client:
-        canvas_id = _create_canvas(client, conn_id)
-        resp = client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id},
-        )
+    conn_id = _seed_connector(db_session)
+    ep_id = _seed_endpoint(db_session, conn_id)
+    canvas_id = _create_canvas(client, conn_id)
+    resp = client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id},
+    )
     assert resp.status_code == 201
     data = resp.json()
     assert data["canvas_id"] == canvas_id
@@ -156,65 +96,58 @@ def test_create_canvas_endpoint_success(setup_db):
 
 # --- Test 2: POST with non-existent endpoint_id returns 404 ---
 
-def test_create_canvas_endpoint_nonexistent_endpoint(setup_db):
+def test_create_canvas_endpoint_nonexistent_endpoint(client, db_session):
     """POST with bogus endpoint_id returns 404 ENDPOINT_NOT_FOUND."""
-    conn_id = _seed_connector(setup_db)
-    with TestClient(fastapi_app) as client:
-        canvas_id = _create_canvas(client, conn_id)
-        resp = client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": "does-not-exist"},
-        )
+    conn_id = _seed_connector(db_session)
+    canvas_id = _create_canvas(client, conn_id)
+    resp = client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": "does-not-exist"},
+    )
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "ENDPOINT_NOT_FOUND"
 
 
 # --- Test 3: POST with endpoint from different connector returns 404 ---
 
-def test_create_canvas_endpoint_wrong_connector(setup_db):
+def test_create_canvas_endpoint_wrong_connector(client, db_session):
     """POST with endpoint belonging to another connector returns 404."""
-    conn_id = _seed_connector(setup_db)
+    conn_id = _seed_connector(db_session)
     # Create a second connector and an endpoint under it
     other_conn_id = str(uuid.uuid4())
-    db = setup_db()
-    try:
-        db.add(Connector(
-            id=other_conn_id,
-            name="Other Connector",
-            base_url="https://other.example.com",
-            auth_method="bearer_token",
-        ))
-        db.commit()
-    finally:
-        db.close()
-    other_ep_id = _seed_endpoint(setup_db, other_conn_id, "Other EP")
+    db_session.add(Connector(
+        id=other_conn_id,
+        name="Other Connector",
+        base_url="https://other.example.com",
+        auth_method="bearer_token",
+    ))
+    db_session.flush()
+    other_ep_id = _seed_endpoint(db_session, other_conn_id, "Other EP")
 
-    with TestClient(fastapi_app) as client:
-        canvas_id = _create_canvas(client, conn_id)
-        resp = client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": other_ep_id},
-        )
+    canvas_id = _create_canvas(client, conn_id)
+    resp = client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": other_ep_id},
+    )
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "ENDPOINT_NOT_FOUND"
 
 
 # --- Test 4: POST with field_role=iterator and variable_extractions ---
 
-def test_create_canvas_endpoint_with_extractions(setup_db):
+def test_create_canvas_endpoint_with_extractions(client, db_session):
     """POST with field_role='iterator' and variable_extractions succeeds."""
-    conn_id = _seed_connector(setup_db)
-    ep_id = _seed_endpoint(setup_db, conn_id)
-    with TestClient(fastapi_app) as client:
-        canvas_id = _create_canvas(client, conn_id)
-        resp = client.post(
-            _base_url(conn_id, canvas_id),
-            json={
-                "endpoint_id": ep_id,
-                "field_role": "iterator",
-                "variable_extractions": {"name": "data.name", "node_id": "data.id"},
-            },
-        )
+    conn_id = _seed_connector(db_session)
+    ep_id = _seed_endpoint(db_session, conn_id)
+    canvas_id = _create_canvas(client, conn_id)
+    resp = client.post(
+        _base_url(conn_id, canvas_id),
+        json={
+            "endpoint_id": ep_id,
+            "field_role": "iterator",
+            "variable_extractions": {"name": "data.name", "node_id": "data.id"},
+        },
+    )
     assert resp.status_code == 201
     data = resp.json()
     assert data["field_role"] == "iterator"
@@ -223,92 +156,88 @@ def test_create_canvas_endpoint_with_extractions(setup_db):
 
 # --- Test 5: POST with max_concurrency=0 returns 422 ---
 
-def test_create_canvas_endpoint_invalid_max_concurrency(setup_db):
+def test_create_canvas_endpoint_invalid_max_concurrency(client, db_session):
     """POST with max_concurrency=0 returns 422 validation error."""
-    conn_id = _seed_connector(setup_db)
-    ep_id = _seed_endpoint(setup_db, conn_id)
-    with TestClient(fastapi_app) as client:
-        canvas_id = _create_canvas(client, conn_id)
-        resp = client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id, "max_concurrency": 0},
-        )
+    conn_id = _seed_connector(db_session)
+    ep_id = _seed_endpoint(db_session, conn_id)
+    canvas_id = _create_canvas(client, conn_id)
+    resp = client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id, "max_concurrency": 0},
+    )
     assert resp.status_code == 422
 
 
 # --- Test 6: POST with field_role=invalid returns 422 ---
 
-def test_create_canvas_endpoint_invalid_field_role(setup_db):
+def test_create_canvas_endpoint_invalid_field_role(client, db_session):
     """POST with invalid field_role returns 422 validation error."""
-    conn_id = _seed_connector(setup_db)
-    ep_id = _seed_endpoint(setup_db, conn_id)
-    with TestClient(fastapi_app) as client:
-        canvas_id = _create_canvas(client, conn_id)
-        resp = client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id, "field_role": "invalid"},
-        )
+    conn_id = _seed_connector(db_session)
+    ep_id = _seed_endpoint(db_session, conn_id)
+    canvas_id = _create_canvas(client, conn_id)
+    resp = client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id, "field_role": "invalid"},
+    )
     assert resp.status_code == 422
 
 
 # --- Test 7: Circular reference detection (D-11) ---
 
-def test_circular_reference_rejected(setup_db):
+def test_circular_reference_rejected(client, db_session):
     """Setting A's parent to B when B's parent is A returns 409 CIRCULAR_REFERENCE."""
-    conn_id = _seed_connector(setup_db)
-    ep_id = _seed_endpoint(setup_db, conn_id)
-    with TestClient(fastapi_app) as client:
-        canvas_id = _create_canvas(client, conn_id)
+    conn_id = _seed_connector(db_session)
+    ep_id = _seed_endpoint(db_session, conn_id)
+    canvas_id = _create_canvas(client, conn_id)
 
-        # Create A (root)
-        resp_a = client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id},
-        )
-        assert resp_a.status_code == 201
-        ref_a_id = resp_a.json()["id"]
+    # Create A (root)
+    resp_a = client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id},
+    )
+    assert resp_a.status_code == 201
+    ref_a_id = resp_a.json()["id"]
 
-        # Create B with parent=A
-        resp_b = client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id, "parent_ref_id": ref_a_id},
-        )
-        assert resp_b.status_code == 201
-        ref_b_id = resp_b.json()["id"]
+    # Create B with parent=A
+    resp_b = client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id, "parent_ref_id": ref_a_id},
+    )
+    assert resp_b.status_code == 201
+    ref_b_id = resp_b.json()["id"]
 
-        # Try to set A's parent to B -> should fail with 409
-        patch_resp = client.patch(
-            _base_url(conn_id, canvas_id) + f"/{ref_a_id}",
-            json={"parent_ref_id": ref_b_id},
-        )
+    # Try to set A's parent to B -> should fail with 409
+    patch_resp = client.patch(
+        _base_url(conn_id, canvas_id) + f"/{ref_a_id}",
+        json={"parent_ref_id": ref_b_id},
+    )
     assert patch_resp.status_code == 409
     assert patch_resp.json()["error"]["code"] == "CIRCULAR_REFERENCE"
 
 
 # --- Test 8: GET list returns all canvas-endpoints ordered by tree_order ---
 
-def test_list_canvas_endpoints_ordered(setup_db):
+def test_list_canvas_endpoints_ordered(client, db_session):
     """GET returns canvas-endpoints ordered by tree_order ascending."""
-    conn_id = _seed_connector(setup_db)
-    ep_id = _seed_endpoint(setup_db, conn_id)
-    with TestClient(fastapi_app) as client:
-        canvas_id = _create_canvas(client, conn_id)
+    conn_id = _seed_connector(db_session)
+    ep_id = _seed_endpoint(db_session, conn_id)
+    canvas_id = _create_canvas(client, conn_id)
 
-        # Create with different tree_orders
-        client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id, "tree_order": 2},
-        )
-        client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id, "tree_order": 0},
-        )
-        client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id, "tree_order": 1},
-        )
+    # Create with different tree_orders
+    client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id, "tree_order": 2},
+    )
+    client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id, "tree_order": 0},
+    )
+    client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id, "tree_order": 1},
+    )
 
-        resp = client.get(_base_url(conn_id, canvas_id))
+    resp = client.get(_base_url(conn_id, canvas_id))
     assert resp.status_code == 200
     items = resp.json()
     assert len(items) == 3
@@ -319,82 +248,79 @@ def test_list_canvas_endpoints_ordered(setup_db):
 
 # --- Test 9: PATCH update field_role ---
 
-def test_update_field_role(setup_db):
+def test_update_field_role(client, db_session):
     """PATCH updates field_role from 'data' to 'both'."""
-    conn_id = _seed_connector(setup_db)
-    ep_id = _seed_endpoint(setup_db, conn_id)
-    with TestClient(fastapi_app) as client:
-        canvas_id = _create_canvas(client, conn_id)
-        create_resp = client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id},
-        )
-        ref_id = create_resp.json()["id"]
+    conn_id = _seed_connector(db_session)
+    ep_id = _seed_endpoint(db_session, conn_id)
+    canvas_id = _create_canvas(client, conn_id)
+    create_resp = client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id},
+    )
+    ref_id = create_resp.json()["id"]
 
-        patch_resp = client.patch(
-            _base_url(conn_id, canvas_id) + f"/{ref_id}",
-            json={"field_role": "both"},
-        )
+    patch_resp = client.patch(
+        _base_url(conn_id, canvas_id) + f"/{ref_id}",
+        json={"field_role": "both"},
+    )
     assert patch_resp.status_code == 200
     assert patch_resp.json()["field_role"] == "both"
 
 
 # --- Test 10: DELETE removes canvas-endpoint, children get orphaned ---
 
-def test_delete_orphans_children(setup_db):
+def test_delete_orphans_children(client, db_session):
     """DELETE parent ref causes child's parent_ref_id to become null (SET NULL)."""
-    conn_id = _seed_connector(setup_db)
-    ep_id = _seed_endpoint(setup_db, conn_id)
-    with TestClient(fastapi_app) as client:
-        canvas_id = _create_canvas(client, conn_id)
+    conn_id = _seed_connector(db_session)
+    ep_id = _seed_endpoint(db_session, conn_id)
+    canvas_id = _create_canvas(client, conn_id)
 
-        # Create parent A (root)
-        resp_a = client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id},
-        )
-        ref_a_id = resp_a.json()["id"]
+    # Create parent A (root)
+    resp_a = client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id},
+    )
+    ref_a_id = resp_a.json()["id"]
 
-        # Create child B with parent=A
-        resp_b = client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id, "parent_ref_id": ref_a_id},
-        )
-        ref_b_id = resp_b.json()["id"]
+    # Create child B with parent=A
+    resp_b = client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id, "parent_ref_id": ref_a_id},
+    )
+    ref_b_id = resp_b.json()["id"]
 
-        # Delete A
-        del_resp = client.delete(_base_url(conn_id, canvas_id) + f"/{ref_a_id}")
-        assert del_resp.status_code == 204
+    # Delete A
+    del_resp = client.delete(_base_url(conn_id, canvas_id) + f"/{ref_a_id}")
+    assert del_resp.status_code == 204
 
-        # Get B -> parent_ref_id should be null
-        get_resp = client.get(_base_url(conn_id, canvas_id) + f"/{ref_b_id}")
+    # Get B -> parent_ref_id should be null
+    get_resp = client.get(_base_url(conn_id, canvas_id) + f"/{ref_b_id}")
     assert get_resp.status_code == 200
     assert get_resp.json()["parent_ref_id"] is None
 
 
 # --- Test 11: GET validate endpoint ---
 
-def test_validate_valid_tree(setup_db):
+def test_validate_valid_tree(client, db_session):
     """Validate returns valid=true for a proper tree (1 root, no orphans)."""
-    conn_id = _seed_connector(setup_db)
-    ep_id = _seed_endpoint(setup_db, conn_id)
-    with TestClient(fastapi_app) as client:
-        canvas_id = _create_canvas(client, conn_id)
+    conn_id = _seed_connector(db_session)
+    ep_id = _seed_endpoint(db_session, conn_id)
+    canvas_id = _create_canvas(client, conn_id)
 
-        # Create root
-        resp_a = client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id},
-        )
-        ref_a_id = resp_a.json()["id"]
+    # Create root
+    resp_a = client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id},
+    )
+    ref_a_id = resp_a.json()["id"]
 
-        # Create child
-        client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id, "parent_ref_id": ref_a_id},
-        )
+    # Create child
+    client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id, "parent_ref_id": ref_a_id},
+    )
 
-        resp = client.get(_base_url(conn_id, canvas_id) + "/validate")
+    resp = client.get(_base_url(conn_id, canvas_id) + "/validate")
     assert resp.status_code == 200
     data = resp.json()
     assert data["valid"] is True
@@ -402,26 +328,25 @@ def test_validate_valid_tree(setup_db):
     assert data["root_count"] == 1
 
 
-def test_validate_orphaned_nodes(setup_db):
+def test_validate_orphaned_nodes(client, db_session):
     """Validate returns valid=false when orphaned nodes exist."""
-    conn_id = _seed_connector(setup_db)
-    ep_id = _seed_endpoint(setup_db, conn_id)
-    with TestClient(fastapi_app) as client:
-        canvas_id = _create_canvas(client, conn_id)
+    conn_id = _seed_connector(db_session)
+    ep_id = _seed_endpoint(db_session, conn_id)
+    canvas_id = _create_canvas(client, conn_id)
 
-        # Create root A
-        client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id},
-        )
+    # Create root A
+    client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id},
+    )
 
-        # Create C (no parent -- second root / orphan from tree perspective)
-        resp_c = client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id},
-        )
-        # With 2 roots, valid should be false
-        resp = client.get(_base_url(conn_id, canvas_id) + "/validate")
+    # Create C (no parent -- second root / orphan from tree perspective)
+    client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id},
+    )
+    # With 2 roots, valid should be false
+    resp = client.get(_base_url(conn_id, canvas_id) + "/validate")
     assert resp.status_code == 200
     data = resp.json()
     assert data["valid"] is False
@@ -430,29 +355,27 @@ def test_validate_orphaned_nodes(setup_db):
 
 # --- Test 12: max_concurrency defaults to 5 ---
 
-def test_max_concurrency_default(setup_db):
+def test_max_concurrency_default(client, db_session):
     """When max_concurrency is not specified, it defaults to 5."""
-    conn_id = _seed_connector(setup_db)
-    ep_id = _seed_endpoint(setup_db, conn_id)
-    with TestClient(fastapi_app) as client:
-        canvas_id = _create_canvas(client, conn_id)
-        resp = client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id},
-        )
+    conn_id = _seed_connector(db_session)
+    ep_id = _seed_endpoint(db_session, conn_id)
+    canvas_id = _create_canvas(client, conn_id)
+    resp = client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id},
+    )
     assert resp.status_code == 201
     assert resp.json()["max_concurrency"] == 5
 
 
-def test_max_concurrency_custom(setup_db):
+def test_max_concurrency_custom(client, db_session):
     """When max_concurrency is specified as 10, it is stored correctly."""
-    conn_id = _seed_connector(setup_db)
-    ep_id = _seed_endpoint(setup_db, conn_id)
-    with TestClient(fastapi_app) as client:
-        canvas_id = _create_canvas(client, conn_id)
-        resp = client.post(
-            _base_url(conn_id, canvas_id),
-            json={"endpoint_id": ep_id, "max_concurrency": 10},
-        )
+    conn_id = _seed_connector(db_session)
+    ep_id = _seed_endpoint(db_session, conn_id)
+    canvas_id = _create_canvas(client, conn_id)
+    resp = client.post(
+        _base_url(conn_id, canvas_id),
+        json={"endpoint_id": ep_id, "max_concurrency": 10},
+    )
     assert resp.status_code == 201
     assert resp.json()["max_concurrency"] == 10

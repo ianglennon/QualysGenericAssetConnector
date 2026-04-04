@@ -1,46 +1,9 @@
-import os
-import sys
 import uuid
 import pytest
-from fastapi.testclient import TestClient
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_connectors.db")
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-
-from app.main import create_app
-from app.db.session import SessionLocal
 from app.services.auth_service import create_user
 from app.models.user import UserRole
-
-
-@pytest.fixture(scope="module")
-def client():
-    db_path = os.path.abspath("test_connectors.db")
-    if os.path.exists(db_path):
-        os.remove(db_path)
-    app = create_app()
-    with TestClient(app) as c:
-        yield c
-    if os.path.exists(db_path):
-        os.remove(db_path)
-
-
-@pytest.fixture(scope="module")
-def admin_token(client):
-    db = SessionLocal()
-    create_user(db, "conn_admin@test.com", "AdminPass12!", UserRole.admin)
-    db.close()
-    resp = client.post("/api/v1/auth/login", json={"email": "conn_admin@test.com", "password": "AdminPass12!"})
-    return resp.json()["access_token"]
-
-
-@pytest.fixture(scope="module")
-def operator_token(client):
-    db = SessionLocal()
-    create_user(db, "conn_op@test.com", "OperatorPass12!", UserRole.operator)
-    db.close()
-    resp = client.post("/api/v1/auth/login", json={"email": "conn_op@test.com", "password": "OperatorPass12!"})
-    return resp.json()["access_token"]
+from app.models.connector import Connector
 
 
 def test_create_connector_as_admin(client, admin_token):
@@ -98,7 +61,6 @@ def test_list_connectors_as_admin(client, admin_token):
     assert resp.status_code == 200
     data = resp.json()
     assert isinstance(data, list)
-    assert len(data) >= 1  # at least the ones created above
 
 
 def test_get_connector_by_id(client, admin_token):
@@ -156,7 +118,7 @@ def test_patch_connector_preserves_credentials(client, admin_token):
     connector_id = create_resp.json()["id"]
     assert create_resp.json()["has_token"] is True
 
-    # PATCH only the name — no credentials field in payload
+    # PATCH only the name -- no credentials field in payload
     patch_resp = client.patch(
         f"/api/v1/connectors/{connector_id}",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -194,10 +156,9 @@ def test_patch_connector_updates_retry_limits(client, admin_token):
     assert data["qualys_retry_limit"] == 1
 
 
-def test_delete_connector_cascades_to_field_mappings(client, admin_token):
+def test_delete_connector_cascades_to_field_mappings(client, admin_token, db_session):
     """DELETE removes connector; field_mappings with FK to that connector are cascade-deleted."""
-    from app.db.session import SessionLocal as _SessionLocal
-    import uuid as _uuid
+    from sqlalchemy import text
     from datetime import datetime
 
     # Create a connector
@@ -213,27 +174,22 @@ def test_delete_connector_cascades_to_field_mappings(client, admin_token):
     assert create_resp.status_code == 201
     connector_id = create_resp.json()["id"]
 
-    # Insert a field_mapping row directly via DB (shell table from Phase 2)
-    db = _SessionLocal()
-    try:
-        from sqlalchemy import text
-        mapping_id = str(_uuid.uuid4())
-        db.execute(
-            text(
-                "INSERT INTO field_mappings (id, connector_id, created_at) VALUES (:id, :connector_id, :created_at)"
-            ),
-            {"id": mapping_id, "connector_id": connector_id, "created_at": datetime.utcnow()},
-        )
-        db.commit()
+    # Insert a field_mapping row directly via DB
+    mapping_id = str(uuid.uuid4())
+    db_session.execute(
+        text(
+            "INSERT INTO field_mappings (id, connector_id, created_at) VALUES (:id, :connector_id, :created_at)"
+        ),
+        {"id": mapping_id, "connector_id": connector_id, "created_at": datetime.utcnow()},
+    )
+    db_session.flush()
 
-        # Verify it's there
-        row = db.execute(
-            text("SELECT id FROM field_mappings WHERE id = :id"),
-            {"id": mapping_id},
-        ).fetchone()
-        assert row is not None, "field_mapping row should exist before delete"
-    finally:
-        db.close()
+    # Verify it's there
+    row = db_session.execute(
+        text("SELECT id FROM field_mappings WHERE id = :id"),
+        {"id": mapping_id},
+    ).fetchone()
+    assert row is not None, "field_mapping row should exist before delete"
 
     # DELETE the connector
     del_resp = client.delete(
@@ -243,15 +199,12 @@ def test_delete_connector_cascades_to_field_mappings(client, admin_token):
     assert del_resp.status_code == 204
 
     # Verify the field_mapping was cascade-deleted
-    db = _SessionLocal()
-    try:
-        row = db.execute(
-            text("SELECT id FROM field_mappings WHERE id = :id"),
-            {"id": mapping_id},
-        ).fetchone()
-        assert row is None, "field_mapping should be cascade-deleted when connector is deleted"
-    finally:
-        db.close()
+    db_session.expire_all()
+    row = db_session.execute(
+        text("SELECT id FROM field_mappings WHERE id = :id"),
+        {"id": mapping_id},
+    ).fetchone()
+    assert row is None, "field_mapping should be cascade-deleted when connector is deleted"
 
     # Verify the connector is gone too
     get_resp = client.get(
@@ -274,5 +227,3 @@ def test_operator_cannot_access_connectors(client, operator_token):
     )
     assert resp.status_code == 403
     assert resp.json()["error"]["code"] == "AUTH_FORBIDDEN"
-
-

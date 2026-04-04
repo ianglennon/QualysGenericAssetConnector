@@ -1,14 +1,9 @@
-import os
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
-
-from app.db.base import Base
 from app.models.canvas import Canvas
 from app.models.canvas_endpoint import CanvasEndpoint
 from app.models.connector import Connector
@@ -24,15 +19,13 @@ from app.services.source_client import SourceFetchResult
 
 
 @pytest.fixture(autouse=True)
-def db_session(monkeypatch):
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+def db_session(engine, monkeypatch):
+    """Create a test session from the shared engine and monkeypatch SessionLocal."""
     TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(bind=engine)
     monkeypatch.setattr("app.services.ingestion_service.SessionLocal", TestSession)
     db = TestSession()
     yield db
     db.close()
-    Base.metadata.drop_all(bind=engine)
 
 
 def _seed_connector(db) -> Connector:

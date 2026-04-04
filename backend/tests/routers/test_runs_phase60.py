@@ -6,27 +6,9 @@ Requirements covered:
   - Gap 4: Schema serializes all 7 base_records_* fields correctly
   - Gap 5: base_records_submitted present in schema used by list endpoint
 """
-import os
 from datetime import datetime
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
-
-from app.db.base import Base
-
-
-@pytest.fixture(autouse=True)
-def db_session():
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-    TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(bind=engine)
-    db = TestSession()
-    yield db
-    db.close()
-    Base.metadata.drop_all(bind=engine)
 
 
 # ---------------------------------------------------------------------------
@@ -122,7 +104,7 @@ def test_run_detail_schema_base_fields_default_to_none():
 # RUN-03: base_records_submitted present in schema used by list views (Gap 5)
 # ---------------------------------------------------------------------------
 
-def test_list_runs_schema_includes_base_records_submitted():
+def test_list_runs_schema_includes_base_records_submitted(db_session):
     """RUN-03: RunHistoryResponse (used by both list and detail endpoints)
     must include base_records_submitted for frontend list views to display
     the correct primary stat.
@@ -132,7 +114,6 @@ def test_list_runs_schema_includes_base_records_submitted():
     """
     from app.models.run_history import RunHistory, RunStatus
     from app.models.connector import Connector
-    from app.schemas.run_history import RunHistoryResponse
     from app.routers.runs import _to_response
 
     connector = Connector(name="List Test", base_url="https://api.example.com", auth_method="bearer_token")
@@ -167,7 +148,7 @@ def test_list_runs_schema_includes_base_records_submitted():
     assert data["base_records_base_only"] == 3
 
 
-def test_list_runs_schema_includes_base_records_submitted(db_session):
+def test_list_runs_schema_maps_base_records_submitted_via_to_response(db_session):
     """RUN-03 (fixture version): Same as above but uses db_session fixture.
 
     Verifies _to_response maps base_records_submitted from model to response

@@ -1,25 +1,21 @@
 """Phase 59 gap tests for _run_canvas ingestion behavior.
 
-Gap 59-03-01 (D-10): Auto-migration failure path — when find_base_endpoint returns
+Gap 59-03-01 (D-10): Auto-migration failure path -- when find_base_endpoint returns
 is_valid=False, _run_canvas returns a fail_log with failure_stage="validation" and
 an error message containing "Canvas migration failed:".
 
-Gap 59-03-02: Base-anchored submission loop — when base_ce_id is set and
+Gap 59-03-02: Base-anchored submission loop -- when base_ce_id is set and
 fan_out_result.record_outputs is populated, assemble_qualys_record is called per
 TraversalRecord, payloads are submitted via submit_batch, and root_log.records_submitted
 reflects the correct count.
 """
 
-import os
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch, AsyncMock, call
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
-os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 from app.db.base import Base
 from app.models.canvas import Canvas
@@ -36,15 +32,9 @@ from app.services.source_client import SourceFetchResult
 
 
 @pytest.fixture(autouse=True)
-def db_session(monkeypatch):
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+def _patch_session(monkeypatch, engine):
     TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(bind=engine)
     monkeypatch.setattr("app.services.ingestion_service.SessionLocal", TestSession)
-    db = TestSession()
-    yield db
-    db.close()
-    Base.metadata.drop_all(bind=engine)
 
 
 def _seed_connector(db) -> Connector:
@@ -182,7 +172,7 @@ class TestAutoMigrationFailurePath:
         self, mock_fetch, mock_find_base, mock_execute_tree, db_session
     ):
         """When find_base_endpoint returns is_valid=True, _run_canvas does NOT
-        return a validation fail_log — execution continues normally.
+        return a validation fail_log -- execution continues normally.
 
         This is the positive case to confirm D-10 only fires on failure.
         """
@@ -217,7 +207,7 @@ class TestAutoMigrationFailurePath:
             SimpleNamespace(), mock_client, 0,
         )
 
-        # No validation fail_log — at least the root_log must be present
+        # No validation fail_log -- at least the root_log must be present
         validation_fails = [l for l in logs if l.failure_stage == "validation"]
         assert validation_fails == [], (
             f"Expected no validation fail_log when detection succeeds, "

@@ -1,9 +1,6 @@
 """Unit tests for cross-endpoint target field collision validation."""
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
 from app.models.connector import Connector
@@ -12,22 +9,6 @@ from app.models.canvas import Canvas
 from app.models.canvas_endpoint import CanvasEndpoint
 from app.models.field_mapping import FieldMapping
 from app.services.validation import validate_no_target_collisions
-
-
-@pytest.fixture
-def db_session():
-    """Create an in-memory SQLite database for testing."""
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    session = SessionLocal()
-    yield session
-    session.close()
-    engine.dispose()
 
 
 def _make_connector(db, connector_id="connector-1"):

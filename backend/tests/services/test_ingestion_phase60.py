@@ -11,15 +11,11 @@ Requirements covered:
   - Gap 9: _get_or_create_stats creates LevelStats per downstream endpoint
 """
 import asyncio
-import os
 from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
-os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 from app.db.base import Base
 
@@ -34,15 +30,9 @@ import app.models.user  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
-def db_session(monkeypatch):
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+def _patch_session(monkeypatch, engine):
     TestSession = sessionmaker(bind=engine)
-    Base.metadata.create_all(bind=engine)
     monkeypatch.setattr("app.services.ingestion_service.SessionLocal", TestSession)
-    db = TestSession()
-    yield db
-    db.close()
-    Base.metadata.drop_all(bind=engine)
 
 
 # ---------------------------------------------------------------------------

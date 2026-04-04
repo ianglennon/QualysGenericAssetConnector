@@ -93,7 +93,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(), nullable=False),
     )
 
-    # --- canvases (FK to connectors) ---
+    # --- canvases (FK to connectors; base_canvas_endpoint_id FK added after canvas_endpoints) ---
     op.create_table(
         "canvases",
         sa.Column("id", sa.String(), primary_key=True),
@@ -106,6 +106,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(), nullable=False),
         sa.Column("description", sa.String(), nullable=True),
         sa.Column("is_enabled", sa.Boolean(), nullable=False, server_default=sa.text("true")),
+        sa.Column("base_canvas_endpoint_id", sa.String(), nullable=True),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
     )
@@ -139,6 +140,16 @@ def upgrade() -> None:
         sa.Column("tree_order", sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
+    )
+
+    # --- deferred FK: canvases.base_canvas_endpoint_id → canvas_endpoints.id ---
+    op.create_foreign_key(
+        "fk_canvases_base_canvas_endpoint_id",
+        "canvases",
+        "canvas_endpoints",
+        ["base_canvas_endpoint_id"],
+        ["id"],
+        ondelete="SET NULL",
     )
 
     # --- field_mappings (FK to connector_endpoints, canvases) ---
@@ -274,6 +285,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Break circular FK before dropping tables
+    op.drop_constraint("fk_canvases_base_canvas_endpoint_id", "canvases", type_="foreignkey")
+
     # Drop in reverse dependency order
     op.drop_table("run_events")
     op.drop_table("endpoint_run_logs")

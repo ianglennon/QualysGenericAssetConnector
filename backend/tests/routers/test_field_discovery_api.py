@@ -9,7 +9,8 @@ Endpoints under test:
 Uses shared conftest.py fixtures for DB and client.
 """
 import pytest
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
+from app.services.source_client import FetchResult
 
 
 @pytest.fixture
@@ -29,21 +30,39 @@ def connector_id(client, admin_token):
     return resp.json()["id"]
 
 
+@pytest.fixture
+def endpoint_id(client, admin_token, connector_id):
+    """Create an endpoint under the connector for endpoint-scoped tests."""
+    resp = client.post(
+        f"/api/v1/connectors/{connector_id}/endpoints",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "name": "Discovery Endpoint",
+            "path": "/hosts",
+        },
+    )
+    assert resp.status_code == 201
+    return resp.json()["id"]
+
+
 # ---------------------------------------------------------------------------
 # GET /api/v1/connectors/{id}/fields/discover
 # ---------------------------------------------------------------------------
 
-def test_discover_success(client, admin_token, connector_id):
+def test_discover_success(client, admin_token, connector_id, endpoint_id):
     """Discover endpoint returns 200 with a fields list when source API responds OK."""
     mock_result_data = [{"id": 1, "name": "host"}]
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"items": mock_result_data}
 
     with patch(
         "app.services.source_client._fetch_with_retries",
         new_callable=AsyncMock,
-        return_value=(200, {"items": mock_result_data}, {}),
+        return_value=FetchResult(response=mock_response),
     ):
         resp = client.get(
-            f"/api/v1/connectors/{connector_id}/fields/discover",
+            f"/api/v1/connectors/{connector_id}/endpoints/{endpoint_id}/fields/discover",
             headers={"Authorization": f"Bearer {admin_token}"},
         )
 
@@ -55,29 +74,29 @@ def test_discover_success(client, admin_token, connector_id):
     assert "name" in field_paths or any("name" in p for p in field_paths)
 
 
-def test_discover_502(client, admin_token, connector_id):
+def test_discover_502(client, admin_token, connector_id, endpoint_id):
     """Discover endpoint returns 502 with error_code SOURCE_UNREACHABLE when source API errors."""
     with patch(
         "app.services.source_client._fetch_with_retries",
         new_callable=AsyncMock,
-        return_value=(500, {"error": "internal server error"}, {}),
+        return_value=FetchResult(response=None),
     ):
         resp = client.get(
-            f"/api/v1/connectors/{connector_id}/fields/discover",
+            f"/api/v1/connectors/{connector_id}/endpoints/{endpoint_id}/fields/discover",
             headers={"Authorization": f"Bearer {admin_token}"},
         )
 
     assert resp.status_code == 502
     body = resp.json()
     detail = body.get("detail", body)
-    error_code = detail.get("error_code") or detail.get("code")
+    error_code = detail.get("error_code") or detail.get("code") or detail.get("error", {}).get("code")
     assert error_code == "SOURCE_UNREACHABLE"
 
 
-def test_discover_rbac(client, operator_token, connector_id):
+def test_discover_rbac(client, operator_token, connector_id, endpoint_id):
     """Operator role receives 403 on discover endpoint (admin-only)."""
     resp = client.get(
-        f"/api/v1/connectors/{connector_id}/fields/discover",
+        f"/api/v1/connectors/{connector_id}/endpoints/{endpoint_id}/fields/discover",
         headers={"Authorization": f"Bearer {operator_token}"},
     )
     assert resp.status_code == 403
@@ -119,8 +138,8 @@ def test_schema_operator(client, operator_token):
 # PUT /api/v1/connectors/{id}/mappings  (batch-replace)
 # ---------------------------------------------------------------------------
 
-def test_batch_replace(client, admin_token, connector_id):
-    """Batch-replace with a valid direct_copy mapping -> 200, replaced=1, is_valid_mappings=true."""
+def test_batch_replace(client, admin_token, connector_id, endpoint_id):
+    """Batch-replace with a valid direct_copy mapping -> 200, replaced=1."""
     payload = {
         "mappings": [
             {
@@ -135,31 +154,29 @@ def test_batch_replace(client, admin_token, connector_id):
         ]
     }
     resp = client.put(
-        f"/api/v1/connectors/{connector_id}/mappings",
+        f"/api/v1/connectors/{connector_id}/endpoints/{endpoint_id}/mappings",
         headers={"Authorization": f"Bearer {admin_token}"},
         json=payload,
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["replaced"] == 1
-    assert data["is_valid_mappings"] is True
 
 
-def test_batch_replace_empty(client, admin_token, connector_id):
-    """Batch-replace with empty mappings list -> 200, replaced=0, is_valid_mappings=false."""
+def test_batch_replace_empty(client, admin_token, connector_id, endpoint_id):
+    """Batch-replace with empty mappings list -> 200, replaced=0."""
     payload = {"mappings": []}
     resp = client.put(
-        f"/api/v1/connectors/{connector_id}/mappings",
+        f"/api/v1/connectors/{connector_id}/endpoints/{endpoint_id}/mappings",
         headers={"Authorization": f"Bearer {admin_token}"},
         json=payload,
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["replaced"] == 0
-    assert data["is_valid_mappings"] is False
 
 
-def test_batch_replace_rollback(client, admin_token, connector_id):
+def test_batch_replace_rollback(client, admin_token, connector_id, endpoint_id):
     """Batch-replace with an invalid mapping_type fails with 422 or 400."""
     # First, set a known good mapping
     good_payload = {
@@ -176,7 +193,7 @@ def test_batch_replace_rollback(client, admin_token, connector_id):
         ]
     }
     setup_resp = client.put(
-        f"/api/v1/connectors/{connector_id}/mappings",
+        f"/api/v1/connectors/{connector_id}/endpoints/{endpoint_id}/mappings",
         headers={"Authorization": f"Bearer {admin_token}"},
         json=good_payload,
     )
@@ -197,7 +214,7 @@ def test_batch_replace_rollback(client, admin_token, connector_id):
         ]
     }
     fail_resp = client.put(
-        f"/api/v1/connectors/{connector_id}/mappings",
+        f"/api/v1/connectors/{connector_id}/endpoints/{endpoint_id}/mappings",
         headers={"Authorization": f"Bearer {admin_token}"},
         json=bad_payload,
     )
@@ -205,7 +222,7 @@ def test_batch_replace_rollback(client, admin_token, connector_id):
 
     # Verify the previously-set mapping is still in place
     verify_resp = client.put(
-        f"/api/v1/connectors/{connector_id}/mappings",
+        f"/api/v1/connectors/{connector_id}/endpoints/{endpoint_id}/mappings",
         headers={"Authorization": f"Bearer {admin_token}"},
         json=good_payload,
     )

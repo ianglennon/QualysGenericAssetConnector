@@ -2,7 +2,7 @@ import base64
 from unittest.mock import MagicMock, patch
 import httpx
 import pytest
-from app.services.connector_service import _build_headers, test_connector_connection
+from app.services.connector_service import _build_headers, test_connector_connection as check_connector_connection
 
 
 def _make_connector(
@@ -94,7 +94,7 @@ def test_test_connection_success():
         mock_client_cls.return_value.__enter__.return_value = mock_client_instance
         mock_client_cls.return_value.__exit__.return_value = False
 
-        result = test_connector_connection(connector)
+        result = check_connector_connection(connector)
 
     assert result["success"] is True
     assert result["status_code"] == 200
@@ -115,7 +115,7 @@ def test_test_connection_auth_failure():
         mock_client_cls.return_value.__enter__.return_value = mock_client_instance
         mock_client_cls.return_value.__exit__.return_value = False
 
-        result = test_connector_connection(connector)
+        result = check_connector_connection(connector)
 
     assert result["success"] is False
     assert result["error_type"] == "auth_failure"
@@ -134,7 +134,7 @@ def test_test_connection_403_auth_failure():
         mock_client_cls.return_value.__enter__.return_value = mock_client_instance
         mock_client_cls.return_value.__exit__.return_value = False
 
-        result = test_connector_connection(connector)
+        result = check_connector_connection(connector)
 
     assert result["success"] is False
     assert result["error_type"] == "auth_failure"
@@ -150,7 +150,7 @@ def test_test_connection_timeout():
         mock_client_cls.return_value.__enter__.return_value = mock_client_instance
         mock_client_cls.return_value.__exit__.return_value = False
 
-        result = test_connector_connection(connector)
+        result = check_connector_connection(connector)
 
     assert result["success"] is False
     assert result["error_type"] == "timeout"
@@ -167,7 +167,7 @@ def test_test_connection_network_error():
         mock_client_cls.return_value.__enter__.return_value = mock_client_instance
         mock_client_cls.return_value.__exit__.return_value = False
 
-        result = test_connector_connection(connector)
+        result = check_connector_connection(connector)
 
     assert result["success"] is False
     assert result["error_type"] == "network_error"

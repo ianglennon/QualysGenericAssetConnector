@@ -5,6 +5,8 @@ import pytest
 
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
+from app.models.canvas import Canvas
+from app.models.canvas_endpoint import CanvasEndpoint
 from app.models.field_mapping import FieldMapping
 from app.models.run_history import RunHistory, RunFailure, RunStatus, EndpointRunLog
 from app.models.user import UserRole
@@ -208,7 +210,7 @@ def test_trigger_run_as_admin_returns_202(client, admin_token, db_session):
     data = resp.json()
     assert data["status"] == "running"
     assert "run_id" in data
-    mock_run.assert_awaited_once_with(data["run_id"])
+    mock_run.assert_awaited_once_with(data["run_id"], None)
 
 
 def test_trigger_run_as_operator_returns_202(client, operator_token, db_session):
@@ -221,7 +223,7 @@ def test_trigger_run_as_operator_returns_202(client, operator_token, db_session)
 
     assert resp.status_code == 202
     data = resp.json()
-    mock_run.assert_awaited_once_with(data["run_id"])
+    mock_run.assert_awaited_once_with(data["run_id"], None)
 
 
 def test_trigger_run_conflict_when_running_exists(client, admin_token, db_session):
@@ -245,7 +247,7 @@ def test_trigger_run_conflict_when_running_exists(client, admin_token, db_sessio
 def test_trigger_run_updates_status_on_completion(client, admin_token, db_session):
     connector_id = _create_connector_with_valid_endpoint(db_session, name="Runs Trigger Status")
 
-    async def _complete_run(run_id: str):
+    async def _complete_run(run_id: str, canvas_id=None):
         db_session.expire_all()
         run = db_session.query(RunHistory).filter(RunHistory.id == run_id).first()
         run.status = RunStatus.success
@@ -347,6 +349,14 @@ def test_trigger_returns_400_invalid_endpoint_mappings(client, admin_token, db_s
     db_session.add(endpoint)
     db_session.flush()
 
+    # Create canvas + canvas_endpoint so canvas-aware validation evaluates it
+    canvas = Canvas(connector_id=connector.id, name="Test Canvas")
+    db_session.add(canvas)
+    db_session.flush()
+    ce = CanvasEndpoint(canvas_id=canvas.id, endpoint_id=endpoint.id, tree_order=0)
+    db_session.add(ce)
+    db_session.flush()
+
     # Only a non-identity mapping -- will fail CONN-02 check
     mapping = FieldMapping(
         endpoint_id=endpoint.id,
@@ -366,8 +376,7 @@ def test_trigger_returns_400_invalid_endpoint_mappings(client, admin_token, db_s
     assert error["code"] == "INVALID_ENDPOINT_MAPPINGS"
     invalid_endpoints = error["details"]["invalid_endpoints"]
     assert len(invalid_endpoints) == 1
-    assert invalid_endpoints[0]["id"] == endpoint.id
-    assert invalid_endpoints[0]["name"] == endpoint.name
+    assert invalid_endpoints[0]["canvas_id"] == canvas.id
 
 
 def test_trigger_returns_202_when_endpoints_valid(client, admin_token, db_session):

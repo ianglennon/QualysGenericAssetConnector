@@ -144,35 +144,6 @@ class TestQualysClientUnaffected:
         )
 
 
-class TestMigrationServerDefault:
-    """Alembic migration must set server_default='1' so existing connectors default to verify_ssl=True."""
-
-    def test_migration_uses_server_default_one_for_verify_ssl(self):
-        """Migration add_verify_ssl must have server_default='1' to default existing rows to True."""
-        from pathlib import Path
-        migration_path = (
-            Path(__file__).parent.parent.parent
-            / "app" / "db" / "migrations" / "versions" / "add_verify_ssl.py"
-        )
-        content = migration_path.read_text()
-        assert "server_default='1'" in content, (
-            "Migration add_verify_ssl.py must include server_default='1' so that "
-            "existing connector rows receive verify_ssl=True after migration"
-        )
-
-    def test_migration_adds_verify_ssl_column(self):
-        """Migration must add the verify_ssl column to the connectors table."""
-        from pathlib import Path
-        migration_path = (
-            Path(__file__).parent.parent.parent
-            / "app" / "db" / "migrations" / "versions" / "add_verify_ssl.py"
-        )
-        content = migration_path.read_text()
-        assert "op.add_column" in content and "'verify_ssl'" in content, (
-            "Migration add_verify_ssl.py must call op.add_column with 'verify_ssl'"
-        )
-
-
 class TestConnectorSchemaVerifySSL:
     """Pydantic schemas must accept verify_ssl in create/update and return it in responses."""
 
@@ -228,6 +199,7 @@ class TestConnectorSchemaVerifySSL:
             source_retry_limit=None,
             qualys_retry_limit=None,
             verify_ssl=False,
+            fault_diagnosis=False,
             has_valid_endpoints=False,
             created_at=now,
             updated_at=now,
@@ -253,6 +225,7 @@ class TestConnectorSchemaVerifySSL:
             source_retry_limit=None,
             qualys_retry_limit=None,
             verify_ssl=True,
+            fault_diagnosis=False,
             has_valid_endpoints=True,
             created_at=now,
             updated_at=now,

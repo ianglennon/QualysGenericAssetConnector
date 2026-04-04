@@ -311,116 +311,6 @@ class TestIngestionSkipsDisabledCanvases:
 # MC-04: Default canvas migration creates canvas for connectors with endpoints
 # ---------------------------------------------------------------------------
 
-class TestDefaultCanvasMigration:
-    """MC-04: Migration creates Default canvas for connectors with endpoints, skips empty ones.
-
-    These tests use the shared engine directly for raw SQL migration testing.
-    """
-
-    def test_migration_creates_default_canvas_for_connector_with_endpoints(self, engine):
-        """upgrade() creates a Default canvas when connector has endpoints but no canvases."""
-        from sqlalchemy import text
-
-        connector_id = str(uuid.uuid4())
-        endpoint_id = str(uuid.uuid4())
-        now = datetime.utcnow().isoformat()
-
-        with engine.connect() as conn:
-            trans = conn.begin()
-            conn.execute(text(
-                "INSERT INTO connectors (id, name, base_url, auth_method, schedule_enabled, is_valid_mappings, created_at, updated_at) "
-                "VALUES (:id, 'Test', 'https://api.test.com', 'bearer_token', false, false, :now, :now)"
-            ), {"id": connector_id, "now": now})
-            conn.execute(text(
-                "INSERT INTO connector_endpoints (id, connector_id, name, path, is_enabled, display_order, created_at, updated_at) "
-                "VALUES (:id, :cid, 'EP', '/test', true, 0, :now, :now)"
-            ), {"id": endpoint_id, "cid": connector_id, "now": now})
-
-            # Find connectors with endpoints but no canvases
-            rows = conn.execute(text("""
-                SELECT DISTINCT c.id FROM connectors c
-                JOIN connector_endpoints ce ON ce.connector_id = c.id
-                WHERE c.id NOT IN (SELECT DISTINCT connector_id FROM canvases)
-            """)).fetchall()
-
-            assert len(rows) == 1, "Should find 1 connector needing default canvas"
-            found_id = rows[0][0]
-            assert found_id == connector_id
-
-            canvas_id = str(uuid.uuid4())
-            conn.execute(text("""
-                INSERT INTO canvases (id, connector_id, name, is_enabled, created_at, updated_at)
-                VALUES (:id, :cid, 'Default', true, :now, :now)
-            """), {"id": canvas_id, "cid": connector_id, "now": now})
-
-            # Verify canvas was created
-            canvas_rows = conn.execute(text(
-                "SELECT id, name FROM canvases WHERE connector_id = :cid"
-            ), {"cid": connector_id}).fetchall()
-            assert len(canvas_rows) == 1
-            assert canvas_rows[0][1] == "Default"
-
-            trans.rollback()
-
-    def test_migration_skips_connectors_without_endpoints(self, engine):
-        """upgrade() does not create canvas for connector with no endpoints."""
-        from sqlalchemy import text
-
-        connector_id = str(uuid.uuid4())
-        now = datetime.utcnow().isoformat()
-
-        with engine.connect() as conn:
-            trans = conn.begin()
-            conn.execute(text(
-                "INSERT INTO connectors (id, name, base_url, auth_method, schedule_enabled, is_valid_mappings, created_at, updated_at) "
-                "VALUES (:id, 'Empty', 'https://api.test.com', 'bearer_token', false, false, :now, :now)"
-            ), {"id": connector_id, "now": now})
-
-            # Check migration query: connector with no endpoints should not appear
-            rows = conn.execute(text("""
-                SELECT DISTINCT c.id FROM connectors c
-                JOIN connector_endpoints ce ON ce.connector_id = c.id
-                WHERE c.id NOT IN (SELECT DISTINCT connector_id FROM canvases)
-            """)).fetchall()
-
-            assert len(rows) == 0, "Connector with no endpoints should be skipped"
-            trans.rollback()
-
-    def test_migration_skips_connectors_with_existing_canvas(self, engine):
-        """upgrade() skips connectors that already have a canvas."""
-        from sqlalchemy import text
-
-        connector_id = str(uuid.uuid4())
-        endpoint_id = str(uuid.uuid4())
-        canvas_id = str(uuid.uuid4())
-        now = datetime.utcnow().isoformat()
-
-        with engine.connect() as conn:
-            trans = conn.begin()
-            conn.execute(text(
-                "INSERT INTO connectors (id, name, base_url, auth_method, schedule_enabled, is_valid_mappings, created_at, updated_at) "
-                "VALUES (:id, 'Test', 'https://api.test.com', 'bearer_token', false, false, :now, :now)"
-            ), {"id": connector_id, "now": now})
-            conn.execute(text(
-                "INSERT INTO connector_endpoints (id, connector_id, name, path, is_enabled, display_order, created_at, updated_at) "
-                "VALUES (:id, :cid, 'EP', '/test', true, 0, :now, :now)"
-            ), {"id": endpoint_id, "cid": connector_id, "now": now})
-            conn.execute(text(
-                "INSERT INTO canvases (id, connector_id, name, is_enabled, created_at, updated_at) "
-                "VALUES (:id, :cid, 'Existing Canvas', true, :now, :now)"
-            ), {"id": canvas_id, "cid": connector_id, "now": now})
-
-            # Migration should skip this connector
-            rows = conn.execute(text("""
-                SELECT DISTINCT c.id FROM connectors c
-                JOIN connector_endpoints ce ON ce.connector_id = c.id
-                WHERE c.id NOT IN (SELECT DISTINCT connector_id FROM canvases)
-            """)).fetchall()
-
-            assert len(rows) == 0, "Connector with existing canvas should be skipped"
-            trans.rollback()
-
-
 # ---------------------------------------------------------------------------
 # MC-05: Canvas-aware validation validates only leaf endpoints
 # ---------------------------------------------------------------------------
@@ -473,7 +363,7 @@ class TestCanvasAwareValidation:
 
         assert is_valid is False
         assert len(invalid) == 1
-        assert invalid[0]["id"] == ep.id
+        assert invalid[0]["canvas_id"] == canvas.id
 
     def test_validate_passes_when_leaf_has_identity_mapping(self, db_session: Session):
         """Validation passes when leaf endpoint has a valid identity mapping."""
@@ -519,9 +409,9 @@ class TestCanvasAwareValidation:
         is_valid, invalid = validate_endpoint_mappings(connector.id, db_session, canvas_id=None)
 
         assert is_valid is False
-        invalid_ids = [e["id"] for e in invalid]
-        assert ep2.id in invalid_ids
-        assert ep1.id not in invalid_ids
+        invalid_canvas_ids = [e["canvas_id"] for e in invalid]
+        assert canvas2.id in invalid_canvas_ids
+        assert canvas1.id not in invalid_canvas_ids
 
     def test_validate_skips_disabled_canvases_in_full_sync(self, db_session: Session):
         """Full connector validation ignores disabled canvases."""

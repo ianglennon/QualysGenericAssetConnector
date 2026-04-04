@@ -11,6 +11,8 @@ import pytest
 from app.core.security import get_current_user
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
+from app.models.canvas import Canvas
+from app.models.canvas_endpoint import CanvasEndpoint
 from app.models.user import UserRole
 
 
@@ -147,6 +149,13 @@ def test_batch_replace_endpoint_mappings_returns_actual_is_valid(client, db_sess
     """
     conn_id = _seed_connector(db_session)
     ep_id = _seed_endpoint(db_session, conn_id)
+    # Canvas-aware validation requires a canvas + canvas_endpoint
+    canvas = Canvas(id=str(uuid.uuid4()), connector_id=conn_id, name="Test Canvas")
+    db_session.add(canvas)
+    db_session.flush()
+    ce = CanvasEndpoint(id=str(uuid.uuid4()), canvas_id=canvas.id, endpoint_id=ep_id, tree_order=0)
+    db_session.add(ce)
+    db_session.flush()
 
     # Step 1: Empty mappings -> endpoint has no identity attribute -> invalid
     resp_empty = client.put(
@@ -194,6 +203,13 @@ def test_batch_replace_persists_is_valid_mappings_to_connector(client, db_sessio
     """
     conn_id = _seed_connector(db_session)
     ep_id = _seed_endpoint(db_session, conn_id)
+    # Canvas-aware validation requires a canvas + canvas_endpoint
+    canvas = Canvas(id=str(uuid.uuid4()), connector_id=conn_id, name="Test Canvas")
+    db_session.add(canvas)
+    db_session.flush()
+    ce = CanvasEndpoint(id=str(uuid.uuid4()), canvas_id=canvas.id, endpoint_id=ep_id, tree_order=0)
+    db_session.add(ce)
+    db_session.flush()
 
     # Step 1: identity mapping -> valid
     resp = client.put(

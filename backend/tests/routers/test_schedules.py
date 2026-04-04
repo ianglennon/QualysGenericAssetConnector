@@ -2,10 +2,20 @@
 
 Uses shared conftest.py fixtures for DB and client.
 """
+import os
 import pytest
 
 from app.models.connector import Connector, AuthMethod
-from app.scheduler.scheduler_service import get_scheduler
+from app.scheduler.scheduler_service import get_scheduler, init_scheduler, shutdown_scheduler
+
+
+@pytest.fixture(autouse=True)
+def _init_scheduler():
+    """Initialize scheduler for schedule tests, shut down after."""
+    db_url = os.environ.get("TEST_DATABASE_URL", "postgresql://qualys:qualys@db:5432/qualys_test")
+    init_scheduler(db_url)
+    yield
+    shutdown_scheduler()
 
 
 @pytest.fixture
@@ -16,7 +26,6 @@ def test_connector(db_session):
         base_url="https://api.example.com",
         auth_method=AuthMethod.bearer_token.value,
         encrypted_token="test_encrypted_token",
-        pagination_config=[],
     )
     db_session.add(connector)
     db_session.flush()

@@ -20,7 +20,12 @@ class Canvas(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     base_canvas_endpoint_id: Mapped[str | None] = mapped_column(
         String,
-        ForeignKey("canvas_endpoints.id", ondelete="SET NULL"),
+        ForeignKey(
+            "canvas_endpoints.id",
+            ondelete="SET NULL",
+            name="fk_canvases_base_canvas_endpoint_id",
+            use_alter=True,
+        ),
         nullable=True,
     )
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

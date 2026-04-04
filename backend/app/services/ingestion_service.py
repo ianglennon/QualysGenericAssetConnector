@@ -8,6 +8,7 @@ import httpx
 logger = logging.getLogger(__name__)
 from pydantic import TypeAdapter
 
+from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
 from app.models.canvas import Canvas
 from app.models.canvas_endpoint import CanvasEndpoint
@@ -37,8 +38,10 @@ from app.schemas.exclusion_rule import ExclusionRule
 QUALYS_BATCH_SIZE = 100
 
 
-def create_run(connector_id: str) -> RunHistory:
-    db = SessionLocal()
+def create_run(connector_id: str, db: Session | None = None) -> RunHistory:
+    owns_session = db is None
+    if owns_session:
+        db = SessionLocal()
     try:
         run = RunHistory(
             connector_id=connector_id,
@@ -46,11 +49,15 @@ def create_run(connector_id: str) -> RunHistory:
             started_at=datetime.utcnow(),
         )
         db.add(run)
-        db.commit()
+        if owns_session:
+            db.commit()
+        else:
+            db.flush()
         db.refresh(run)
         return run
     finally:
-        db.close()
+        if owns_session:
+            db.close()
 
 
 def _chunk_records(records: list[dict], batch_size: int) -> list[list[dict]]:

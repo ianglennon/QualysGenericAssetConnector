@@ -7,6 +7,8 @@ import pytest
 
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
+from app.models.canvas import Canvas
+from app.models.canvas_endpoint import CanvasEndpoint
 from app.models.field_mapping import FieldMapping
 from app.services.validation import validate_endpoint_mappings, IDENTITY_ATTRIBUTES
 
@@ -72,9 +74,16 @@ def test_enabled_endpoint_with_identity_mapping_returns_valid(db_session):
 
 
 def test_enabled_endpoint_missing_identity_mapping_returns_invalid(db_session):
-    """Connector with enabled endpoint that has no identity mapping returns (False, [{id, name}])."""
+    """Connector with canvas endpoint that has no identity mapping returns (False, [...])."""
     _make_connector(db_session, "conn-invalid")
     endpoint = _make_endpoint(db_session, "conn-invalid", "ep-invalid", name="Bad Endpoint", is_enabled=True)
+    # Create a canvas + canvas_endpoint so the canvas-aware validator evaluates it
+    canvas = Canvas(id="canvas-invalid", connector_id="conn-invalid", name="Test Canvas")
+    db_session.add(canvas)
+    db_session.flush()
+    ce = CanvasEndpoint(id="ce-invalid", canvas_id="canvas-invalid", endpoint_id="ep-invalid", tree_order=0)
+    db_session.add(ce)
+    db_session.flush()
     # Map a non-identity field only
     _make_mapping(db_session, "ep-invalid", "map-bad", target_field="operatingSystem")
 
@@ -82,8 +91,7 @@ def test_enabled_endpoint_missing_identity_mapping_returns_invalid(db_session):
 
     assert is_valid is False
     assert len(invalid) == 1
-    assert invalid[0]["id"] == endpoint.id
-    assert invalid[0]["name"] == "Bad Endpoint"
+    assert invalid[0]["canvas_id"] == "canvas-invalid"
 
 
 def test_disabled_endpoint_missing_identity_mapping_is_ignored(db_session):

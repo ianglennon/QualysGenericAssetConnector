@@ -174,14 +174,29 @@ def test_delete_connector_cascades_to_field_mappings(client, admin_token, db_ses
     assert create_resp.status_code == 201
     connector_id = create_resp.json()["id"]
 
-    # Insert a field_mapping row directly via DB
-    mapping_id = str(uuid.uuid4())
-    db_session.execute(
-        text(
-            "INSERT INTO field_mappings (id, connector_id, created_at) VALUES (:id, :connector_id, :created_at)"
-        ),
-        {"id": mapping_id, "connector_id": connector_id, "created_at": datetime.utcnow()},
+    # Create an endpoint first (field_mappings FK to endpoint, not connector)
+    from app.models.connector_endpoint import ConnectorEndpoint
+    from app.models.field_mapping import FieldMapping
+    ep_id = str(uuid.uuid4())
+    ep = ConnectorEndpoint(
+        id=ep_id,
+        connector_id=connector_id,
+        name="Cascade EP",
+        path="/cascade",
+        is_enabled=True,
     )
+    db_session.add(ep)
+    db_session.flush()
+
+    mapping_id = str(uuid.uuid4())
+    fm = FieldMapping(
+        id=mapping_id,
+        endpoint_id=ep_id,
+        target_field="hostName",
+        mapping_type="direct_copy",
+        source_field="name",
+    )
+    db_session.add(fm)
     db_session.flush()
 
     # Verify it's there

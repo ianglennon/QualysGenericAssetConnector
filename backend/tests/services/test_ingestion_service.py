@@ -20,12 +20,20 @@ from app.services.source_client import SourceFetchResult
 
 @pytest.fixture(autouse=True)
 def db_session(engine, monkeypatch):
-    """Create a test session from the shared engine and monkeypatch SessionLocal."""
-    TestSession = sessionmaker(bind=engine)
+    """Create a test session from the shared engine and monkeypatch SessionLocal.
+
+    Uses a connection-level transaction that is rolled back after each test
+    to prevent data leakage between tests.
+    """
+    connection = engine.connect()
+    transaction = connection.begin()
+    TestSession = sessionmaker(bind=connection)
     monkeypatch.setattr("app.services.ingestion_service.SessionLocal", TestSession)
     db = TestSession()
     yield db
     db.close()
+    transaction.rollback()
+    connection.close()
 
 
 def _seed_connector(db) -> Connector:
@@ -57,7 +65,7 @@ def _seed_endpoint(db, connector_id: str, path: str = "/assets", display_order: 
 def _seed_mapping(db, endpoint_id: str) -> FieldMapping:
     mapping = FieldMapping(
         endpoint_id=endpoint_id,
-        target_field="name",
+        target_field="hostName",
         mapping_type="direct_copy",
         source_field="hostname",
     )
@@ -529,6 +537,10 @@ async def test_qualys_submit_failure_remaining_endpoints_continue(db_session):
 @pytest.mark.asyncio
 async def test_preflight_validation_fails_run_before_endpoint_loop(db_session):
     """Pre-flight validation (missing credentials) fails entire run before any endpoint executes."""
+    # Ensure no prior QualysConfig leaks from other tests
+    db_session.query(QualysConfig).delete()
+    db_session.commit()
+
     connector = _seed_connector(db_session)
     # Create config with NO credentials (no password)
     config = QualysConfig(

@@ -17,11 +17,11 @@ def test_login_invalid_credentials(client):
 
 def test_login_success_and_refresh(client, db_session):
     # Create a user first (use auth_service directly)
-    create_user(db_session, "test@example.com", "SecurePass1!", UserRole.admin)
+    create_user(db_session, "test@example.com", "SecurePass12!", UserRole.admin)
     db_session.flush()
 
     # Login
-    resp = client.post("/api/v1/auth/login", json={"email": "test@example.com", "password": "SecurePass1!"})
+    resp = client.post("/api/v1/auth/login", json={"email": "test@example.com", "password": "SecurePass12!"})
     assert resp.status_code == 200
     tokens = resp.json()
     assert "access_token" in tokens
@@ -36,11 +36,11 @@ def test_login_success_and_refresh(client, db_session):
 def test_operator_cannot_access_admin_only_endpoint(client, db_session):
     """Verify AUTH-05: Operator gets 403 on admin-only endpoint."""
     # Create operator user
-    create_user(db_session, "operator@test.com", "OperatorPass1!", UserRole.operator)
+    create_user(db_session, "operator@test.com", "OperatorPass12!", UserRole.operator)
     db_session.flush()
 
     # Login as operator
-    op_resp = client.post("/api/v1/auth/login", json={"email": "operator@test.com", "password": "OperatorPass1!"})
+    op_resp = client.post("/api/v1/auth/login", json={"email": "operator@test.com", "password": "OperatorPass12!"})
     assert op_resp.status_code == 200
     op_token = op_resp.json()["access_token"]
 
@@ -52,10 +52,10 @@ def test_operator_cannot_access_admin_only_endpoint(client, db_session):
 
 def test_admin_can_access_admin_only_endpoint(client, db_session):
     """Verify AUTH-03: Admin can access admin-only endpoints."""
-    create_user(db_session, "admin2@test.com", "AdminPass2!", UserRole.admin)
+    create_user(db_session, "admin2@test.com", "AdminPass22!", UserRole.admin)
     db_session.flush()
 
-    admin_resp = client.post("/api/v1/auth/login", json={"email": "admin2@test.com", "password": "AdminPass2!"})
+    admin_resp = client.post("/api/v1/auth/login", json={"email": "admin2@test.com", "password": "AdminPass22!"})
     admin_token = admin_resp.json()["access_token"]
 
     resp = client.get("/api/v1/auth/admin-only", headers={"Authorization": f"Bearer {admin_token}"})

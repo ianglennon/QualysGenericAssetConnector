@@ -25,7 +25,7 @@ def test_connector_endpoint_columns():
     }
     assert expected.issubset(columns.keys())
     assert isinstance(columns["pagination_config"].type, sa.JSON)
-    assert isinstance(columns["is_enabled"].type, sa.Integer)
+    assert isinstance(columns["is_enabled"].type, sa.Boolean)
 
 
 def test_endpoint_run_log_columns():

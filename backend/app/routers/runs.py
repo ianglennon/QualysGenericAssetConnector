@@ -465,6 +465,6 @@ def trigger_connector_run(
             ),
         )
 
-    run = create_run(connector_id)
+    run = create_run(connector_id, db=db)
     background_tasks.add_task(run_ingestion, run.id, canvas_id)
     return {"run_id": run.id, "status": RunStatus.running.value}

@@ -42,6 +42,7 @@ def _setup_connector_with_two_endpoints_in_canvas(db):
         auth_method="bearer_token",
     )
     db.add(connector)
+    db.flush()
 
     ep1 = ConnectorEndpoint(
         id=ep1_id,

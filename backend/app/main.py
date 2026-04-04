@@ -9,15 +9,19 @@ from sqlalchemy import inspect as sa_inspect
 from alembic import command
 from alembic.config import Config
 from fastapi_pagination import add_pagination
+import asyncio
 import logging
 import sys
 import time
 
+import procrastinate
 from app.core.settings import get_settings
 from app.core.errors import http_exception_handler, validation_exception_handler
 from app.db.session import SessionLocal
+from app.worker import procrastinate_app
 
 _app_ready: bool = False
+_worker_task: asyncio.Task | None = None
 
 logger = logging.getLogger(__name__)
 
@@ -98,8 +102,54 @@ def verify_db_integrity() -> None:
 
 
 @asynccontextmanager
+async def _procrastinate_lifecycle(settings):
+    """Bootstrap Procrastinate schema and run async worker.
+
+    Extracted as a helper so tests can patch this single function
+    instead of mocking multiple Procrastinate internals.
+    """
+    global _worker_task
+
+    # D-09: Create procrastinate schema namespace FIRST
+    from sqlalchemy import text as sa_text
+    db2 = SessionLocal()
+    try:
+        db2.execute(sa_text("CREATE SCHEMA IF NOT EXISTS procrastinate"))
+        db2.commit()
+    finally:
+        db2.close()
+
+    # D-08: Apply Procrastinate schema (sync, before open_async)
+    # Uses a temporary SyncPsycopgConnector because apply_schema() is sync-only.
+    sync_connector = procrastinate.SyncPsycopgConnector(
+        conninfo=settings.database_url,
+        kwargs={"options": "-c search_path=procrastinate,public"},
+    )
+    sync_app = procrastinate.App(connector=sync_connector)
+    with sync_app.open():
+        sync_app.admin.apply_schema()
+
+    # D-01: Open async connection pool and start worker
+    async with procrastinate_app.open_async():
+        _worker_task = asyncio.create_task(
+            procrastinate_app.run_worker_async(
+                install_signal_handlers=False,
+            )
+        )
+        yield
+
+        # D-02: Graceful shutdown
+        _worker_task.cancel()
+        try:
+            await asyncio.wait_for(_worker_task, timeout=300)
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            pass
+        _worker_task = None
+
+
+@asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _app_ready
+    global _app_ready, _worker_task
     settings = get_settings()
     run_migrations()
     verify_db_integrity()
@@ -111,16 +161,11 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
 
-    # Initialize scheduler after migrations
-    from app.scheduler.scheduler_service import init_scheduler, shutdown_scheduler
-    init_scheduler(settings.database_url)
-
-    _app_ready = True
-    yield
-
-    _app_ready = False
-    # Shutdown scheduler on application shutdown
-    shutdown_scheduler()
+    # Procrastinate lifecycle: schema bootstrap + worker start/stop
+    async with _procrastinate_lifecycle(settings):
+        _app_ready = True
+        yield
+        _app_ready = False
 
 
 def create_app() -> FastAPI:
@@ -159,9 +204,14 @@ def create_app() -> FastAPI:
             db_ok = True
         except Exception:
             pass
+        worker_ok = _worker_task is not None and not _worker_task.done()
         return JSONResponse(
             status_code=200,
-            content={"status": "ok", "db": "ok" if db_ok else "error"},
+            content={
+                "status": "ok",
+                "db": "ok" if db_ok else "error",
+                "worker": "ok" if worker_ok else "error",
+            },
         )
 
     add_pagination(app)

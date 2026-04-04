@@ -10,7 +10,6 @@ def test_lifespan_starts_procrastinate_worker():
     assert _worker_task is not None
 
 
-@pytest.mark.xfail(reason="Wave 0 stub — implementation in Task 2")
 def test_health_endpoint_reports_worker_status(client):
     """GET /health returns worker field."""
     response = client.get("/health")

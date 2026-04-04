@@ -6,6 +6,7 @@ Uses shared conftest.py client fixture for standard health checks.
 Tests that need to manipulate _app_ready use their own TestClient.
 """
 import pytest
+from contextlib import asynccontextmanager
 from unittest.mock import patch
 import app.main as main_module
 from app.main import app
@@ -48,12 +49,15 @@ def test_app_ready_false_after_shutdown():
 
     This test requires its own TestClient to observe lifespan exit behavior.
     """
+    @asynccontextmanager
+    async def _noop_procrastinate_lifecycle(settings):
+        yield
+
     with (
         patch("app.main.run_migrations"),
         patch("app.main.verify_db_integrity"),
         patch("app.services.bootstrap_service.seed_admin_if_empty"),
-        patch("app.scheduler.scheduler_service.init_scheduler"),
-        patch("app.scheduler.scheduler_service.shutdown_scheduler"),
+        patch("app.main._procrastinate_lifecycle", _noop_procrastinate_lifecycle),
     ):
         with TestClient(app, raise_server_exceptions=False) as tc:
             # Inside context: _app_ready should be True

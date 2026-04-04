@@ -6,6 +6,7 @@ Per D-03: Separate test database (qualys_test) on the same PostgreSQL container.
 Per D-04: Base.metadata.create_all() builds schema directly from models.
 """
 import os
+from contextlib import asynccontextmanager
 import pytest
 from unittest.mock import patch
 from sqlalchemy import create_engine, event
@@ -83,12 +84,15 @@ def client(db_session):
 
     fastapi_app.dependency_overrides[get_db] = override_get_db
 
+    @asynccontextmanager
+    async def _noop_procrastinate_lifecycle(settings):
+        yield
+
     with (
         patch("app.main.run_migrations"),
         patch("app.main.verify_db_integrity"),
         patch("app.services.bootstrap_service.seed_admin_if_empty"),
-        patch("app.scheduler.scheduler_service.init_scheduler"),
-        patch("app.scheduler.scheduler_service.shutdown_scheduler"),
+        patch("app.main._procrastinate_lifecycle", _noop_procrastinate_lifecycle),
     ):
         with TestClient(fastapi_app, raise_server_exceptions=False) as c:
             yield c

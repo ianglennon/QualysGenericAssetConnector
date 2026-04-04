@@ -77,7 +77,7 @@ def set_schedule(
 def get_schedule(
     connector_id: str,
     db: Session = Depends(get_db),
-    _user=Depends(require_role("operator")),  # Admin or operator can view
+    _user=Depends(require_role("admin", "operator")),  # Admin or operator can view
 ):
     """Get connector schedule status.
 

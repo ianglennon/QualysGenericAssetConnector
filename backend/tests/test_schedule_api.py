@@ -1,46 +1,9 @@
-"""Schedule API integration tests (SM-01, SM-02, SM-04)."""
-import os
-import sys
+"""Schedule API integration tests (SM-01, SM-02, SM-04).
+
+Uses shared conftest fixtures (db_session, client, admin_token) which handle
+PostgreSQL test database and procrastinate lifecycle mocking.
+"""
 import pytest
-from fastapi.testclient import TestClient
-
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_schedule_api.db")
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from app.main import create_app
-from app.db.session import SessionLocal
-from app.services.auth_service import create_user
-from app.models.user import UserRole
-
-
-@pytest.fixture(scope="module")
-def client():
-    db_path = os.path.abspath("test_schedule_api.db")
-    if os.path.exists(db_path):
-        os.remove(db_path)
-    app = create_app()
-    with TestClient(app) as c:
-        yield c
-    if os.path.exists(db_path):
-        os.remove(db_path)
-
-
-@pytest.fixture(scope="module")
-def admin_token(client):
-    db = SessionLocal()
-    create_user(db, "schedapi_admin@test.com", "AdminPass12!", UserRole.admin)
-    db.close()
-    resp = client.post("/api/v1/auth/login", json={"email": "schedapi_admin@test.com", "password": "AdminPass12!"})
-    return resp.json()["access_token"]
-
-
-@pytest.fixture(scope="module")
-def db_session():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def _create_connector(client, token):
@@ -99,7 +62,6 @@ def test_set_schedule(client, admin_token):
 def test_schedule_response_fields(client, admin_token):
     """SM-04: Response includes interval_type, interval_value, schedule_enabled, next_run_at."""
     cid = _create_connector(client, admin_token)
-    # Set a schedule first
     client.put(
         f"/api/v1/connectors/{cid}/schedule",
         json={"interval": {"interval_type": "days", "interval_value": 1}},
@@ -115,14 +77,12 @@ def test_schedule_response_fields(client, admin_token):
     assert "interval_value" in data
     assert "schedule_enabled" in data
     assert "next_run_at" in data
-    # Must NOT have cron_schedule
     assert "cron_schedule" not in data
 
 
 def test_clear_schedule(client, admin_token):
     """SM-02: Setting interval=None clears the schedule."""
     cid = _create_connector(client, admin_token)
-    # Set then clear
     client.put(
         f"/api/v1/connectors/{cid}/schedule",
         json={"interval": {"interval_type": "hours", "interval_value": 1}},
@@ -149,7 +109,6 @@ def test_pause_resume_schedule(client, admin_token):
         json={"interval": {"interval_type": "hours", "interval_value": 2}},
         headers={"Authorization": f"Bearer {admin_token}"},
     )
-    # Pause
     resp = client.post(
         f"/api/v1/connectors/{cid}/schedule/pause",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -158,7 +117,6 @@ def test_pause_resume_schedule(client, admin_token):
     assert resp.json()["schedule_enabled"] is False
     assert resp.json()["next_run_at"] is None
 
-    # Resume
     resp = client.post(
         f"/api/v1/connectors/{cid}/schedule/resume",
         headers={"Authorization": f"Bearer {admin_token}"},

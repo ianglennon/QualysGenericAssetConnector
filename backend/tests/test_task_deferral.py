@@ -2,7 +2,6 @@
 import pytest
 
 
-@pytest.mark.xfail(reason="Wave 0 stub — implementation in Task 1")
 def test_run_connector_sync_task_is_registered():
     """run_connector_sync task is importable and registered with procrastinate."""
     from app.worker.tasks import run_connector_sync

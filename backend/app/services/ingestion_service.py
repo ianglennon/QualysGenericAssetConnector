@@ -695,6 +695,16 @@ async def run_ingestion(run_id: str, canvas_id: str | None = None) -> None:
         if not run:
             return
 
+        # D-06: Reset status for retry attempts — same run_id is reused across retries
+        run.status = RunStatus.running
+        run.started_at = datetime.utcnow()
+        run.finished_at = None
+        run.records_fetched = 0
+        run.records_submitted = 0
+        run.records_failed = 0
+        run.error_message = None
+        db.commit()
+
         logger.debug("Starting ingestion run_id=%s connector_id=%s", run_id, run.connector_id)
         connector = db.query(Connector).filter(Connector.id == run.connector_id).first()
         if not connector:

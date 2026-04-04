@@ -82,7 +82,6 @@ def test_connector_no_cron_schedule(client, admin_token, db_session):
 
 def test_set_schedule(client, admin_token):
     """SM-02: PUT /schedule writes interval columns directly."""
-    pytest.skip("Stub -- schedule API endpoints implemented in Plan 02")
     cid = _create_connector(client, admin_token)
     resp = client.put(
         f"/api/v1/connectors/{cid}/schedule",
@@ -99,7 +98,6 @@ def test_set_schedule(client, admin_token):
 
 def test_schedule_response_fields(client, admin_token):
     """SM-04: Response includes interval_type, interval_value, schedule_enabled, next_run_at."""
-    pytest.skip("Stub -- schedule API endpoints implemented in Plan 02")
     cid = _create_connector(client, admin_token)
     # Set a schedule first
     client.put(
@@ -123,7 +121,6 @@ def test_schedule_response_fields(client, admin_token):
 
 def test_clear_schedule(client, admin_token):
     """SM-02: Setting interval=None clears the schedule."""
-    pytest.skip("Stub -- schedule API endpoints implemented in Plan 02")
     cid = _create_connector(client, admin_token)
     # Set then clear
     client.put(
@@ -146,7 +143,6 @@ def test_clear_schedule(client, admin_token):
 
 def test_pause_resume_schedule(client, admin_token):
     """SM-02: Pause clears next_run_at, resume recomputes it (D-04)."""
-    pytest.skip("Stub -- schedule API endpoints implemented in Plan 02")
     cid = _create_connector(client, admin_token)
     client.put(
         f"/api/v1/connectors/{cid}/schedule",
@@ -174,7 +170,6 @@ def test_pause_resume_schedule(client, admin_token):
 
 def test_delete_schedule(client, admin_token):
     """SM-02: DELETE clears all schedule columns."""
-    pytest.skip("Stub -- schedule API endpoints implemented in Plan 02")
     cid = _create_connector(client, admin_token)
     client.put(
         f"/api/v1/connectors/{cid}/schedule",
@@ -190,7 +185,6 @@ def test_delete_schedule(client, admin_token):
 
 def test_connector_response_includes_schedule_fields(client, admin_token):
     """SM-04 / D-11: ConnectorResponse includes inline schedule fields."""
-    pytest.skip("Stub -- ConnectorResponse updated in Plan 02")
     cid = _create_connector(client, admin_token)
     resp = client.get(
         f"/api/v1/connectors/{cid}",

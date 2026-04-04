@@ -42,8 +42,9 @@ class ScheduleUpdate(BaseModel):
 
 
 class ScheduleResponse(BaseModel):
-    """Schedule status response."""
-    cron_schedule: str | None
-    schedule_enabled: bool
-    execution_timeout: int | None
-    next_run_time: str | None  # ISO 8601 timestamp
+    """Schedule status response (D-10)."""
+    interval_type: str | None = None
+    interval_value: int | None = None
+    schedule_enabled: bool = False
+    execution_timeout: int | None = None
+    next_run_at: str | None = None  # ISO 8601 timestamp

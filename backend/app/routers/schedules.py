@@ -1,11 +1,16 @@
-"""Schedule CRUD endpoints for connector scheduling."""
+"""Schedule CRUD endpoints for connector scheduling.
+
+Interval-based scheduling (Phase 64): writes interval_type/interval_value
+directly to Connector columns. No cron conversion needed.
+"""
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from croniter import croniter
 
 from app.db.session import get_db
 from app.models.connector import Connector
-from app.schemas.schedule import IntervalSchedule, IntervalType, ScheduleUpdate, ScheduleResponse
+from app.schemas.schedule import ScheduleUpdate, ScheduleResponse
 from app.core.security import require_role
 from app.core.errors import make_error
 
@@ -13,26 +18,34 @@ from app.core.errors import make_error
 router = APIRouter(prefix="/connectors", tags=["schedules"])
 
 
-def interval_to_cron(interval: IntervalSchedule) -> str:
-    """Convert interval picker selection to cron expression.
+def compute_next_run_at(
+    interval_type: str,
+    interval_value: int,
+    from_time: datetime | None = None,
+) -> datetime:
+    """Compute next_run_at = from_time + interval (D-04)."""
+    base = from_time or datetime.utcnow()
+    deltas = {
+        "minutes": timedelta(minutes=interval_value),
+        "hours": timedelta(hours=interval_value),
+        "days": timedelta(days=interval_value),
+        "weeks": timedelta(weeks=interval_value),
+    }
+    delta = deltas.get(interval_type)
+    if not delta:
+        raise ValueError(f"Unknown interval_type: {interval_type}")
+    return base + delta
 
-    Args:
-        interval: IntervalSchedule with type and value
 
-    Returns:
-        Cron expression string (e.g., "0 */6 * * *" for every 6 hours)
-    """
-    if interval.interval_type == IntervalType.minutes:
-        return f"*/{interval.interval_value} * * * *"
-    elif interval.interval_type == IntervalType.hours:
-        return f"0 */{interval.interval_value} * * *"
-    elif interval.interval_type == IntervalType.days:
-        return f"0 0 */{interval.interval_value} * *"
-    elif interval.interval_type == IntervalType.weeks:
-        # Every N weeks = every N*7 days
-        return f"0 0 */{interval.interval_value * 7} * *"
-    else:
-        raise ValueError(f"Invalid interval type: {interval.interval_type}")
+def _schedule_response(connector: Connector) -> ScheduleResponse:
+    """Build ScheduleResponse from Connector columns (DRY helper)."""
+    return ScheduleResponse(
+        interval_type=connector.interval_type,
+        interval_value=connector.interval_value,
+        schedule_enabled=connector.schedule_enabled,
+        execution_timeout=connector.execution_timeout,
+        next_run_at=connector.next_run_at.isoformat() if connector.next_run_at else None,
+    )
 
 
 @router.put("/{connector_id}/schedule", response_model=ScheduleResponse)
@@ -56,40 +69,28 @@ def set_schedule(
 
     # Clear schedule if interval is None
     if payload.interval is None:
-        connector.cron_schedule = None
+        connector.interval_type = None
+        connector.interval_value = None
         connector.schedule_enabled = False
+        connector.next_run_at = None
         db.commit()
         db.refresh(connector)
-        return ScheduleResponse(
-            cron_schedule=None,
-            schedule_enabled=False,
-            execution_timeout=connector.execution_timeout,
-            next_run_time=None,
-        )
+        return _schedule_response(connector)
 
-    # Convert interval to cron and validate
-    cron = interval_to_cron(payload.interval)
-    if not croniter.is_valid(cron):
-        raise HTTPException(
-            status_code=400,
-            detail=make_error("INVALID_CRON", "Generated cron expression is invalid", {"cron": cron}),
-        )
-
-    # Update database
-    connector.cron_schedule = cron
+    # Write interval columns directly (no cron conversion)
+    connector.interval_type = payload.interval.interval_type.value
+    connector.interval_value = payload.interval.interval_value
     connector.schedule_enabled = True
+    connector.next_run_at = compute_next_run_at(
+        connector.interval_type, connector.interval_value
+    )
+
     if payload.execution_timeout is not None:
         connector.execution_timeout = payload.execution_timeout
 
     db.commit()
     db.refresh(connector)
-
-    return ScheduleResponse(
-        cron_schedule=connector.cron_schedule,
-        schedule_enabled=connector.schedule_enabled,
-        execution_timeout=connector.execution_timeout,
-        next_run_time=None,
-    )
+    return _schedule_response(connector)
 
 
 @router.get("/{connector_id}/schedule", response_model=ScheduleResponse)
@@ -109,12 +110,7 @@ def get_schedule(
             detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
         )
 
-    return ScheduleResponse(
-        cron_schedule=connector.cron_schedule,
-        schedule_enabled=connector.schedule_enabled,
-        execution_timeout=connector.execution_timeout,
-        next_run_time=None,
-    )
+    return _schedule_response(connector)
 
 
 @router.post("/{connector_id}/schedule/pause", response_model=ScheduleResponse, status_code=200)
@@ -126,6 +122,7 @@ def pause_schedule(
     """Pause connector schedule without deleting it.
 
     Schedule can be resumed later. Admin-only endpoint.
+    Clears next_run_at on pause per D-04.
     """
     connector = db.query(Connector).filter(Connector.id == connector_id).first()
     if not connector:
@@ -134,23 +131,19 @@ def pause_schedule(
             detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
         )
 
-    if not connector.cron_schedule:
+    if not connector.interval_type:
         raise HTTPException(
             status_code=400,
             detail=make_error("NO_SCHEDULE", "Connector has no schedule to pause", {}),
         )
 
-    # Update database
+    # Update database — clear next_run_at on pause (D-04)
     connector.schedule_enabled = False
+    connector.next_run_at = None
     db.commit()
     db.refresh(connector)
 
-    return ScheduleResponse(
-        cron_schedule=connector.cron_schedule,
-        schedule_enabled=False,
-        execution_timeout=connector.execution_timeout,
-        next_run_time=None,  # Paused jobs have no next run
-    )
+    return _schedule_response(connector)
 
 
 @router.post("/{connector_id}/schedule/resume", response_model=ScheduleResponse, status_code=200)
@@ -161,6 +154,7 @@ def resume_schedule(
 ):
     """Resume a paused schedule.
 
+    Recomputes next_run_at from interval on resume per D-04.
     Admin-only endpoint.
     """
     connector = db.query(Connector).filter(Connector.id == connector_id).first()
@@ -170,23 +164,21 @@ def resume_schedule(
             detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
         )
 
-    if not connector.cron_schedule:
+    if not connector.interval_type:
         raise HTTPException(
             status_code=400,
             detail=make_error("NO_SCHEDULE", "Connector has no schedule to resume", {}),
         )
 
-    # Update database
+    # Update database — recompute next_run_at on resume (D-04)
     connector.schedule_enabled = True
+    connector.next_run_at = compute_next_run_at(
+        connector.interval_type, connector.interval_value
+    )
     db.commit()
     db.refresh(connector)
 
-    return ScheduleResponse(
-        cron_schedule=connector.cron_schedule,
-        schedule_enabled=True,
-        execution_timeout=connector.execution_timeout,
-        next_run_time=None,
-    )
+    return _schedule_response(connector)
 
 
 @router.delete("/{connector_id}/schedule", status_code=204)
@@ -197,7 +189,7 @@ def delete_schedule(
 ):
     """Delete connector schedule.
 
-    Removes schedule from database. Admin-only endpoint.
+    Clears all schedule columns. Admin-only endpoint.
     """
     connector = db.query(Connector).filter(Connector.id == connector_id).first()
     if not connector:
@@ -206,7 +198,9 @@ def delete_schedule(
             detail=make_error("CONNECTOR_NOT_FOUND", "Connector not found", {"connector_id": connector_id}),
         )
 
-    # Clear database
-    connector.cron_schedule = None
+    # Clear all schedule columns
+    connector.interval_type = None
+    connector.interval_value = None
     connector.schedule_enabled = False
+    connector.next_run_at = None
     db.commit()

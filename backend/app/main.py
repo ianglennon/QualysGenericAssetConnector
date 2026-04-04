@@ -37,6 +37,8 @@ EXPECTED_TABLES = {
     "users",
     "canvases",
     "canvas_endpoints",
+    "roles",
+    "role_permissions",
 }
 
 

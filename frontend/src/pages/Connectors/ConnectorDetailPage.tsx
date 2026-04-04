@@ -10,6 +10,7 @@ import { useToast } from '@/hooks/use-toast'
 import { EndpointList } from '@/components/connectors/EndpointList'
 import { CanvasGrid } from '@/components/connectors/CanvasGrid'
 import { FaultDiagnosisToggle } from '@/components/connectors/FaultDiagnosisToggle'
+import { ScheduleBuilder } from '@/components/connectors/ScheduleBuilder'
 
 export function ConnectorDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -138,6 +139,8 @@ export function ConnectorDetailPage() {
           onToggle={handleFaultDiagnosisToggle}
           isPending={updateConnector.isPending}
         />
+
+        <ScheduleBuilder connectorId={connector.id} connector={connector} />
 
         <CanvasGrid connectorId={connector.id} />
 

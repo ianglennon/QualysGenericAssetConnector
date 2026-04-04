@@ -5,12 +5,12 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.schemas.auth import (
     LoginRequest, TokenResponse, RefreshRequest, AccessTokenResponse,
-    MeResponse, RoleResponse,
+    MeResponse, RoleResponse, PasswordChangeRequest, PasswordChangeResponse,
 )
 from app.services.auth_service import authenticate_user, get_user_permissions
 from app.core.security import (
     create_access_token, create_refresh_token, decode_token,
-    get_current_user,
+    get_current_user, verify_password, hash_password, validate_password_policy,
 )
 from app.models.user import User
 from app.models.role import Role
@@ -49,7 +49,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
             detail=make_error("AUTH_INVALID_CREDENTIALS", "Invalid email or password"),
         )
     permissions = get_user_permissions(db, user)
-    access_token = create_access_token(user.id, user.role.name, permissions)
+    access_token = create_access_token(user.id, user.role.name, permissions, must_change_password=user.must_change_password)
     refresh_token, refresh_expires = create_refresh_token(user.id)
     # Store refresh token in DB (rotate on use)
     user.refresh_token = refresh_token
@@ -76,5 +76,39 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail=make_error("AUTH_TOKEN_EXPIRED", "Refresh token expired"))
 
     permissions = get_user_permissions(db, user)
-    access_token = create_access_token(user.id, user.role.name, permissions)
+    access_token = create_access_token(user.id, user.role.name, permissions, must_change_password=user.must_change_password)
     return AccessTokenResponse(access_token=access_token)
+
+
+@router.post("/change-password", response_model=PasswordChangeResponse)
+def change_password(
+    payload: PasswordChangeRequest,
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Change own password. Requires current password verification (per D-06, USER-06)."""
+    if not verify_password(payload.current_password, user.hashed_password):
+        raise HTTPException(
+            status_code=401,
+            detail=make_error("AUTH_WRONG_PASSWORD", "Current password is incorrect"),
+        )
+    policy_errors = validate_password_policy(payload.new_password)
+    if policy_errors:
+        raise HTTPException(
+            status_code=422,
+            detail=make_error("AUTH_PASSWORD_POLICY", "Password does not meet policy requirements",
+                              {"violations": policy_errors}),
+        )
+    user.hashed_password = hash_password(payload.new_password)
+    user.must_change_password = False
+    db.commit()
+
+    # Issue new token pair with must_change_password=false
+    permissions = get_user_permissions(db, user)
+    access_token = create_access_token(user.id, user.role.name, permissions, must_change_password=False)
+    refresh_token, refresh_expires = create_refresh_token(user.id)
+    user.refresh_token = refresh_token
+    user.refresh_token_expires_at = refresh_expires
+    db.commit()
+
+    return PasswordChangeResponse(access_token=access_token, refresh_token=refresh_token)

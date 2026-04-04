@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 import jwt
@@ -43,10 +43,10 @@ def verify_password(plain: str, hashed: str) -> bool:
 # --- JWT ---
 
 
-def create_access_token(subject: str, role: str, permissions: list[str]) -> str:
+def create_access_token(subject: str, role: str, permissions: list[str], must_change_password: bool = False) -> str:
     settings = get_settings()
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
-    payload = {"sub": subject, "role": role, "permissions": permissions, "exp": expire, "type": "access"}
+    payload = {"sub": subject, "role": role, "permissions": permissions, "must_change_password": must_change_password, "exp": expire, "type": "access"}
     return jwt.encode(payload, settings.secret_key, algorithm="HS256")
 
 
@@ -70,8 +70,15 @@ def decode_token(token: str) -> dict:
 
 # --- RBAC dependency ---
 
+MUST_CHANGE_PASSWORD_EXEMPT_PATHS = {
+    "/api/v1/auth/login",
+    "/api/v1/auth/refresh",
+    "/api/v1/auth/change-password",
+    "/api/v1/auth/me",
+}
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+
+def get_current_user(request: Request, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     from app.models.user import User
     payload = decode_token(token)
     if payload.get("type") != "access":
@@ -80,6 +87,14 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if not user:
         raise HTTPException(status_code=401, detail="AUTH_USER_NOT_FOUND")
     user.permissions = payload.get("permissions", [])
+
+    # D-07: must_change_password enforcement
+    if payload.get("must_change_password") and request.url.path not in MUST_CHANGE_PASSWORD_EXEMPT_PATHS:
+        raise HTTPException(
+            status_code=403,
+            detail=make_error("AUTH_PASSWORD_CHANGE_REQUIRED", "Password change required"),
+        )
+
     return user
 
 

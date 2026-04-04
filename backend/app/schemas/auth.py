@@ -33,3 +33,14 @@ class MeResponse(BaseModel):
     email: str
     is_active: bool
     role: RoleResponse
+
+
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class PasswordChangeResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"

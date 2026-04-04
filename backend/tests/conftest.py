@@ -30,6 +30,7 @@ from app.models.canvas_endpoint import CanvasEndpoint  # noqa: F401
 from app.models.field_mapping import FieldMapping  # noqa: F401
 from app.models.qualys_config import QualysConfig  # noqa: F401
 from app.models.run_history import RunHistory, RunFailure, EndpointRunLog  # noqa: F401
+from app.models.role import Role, RolePermission  # noqa: F401
 from app.models.run_event import RunEvent  # noqa: F401
 
 
@@ -101,11 +102,39 @@ def client(db_session):
 
 
 @pytest.fixture(scope="function")
-def admin_token(client, db_session):
+def admin_role(db_session):
+    """Seed an Administrator role for tests."""
+    from app.models.role import Role, RolePermission
+    from app.core.permissions import ALL_PERMISSIONS
+    role = Role(name="Administrator", description="Test admin role", is_system=True)
+    db_session.add(role)
+    db_session.flush()
+    for perm in ALL_PERMISSIONS:
+        db_session.add(RolePermission(role_id=role.id, permission=perm))
+    db_session.flush()
+    return role
+
+
+@pytest.fixture(scope="function")
+def operator_role(db_session):
+    """Seed an Operator role for tests (read-only permissions)."""
+    from app.models.role import Role, RolePermission
+    role = Role(name="Operator", description="Test operator role", is_system=False)
+    db_session.add(role)
+    db_session.flush()
+    # Operator gets read permissions + runs:trigger_sync
+    for resource in ["connectors", "canvases", "schedules", "runs", "settings"]:
+        db_session.add(RolePermission(role_id=role.id, permission=f"{resource}:read"))
+    db_session.add(RolePermission(role_id=role.id, permission="runs:trigger_sync"))
+    db_session.flush()
+    return role
+
+
+@pytest.fixture(scope="function")
+def admin_token(client, db_session, admin_role):
     """Create an admin user and return a valid JWT access token."""
     from app.services.auth_service import create_user
-    from app.models.user import UserRole
-    create_user(db_session, "admin@test.com", "AdminPass12!!", UserRole.admin)
+    create_user(db_session, "admin@test.com", "AdminPass12!!", role_id=admin_role.id)
     db_session.flush()
     resp = client.post("/api/v1/auth/login", json={
         "email": "admin@test.com",
@@ -115,11 +144,10 @@ def admin_token(client, db_session):
 
 
 @pytest.fixture(scope="function")
-def operator_token(client, db_session):
+def operator_token(client, db_session, operator_role):
     """Create an operator user and return a valid JWT access token."""
     from app.services.auth_service import create_user
-    from app.models.user import UserRole
-    create_user(db_session, "operator@test.com", "OperatorPass12!!", UserRole.operator)
+    create_user(db_session, "operator@test.com", "OperatorPass12!!", role_id=operator_role.id)
     db_session.flush()
     resp = client.post("/api/v1/auth/login", json={
         "email": "operator@test.com",

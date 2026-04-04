@@ -1,8 +1,6 @@
 import uuid
 import pytest
 
-from app.services.auth_service import create_user
-from app.models.user import UserRole
 from app.models.connector import Connector
 
 

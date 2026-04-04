@@ -1,25 +1,24 @@
 import pytest
 from app.services.auth_service import create_user, authenticate_user
 from app.core.security import validate_password_policy
-from app.models.user import UserRole
 
 
-def test_create_user_and_authenticate(db_session):
-    user = create_user(db_session, "svc@test.com", "ServicePass12!", UserRole.operator)
+def test_create_user_and_authenticate(db_session, admin_role):
+    user = create_user(db_session, "svc@test.com", "ServicePass12!", role_id=admin_role.id)
     assert user.id is not None
     assert user.hashed_password != "ServicePass12!"  # stored hashed
 
 
-def test_authenticate_user_valid(db_session):
-    create_user(db_session, "svc_valid@test.com", "ServicePass12!", UserRole.operator)
+def test_authenticate_user_valid(db_session, admin_role):
+    create_user(db_session, "svc_valid@test.com", "ServicePass12!", role_id=admin_role.id)
     db_session.flush()
     result = authenticate_user(db_session, "svc_valid@test.com", "ServicePass12!")
     assert result is not None
     assert result.email == "svc_valid@test.com"
 
 
-def test_authenticate_user_invalid_password(db_session):
-    create_user(db_session, "svc_inv@test.com", "ServicePass12!", UserRole.operator)
+def test_authenticate_user_invalid_password(db_session, admin_role):
+    create_user(db_session, "svc_inv@test.com", "ServicePass12!", role_id=admin_role.id)
     db_session.flush()
     result = authenticate_user(db_session, "svc_inv@test.com", "wrong")
     assert result is None

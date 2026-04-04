@@ -94,6 +94,8 @@ def require_role(*allowed_roles: str):
         effective_roles = set(allowed_roles)
         if "admin" in effective_roles:
             effective_roles.add("Administrator")
+        if "operator" in effective_roles:
+            effective_roles.add("Operator")
         if role_name not in effective_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

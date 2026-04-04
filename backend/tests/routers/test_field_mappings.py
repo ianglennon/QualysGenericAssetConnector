@@ -13,15 +13,23 @@ from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
 from app.models.canvas import Canvas
 from app.models.canvas_endpoint import CanvasEndpoint
-from app.models.user import UserRole
+from app.core.permissions import ALL_PERMISSIONS as _ALL_PERMS
+
+
+class _MockRole:
+    name = "Administrator"
+    id = "mock-role-id"
+    is_system = True
 
 
 class _MockAdminUser:
-    """Minimal user object that satisfies require_role role check."""
-    role = UserRole.admin
+    """Minimal user object that satisfies require_role and permission checks."""
     id = "mock-admin-id"
     email = "admin@test.local"
     is_active = True
+    permissions = list(_ALL_PERMS)
+    role = _MockRole()
+    role_id = "mock-role-id"
 
 
 @pytest.fixture(autouse=True)

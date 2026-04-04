@@ -21,14 +21,22 @@ from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
 from app.models.canvas import Canvas
 from app.models.run_history import RunHistory, RunStatus, EndpointRunLog
-from app.models.user import UserRole
+from app.core.permissions import ALL_PERMISSIONS as _ALL_PERMS
+
+
+class _MockRole:
+    name = "Administrator"
+    id = "mock-role-id"
+    is_system = True
 
 
 class _MockAdminUser:
-    role = UserRole.admin
     id = "mock-admin-id"
     email = "admin@test.local"
     is_active = True
+    permissions = list(_ALL_PERMS)
+    role = _MockRole()
+    role_id = "mock-role-id"
 
 
 @pytest.fixture(autouse=True)
@@ -191,11 +199,18 @@ def test_dry_run_endpoint_accessible_to_operator_role(client, db_session):
     """POST dry-run endpoint is accessible by operator (not just admin)."""
     from app.main import app as fastapi_app
 
+    class _MockOpRole:
+        name = "Operator"
+        id = "mock-op-role-id"
+        is_system = False
+
     class _MockOperatorUser:
-        role = UserRole.operator
         id = "mock-op-id"
         email = "op@test.local"
         is_active = True
+        permissions = []
+        role_id = "mock-op-role-id"
+        role = _MockOpRole()
 
     fastapi_app.dependency_overrides[get_current_user] = lambda: _MockOperatorUser()
 

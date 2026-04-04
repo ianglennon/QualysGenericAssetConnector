@@ -9,7 +9,6 @@ from app.models.canvas import Canvas
 from app.models.canvas_endpoint import CanvasEndpoint
 from app.models.field_mapping import FieldMapping
 from app.models.run_history import RunHistory, RunFailure, RunStatus, EndpointRunLog
-from app.models.user import UserRole
 
 
 @pytest.fixture

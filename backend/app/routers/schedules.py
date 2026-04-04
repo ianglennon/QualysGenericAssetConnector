@@ -3,8 +3,6 @@
 Interval-based scheduling (Phase 64): writes interval_type/interval_value
 directly to Connector columns. No cron conversion needed.
 """
-from datetime import datetime, timedelta
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -13,28 +11,10 @@ from app.models.connector import Connector
 from app.schemas.schedule import ScheduleUpdate, ScheduleResponse
 from app.core.security import require_role
 from app.core.errors import make_error
+from app.worker.tasks import compute_next_run_at
 
 
 router = APIRouter(prefix="/connectors", tags=["schedules"])
-
-
-def compute_next_run_at(
-    interval_type: str,
-    interval_value: int,
-    from_time: datetime | None = None,
-) -> datetime:
-    """Compute next_run_at = from_time + interval (D-04)."""
-    base = from_time or datetime.utcnow()
-    deltas = {
-        "minutes": timedelta(minutes=interval_value),
-        "hours": timedelta(hours=interval_value),
-        "days": timedelta(days=interval_value),
-        "weeks": timedelta(weeks=interval_value),
-    }
-    delta = deltas.get(interval_type)
-    if not delta:
-        raise ValueError(f"Unknown interval_type: {interval_type}")
-    return base + delta
 
 
 def _schedule_response(connector: Connector) -> ScheduleResponse:

@@ -68,6 +68,7 @@ def upgrade() -> None:
         sa.Column("execution_timeout", sa.Integer(), nullable=True),
         sa.Column("verify_ssl", sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column("is_valid_mappings", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column("fault_diagnosis", sa.Boolean(), nullable=False, server_default=sa.text("false")),
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
     )
@@ -253,9 +254,28 @@ def upgrade() -> None:
     op.create_index("ix_endpoint_run_logs_run_id", "endpoint_run_logs", ["run_id"])
     op.create_index("ix_endpoint_run_logs_endpoint_id", "endpoint_run_logs", ["endpoint_id"])
 
+    # --- run_events (FK to run_history) ---
+    op.create_table(
+        "run_events",
+        sa.Column("id", sa.String(), primary_key=True),
+        sa.Column(
+            "run_id",
+            sa.String(),
+            sa.ForeignKey("run_history.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+        sa.Column("event_type", sa.String(), nullable=False),
+        sa.Column("stage", sa.String(), nullable=False),
+        sa.Column("message", sa.Text(), nullable=False),
+        sa.Column("detail", sa.JSON(), nullable=True),
+        sa.Column("timestamp", sa.DateTime(), nullable=False),
+    )
+    op.create_index("ix_run_events_run_id", "run_events", ["run_id"])
+
 
 def downgrade() -> None:
     # Drop in reverse dependency order
+    op.drop_table("run_events")
     op.drop_table("endpoint_run_logs")
     op.drop_table("run_failures")
     op.drop_table("run_history")

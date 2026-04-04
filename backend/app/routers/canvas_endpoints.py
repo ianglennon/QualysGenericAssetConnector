@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.core.security import require_role
+from app.core.security import require_permission
 from app.core.errors import make_error
 from app.models.canvas import Canvas
 from app.models.canvas_endpoint import CanvasEndpoint
@@ -135,7 +135,7 @@ def validate_canvas_tree(
     connector_id: str,
     canvas_id: str,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin", "operator")),
+    _user=Depends(require_permission("canvases:read")),
 ):
     """Validate the endpoint tree for a canvas.
 
@@ -162,7 +162,7 @@ async def discover_canvas_endpoint_fields(
     canvas_id: str,
     ref_id: str,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin")),
+    _user=Depends(require_permission("canvases:read")),
 ):
     """Discover fields for a canvas endpoint, including merged _parent.* fields.
 
@@ -379,7 +379,7 @@ async def dry_run_canvas(
     connector_id: str,
     canvas_id: str,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin", "operator")),
+    _user=Depends(require_permission("canvases:read")),
 ):
     """Execute canvas chain without Qualys submission. Returns mapped records capped at 50.
 
@@ -489,7 +489,7 @@ def list_canvas_endpoints(
     connector_id: str,
     canvas_id: str,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin", "operator")),
+    _user=Depends(require_permission("canvases:read")),
 ):
     """List all canvas-endpoint references for a canvas, ordered by tree_order."""
     _get_canvas_or_404(db, connector_id, canvas_id)
@@ -507,7 +507,7 @@ def get_canvas_endpoint(
     canvas_id: str,
     ref_id: str,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin", "operator")),
+    _user=Depends(require_permission("canvases:read")),
 ):
     """Retrieve a single canvas-endpoint reference."""
     _get_canvas_or_404(db, connector_id, canvas_id)
@@ -538,7 +538,7 @@ def create_canvas_endpoint(
     canvas_id: str,
     payload: CanvasEndpointCreate,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin")),
+    _user=Depends(require_permission("canvases:create")),
 ):
     """Add an endpoint reference to a canvas.
 
@@ -641,7 +641,7 @@ def update_canvas_endpoint(
     ref_id: str,
     payload: CanvasEndpointUpdate,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin")),
+    _user=Depends(require_permission("canvases:update")),
 ):
     """Update a canvas-endpoint reference. Cycle detection on parent change."""
     _get_canvas_or_404(db, connector_id, canvas_id)
@@ -713,7 +713,7 @@ def delete_canvas_endpoint(
     canvas_id: str,
     ref_id: str,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin")),
+    _user=Depends(require_permission("canvases:delete")),
 ):
     """Remove an endpoint reference from a canvas.
 

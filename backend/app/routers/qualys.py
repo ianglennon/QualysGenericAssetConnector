@@ -6,7 +6,7 @@ from app.models.qualys_config import QualysConfig
 from app.schemas.qualys import QualysConfigCreate, QualysConfigResponse
 from app.schemas.field_mapping import QualysSchemaField, QualysSchemaResponse
 from app.services.credential_crypto import get_crypto
-from app.core.security import require_role
+from app.core.security import require_permission
 from app.core.errors import make_error
 from qualys_client.platform import detect_platform, derive_urls
 
@@ -49,7 +49,7 @@ def _to_response(config: QualysConfig) -> QualysConfigResponse:
 def upsert_qualys_config(
     payload: QualysConfigCreate,
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("settings:update")),
 ):
     """Create or replace Qualys subscription credentials. Credentials are encrypted before storage."""
     # Validate platform from username (CFG-01)
@@ -96,7 +96,7 @@ def upsert_qualys_config(
 @router.get("/config", response_model=QualysConfigResponse)
 def get_qualys_config(
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("settings:read")),
 ):
     """Retrieve current Qualys config. Never returns raw credentials."""
     config = db.query(QualysConfig).first()
@@ -115,7 +115,7 @@ def get_qualys_config(
 
 
 @router.get("/schema", response_model=QualysSchemaResponse)
-def get_qualys_schema(_user=Depends(require_role("admin", "operator"))):
+def get_qualys_schema(_user=Depends(require_permission("settings:read"))):
     """Return all Qualys CSAM target fields with is_identity flags.
 
     Identity fields are surfaced at the top of the visual canvas field panel

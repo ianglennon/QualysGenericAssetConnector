@@ -10,7 +10,7 @@ from app.schemas.auth import (
 from app.services.auth_service import authenticate_user, get_user_permissions
 from app.core.security import (
     create_access_token, create_refresh_token, decode_token,
-    require_role, get_current_user,
+    get_current_user,
 )
 from app.models.user import User
 from app.models.role import Role
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.get("/me", response_model=MeResponse)
 def get_me(
-    user=Depends(require_role("admin", "operator")),
+    user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Returns current user with role and permissions."""
@@ -38,12 +38,6 @@ def get_me(
             permissions=permissions,
         ) if role else RoleResponse(id="", name="Unknown", is_system=False, permissions=[]),
     )
-
-
-@router.get("/admin-only")
-def admin_only_endpoint(_admin=Depends(require_role("admin"))):
-    """Admin-only test endpoint. Used in tests to verify RBAC blocks operators."""
-    return {"status": "ok", "role": "admin"}
 
 
 @router.post("/login", response_model=TokenResponse)

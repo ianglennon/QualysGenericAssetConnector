@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.core.security import require_role
+from app.core.security import require_permission
 from app.models.field_mapping import FieldMapping
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
@@ -36,7 +36,7 @@ def list_endpoint_mappings(
     connector_id: str,
     endpoint_id: str,
     db: Session = Depends(get_db),
-    _: str = Depends(require_role("admin", "operator")),
+    _user=Depends(require_permission("canvases:read")),
 ):
     """List all mappings for a specific endpoint."""
     return (
@@ -56,7 +56,7 @@ def batch_replace_endpoint_mappings(
     endpoint_id: str,
     payload: BatchReplaceRequest,
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("canvases:create")),
 ):
     """Atomically replace all field mappings for a specific endpoint.
 
@@ -150,7 +150,7 @@ def create_mapping(
     connector_id: str,
     mapping: FieldMappingCreate,
     db: Session = Depends(get_db),
-    _: str = Depends(require_role("admin"))
+    _user=Depends(require_permission("canvases:create")),
 ):
     """Create a field mapping. DEPRECATED: use endpoint-scoped routes."""
     raise HTTPException(
@@ -164,7 +164,7 @@ def create_mapping(
 def list_mappings(
     connector_id: str,
     db: Session = Depends(get_db),
-    _: str = Depends(require_role("admin", "operator"))
+    _user=Depends(require_permission("canvases:read")),
 ):
     """List all mappings for a connector. DEPRECATED: use endpoint-scoped routes."""
     raise HTTPException(
@@ -179,7 +179,7 @@ def batch_replace_mappings(
     connector_id: str,
     payload: BatchReplaceRequest,
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("canvases:create")),
 ):
     """Atomically replace all field mappings for a connector. DEPRECATED: use endpoint-scoped routes."""
     raise HTTPException(
@@ -194,7 +194,7 @@ def update_mapping(
     mapping_id: str,
     mapping: FieldMappingCreate,
     db: Session = Depends(get_db),
-    _: str = Depends(require_role("admin"))
+    _user=Depends(require_permission("canvases:update")),
 ):
     """Update a field mapping. DEPRECATED: use endpoint-scoped routes."""
     raise HTTPException(
@@ -208,7 +208,7 @@ def delete_mapping(
     connector_id: str,
     mapping_id: str,
     db: Session = Depends(get_db),
-    _: str = Depends(require_role("admin"))
+    _user=Depends(require_permission("canvases:delete")),
 ):
     """Delete a mapping. DEPRECATED: use endpoint-scoped routes."""
     raise HTTPException(
@@ -221,7 +221,7 @@ def delete_mapping(
 async def preview_mapping_transform(
     connector_id: str,
     db: Session = Depends(get_db),
-    _: str = Depends(require_role("admin"))
+    _user=Depends(require_permission("canvases:read")),
 ):
     """Preview mapping transformation on live sample. DEPRECATED: use endpoint-scoped routes."""
     raise HTTPException(

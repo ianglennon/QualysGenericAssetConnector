@@ -11,7 +11,7 @@ from app.services.connector_service import _build_headers, HTTPX_TIMEOUT, test_c
 from app.services.credential_crypto import get_crypto
 from app.services.field_discovery import auto_detect_data_root, merge_fields_across_records
 from app.services.path_resolver import resolve_path as path_resolve
-from app.core.security import require_role
+from app.core.security import require_permission
 from app.core.errors import make_error
 
 router = APIRouter(prefix="/connectors", tags=["connectors"])
@@ -48,7 +48,7 @@ def _to_response(connector: Connector) -> ConnectorResponse:
 def create_connector(
     payload: ConnectorCreate,
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("connectors:create")),
 ):
     """Create a new connector. Credentials are encrypted before storage."""
     crypto = get_crypto()
@@ -85,7 +85,7 @@ def create_connector(
 @router.get("/", response_model=list[ConnectorResponse])
 def list_connectors(
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("connectors:read")),
 ):
     """List all connectors. Never returns raw credentials."""
     connectors = db.query(Connector).all()
@@ -96,7 +96,7 @@ def list_connectors(
 def get_connector(
     connector_id: str,
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("connectors:read")),
 ):
     """Get a single connector by ID. Returns 404 if not found."""
     connector = db.query(Connector).filter(Connector.id == connector_id).first()
@@ -113,7 +113,7 @@ def update_connector(
     connector_id: str,
     payload: ConnectorUpdate,
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("connectors:update")),
 ):
     """Partially update a connector. Omitted credential fields preserve existing encrypted values."""
     connector = db.query(Connector).filter(Connector.id == connector_id).first()
@@ -164,7 +164,7 @@ def update_connector(
 def delete_connector(
     connector_id: str,
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("connectors:delete")),
 ):
     """Delete a connector. field_mappings for this connector are cascade-deleted at DB level."""
     connector = db.query(Connector).filter(Connector.id == connector_id).first()
@@ -182,7 +182,7 @@ def delete_connector(
 def run_test_connection(
     connector_id: str,
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("connectors:read")),
 ):
     """Test connectivity to the source API for this connector. Returns metadata only — no body inspection."""
     connector = db.query(Connector).filter(Connector.id == connector_id).first()
@@ -270,7 +270,7 @@ async def discover_endpoint_fields(
     connector_id: str,
     endpoint_id: str,
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("connectors:read")),
 ):
     """Discover available source fields for a specific endpoint.
 
@@ -310,7 +310,7 @@ async def discover_endpoint_fields(
 async def discover_fields(
     connector_id: str,
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("connectors:read")),
 ):
     """DEPRECATED: use endpoint-scoped GET /connectors/{id}/endpoints/{endpoint_id}/fields/discover."""
     raise HTTPException(

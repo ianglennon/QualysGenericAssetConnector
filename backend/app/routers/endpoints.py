@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.core.security import require_role
+from app.core.security import require_permission
 from app.core.errors import make_error
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
@@ -35,7 +35,7 @@ def list_endpoints(
     connector_id: str,
     unassigned_only: bool = Query(False, description="If true, exclude endpoints referenced by any canvas"),
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin", "operator")),
+    _user=Depends(require_permission("connectors:read")),
 ):
     """List all endpoints for a connector ordered by display_order asc."""
     query = (
@@ -63,7 +63,7 @@ def get_endpoint(
     connector_id: str,
     endpoint_id: str,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin", "operator")),
+    _user=Depends(require_permission("connectors:read")),
 ):
     """Retrieve a single endpoint by ID scoped to connector."""
     endpoint = (
@@ -88,7 +88,7 @@ def create_endpoint(
     connector_id: str,
     payload: EndpointCreate,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin")),
+    _user=Depends(require_permission("connectors:create")),
 ):
     """Create a new endpoint under a connector. 404 if connector not found."""
     connector = db.query(Connector).filter_by(id=connector_id).first()
@@ -122,7 +122,7 @@ def update_endpoint(
     endpoint_id: str,
     payload: EndpointUpdate,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin")),
+    _user=Depends(require_permission("connectors:update")),
 ):
     """Partially update an endpoint. Only provided fields are updated."""
     endpoint = (
@@ -150,7 +150,7 @@ def delete_endpoint(
     connector_id: str,
     endpoint_id: str,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin")),
+    _user=Depends(require_permission("connectors:delete")),
 ):
     """Delete an endpoint. Returns 204 No Content."""
     endpoint = (
@@ -195,7 +195,7 @@ def reorder_endpoints(
     connector_id: str,
     payload: ReorderRequest,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin")),
+    _user=Depends(require_permission("connectors:update")),
 ):
     """Bulk-update display_order for endpoints by ID list order.
 

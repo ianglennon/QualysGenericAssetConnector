@@ -10,7 +10,7 @@ from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.core.security import require_role
+from app.core.security import require_permission
 from app.core.errors import make_error
 from app.models.connector import Connector
 from app.models.canvas import Canvas
@@ -30,7 +30,7 @@ router = APIRouter(tags=["canvases"])
 def list_canvases(
     connector_id: str,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin", "operator")),
+    _user=Depends(require_permission("canvases:read")),
 ):
     """List all canvases for a connector with aggregation fields."""
     canvases = (
@@ -98,7 +98,7 @@ def get_canvas(
     connector_id: str,
     canvas_id: str,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin", "operator")),
+    _user=Depends(require_permission("canvases:read")),
 ):
     """Retrieve a single canvas by ID scoped to connector."""
     canvas = (
@@ -123,7 +123,7 @@ def create_canvas(
     connector_id: str,
     payload: CanvasCreate,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin")),
+    _user=Depends(require_permission("canvases:create")),
 ):
     """Create a new canvas under a connector. 404 if connector not found."""
     connector = db.query(Connector).filter_by(id=connector_id).first()
@@ -154,7 +154,7 @@ def update_canvas(
     canvas_id: str,
     payload: CanvasUpdate,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin")),
+    _user=Depends(require_permission("canvases:update")),
 ):
     """Partially update a canvas. Only provided fields are updated."""
     canvas = (
@@ -182,7 +182,7 @@ def delete_canvas(
     connector_id: str,
     canvas_id: str,
     db: Session = Depends(get_db),
-    _=Depends(require_role("admin")),
+    _user=Depends(require_permission("canvases:delete")),
 ):
     """Delete a canvas. Returns 204 No Content."""
     canvas = (

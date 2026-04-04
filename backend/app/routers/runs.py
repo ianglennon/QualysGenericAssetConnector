@@ -9,7 +9,7 @@ from fastapi_pagination import Page, Params
 from fastapi_pagination.ext.sqlalchemy import paginate
 
 from app.core.errors import make_error
-from app.core.security import require_role
+from app.core.security import require_permission
 from app.db.session import get_db
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
@@ -117,7 +117,7 @@ def _fetch_failures_by_run(db: Session, run_ids: list[str]) -> dict[str, list[Ru
 def list_runs(
     db: Session = Depends(get_db),
     params: Params = Depends(),
-    _user=Depends(require_role("admin", "operator")),
+    _user=Depends(require_permission("runs:read")),
     connector_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     date_from: Optional[str] = Query(None),
@@ -188,7 +188,7 @@ def list_runs(
 @router.get("/runs/stats", response_model=RunStatsResponse)
 def get_runs_stats(
     db: Session = Depends(get_db),
-    _user=Depends(require_role("admin", "operator")),
+    _user=Depends(require_permission("runs:read")),
 ):
     """Return aggregate run statistics for dashboard cards."""
     now = _datetime.utcnow()
@@ -235,7 +235,7 @@ def get_runs_stats(
 def get_run_events(
     run_id: str,
     db: Session = Depends(get_db),
-    _user=Depends(require_role("admin", "operator")),
+    _user=Depends(require_permission("runs:read")),
     limit: int = Query(200, ge=1, le=1000),
 ):
     """Return pipeline event timeline for a run (stage summaries + detail events)."""
@@ -294,7 +294,7 @@ def get_run_events(
 def get_run(
     run_id: str,
     db: Session = Depends(get_db),
-    _user=Depends(require_role("admin", "operator")),
+    _user=Depends(require_permission("runs:read")),
 ):
     """Get detailed run history including all failures."""
     run = db.query(RunHistory).filter(RunHistory.id == run_id).first()
@@ -353,7 +353,7 @@ def list_connector_runs(
     connector_id: str,
     db: Session = Depends(get_db),
     params: Params = Depends(),
-    _user=Depends(require_role("admin", "operator")),
+    _user=Depends(require_permission("runs:read")),
 ):
     """List runs for a specific connector with pagination."""
     connector = db.query(Connector).filter(Connector.id == connector_id).first()
@@ -391,7 +391,7 @@ def list_connector_runs(
 async def trigger_connector_run(
     connector_id: str,
     db: Session = Depends(get_db),
-    _user=Depends(require_role("admin", "operator")),
+    _user=Depends(require_permission("runs:trigger_sync")),
     canvas_id: Optional[str] = Query(None, description="Optional canvas ID for single-canvas sync"),
 ):
     connector = db.query(Connector).filter(Connector.id == connector_id).first()

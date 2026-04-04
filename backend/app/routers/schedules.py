@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.connector import Connector
 from app.schemas.schedule import ScheduleUpdate, ScheduleResponse
-from app.core.security import require_role
+from app.core.security import require_permission
 from app.core.errors import make_error
 from app.worker.tasks import compute_next_run_at
 
@@ -33,7 +33,7 @@ def set_schedule(
     connector_id: str,
     payload: ScheduleUpdate,
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("schedules:create")),
 ):
     """Set or update connector schedule.
 
@@ -77,7 +77,7 @@ def set_schedule(
 def get_schedule(
     connector_id: str,
     db: Session = Depends(get_db),
-    _user=Depends(require_role("admin", "operator")),  # Admin or operator can view
+    _user=Depends(require_permission("schedules:read")),
 ):
     """Get connector schedule status.
 
@@ -97,7 +97,7 @@ def get_schedule(
 def pause_schedule(
     connector_id: str,
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("schedules:update")),
 ):
     """Pause connector schedule without deleting it.
 
@@ -130,7 +130,7 @@ def pause_schedule(
 def resume_schedule(
     connector_id: str,
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("schedules:update")),
 ):
     """Resume a paused schedule.
 
@@ -165,7 +165,7 @@ def resume_schedule(
 def delete_schedule(
     connector_id: str,
     db: Session = Depends(get_db),
-    _admin=Depends(require_role("admin")),
+    _user=Depends(require_permission("schedules:delete")),
 ):
     """Delete connector schedule.
 

@@ -19,3 +19,17 @@ class RefreshRequest(BaseModel):
 class AccessTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class RoleResponse(BaseModel):
+    id: str
+    name: str
+    is_system: bool
+    permissions: list[str]
+
+
+class MeResponse(BaseModel):
+    id: str
+    email: str
+    is_active: bool
+    role: RoleResponse

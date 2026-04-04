@@ -42,10 +42,10 @@ def verify_password(plain: str, hashed: str) -> bool:
 # --- JWT ---
 
 
-def create_access_token(subject: str, role: str) -> str:
+def create_access_token(subject: str, role: str, permissions: list[str]) -> str:
     settings = get_settings()
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
-    payload = {"sub": subject, "role": role, "exp": expire, "type": "access"}
+    payload = {"sub": subject, "role": role, "permissions": permissions, "exp": expire, "type": "access"}
     return jwt.encode(payload, settings.secret_key, algorithm="HS256")
 
 
@@ -78,13 +78,23 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     user = db.query(User).filter(User.id == payload["sub"], User.is_active == True).first()
     if not user:
         raise HTTPException(status_code=401, detail="AUTH_USER_NOT_FOUND")
+    user.permissions = payload.get("permissions", [])
     return user
 
 
 def require_role(*allowed_roles: str):
-    """Returns a FastAPI dependency that enforces role membership."""
+    """Returns a FastAPI dependency that enforces role membership.
+
+    DEPRECATED: Phase 67 will replace with require_permission().
+    Backward compat: 'admin' matches 'Administrator' role name.
+    """
     def _inner(user=Depends(get_current_user)):
-        if user.role not in allowed_roles:
+        role_name = user.role.name if hasattr(user.role, 'name') else str(user.role)
+        # Backward compat mapping for Phase 66 transition
+        effective_roles = set(allowed_roles)
+        if "admin" in effective_roles:
+            effective_roles.add("Administrator")
+        if role_name not in effective_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="AUTH_FORBIDDEN",

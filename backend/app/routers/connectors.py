@@ -35,6 +35,10 @@ def _to_response(connector: Connector) -> ConnectorResponse:
         verify_ssl=connector.verify_ssl,
         fault_diagnosis=connector.fault_diagnosis,
         has_valid_endpoints=connector.is_valid_mappings,
+        interval_type=connector.interval_type,
+        interval_value=connector.interval_value,
+        schedule_enabled=connector.schedule_enabled,
+        next_run_at=connector.next_run_at,
         created_at=connector.created_at,
         updated_at=connector.updated_at,
     )

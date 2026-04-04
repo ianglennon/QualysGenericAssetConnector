@@ -64,6 +64,12 @@ class ConnectorResponse(BaseModel):
     verify_ssl: bool
     fault_diagnosis: bool
     has_valid_endpoints: bool
+    # Schedule fields (D-11: inline for list/detail)
+    interval_type: Optional[str] = None
+    interval_value: Optional[int] = None
+    schedule_enabled: bool = False
+    next_run_at: Optional[datetime] = None
+    # Timestamps
     created_at: datetime
     updated_at: datetime
 

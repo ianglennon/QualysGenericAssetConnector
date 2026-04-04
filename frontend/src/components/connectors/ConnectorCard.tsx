@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
+import { ScheduleBadge } from '@/components/connectors/ScheduleBadge'
 import { useAuth } from '@/hooks/useAuth'
 import type { Connector } from '@/types/api'
 
@@ -92,6 +93,7 @@ export function ConnectorCard({ connector, onEdit, onDelete, onTriggerSync, isSy
               <Badge variant="outline" className="border-amber-500 text-amber-600">Invalid</Badge>
             )}
           </div>
+          <ScheduleBadge connector={connector} />
         </div>
       </CardContent>
     </Card>

@@ -1,21 +1,11 @@
 """Integration tests for schedule CRUD endpoints.
 
 Uses shared conftest.py fixtures for DB and client.
+Schedule routes are now database-only (APScheduler removed in 63-02).
 """
-import os
 import pytest
 
 from app.models.connector import Connector, AuthMethod
-from app.scheduler.scheduler_service import get_scheduler, init_scheduler, shutdown_scheduler
-
-
-@pytest.fixture(autouse=True)
-def _init_scheduler():
-    """Initialize scheduler for schedule tests, shut down after."""
-    db_url = os.environ.get("TEST_DATABASE_URL", "postgresql://qualys:qualys@db:5432/qualys_test")
-    init_scheduler(db_url)
-    yield
-    shutdown_scheduler()
 
 
 @pytest.fixture
@@ -63,12 +53,8 @@ def test_set_schedule_success(client, admin_headers, test_connector):
     assert data["cron_schedule"] == "0 */6 * * *"
     assert data["schedule_enabled"] is True
     assert data["execution_timeout"] == 300
-    assert data["next_run_time"] is not None
-
-    # Verify scheduler job exists
-    scheduler = get_scheduler()
-    job = scheduler.get_job(f"connector_{test_connector.id}")
-    assert job is not None
+    # next_run_time is None until Phase 64 computes it from interval columns
+    assert data["next_run_time"] is None
 
 
 def test_set_schedule_invalid_interval_too_small(client, admin_headers, test_connector):
@@ -127,7 +113,8 @@ def test_get_schedule_enabled(client, admin_headers, test_connector):
     data = response.json()
     assert data["cron_schedule"] == "0 0 */1 * *"
     assert data["schedule_enabled"] is True
-    assert data["next_run_time"] is not None
+    # next_run_time is None until Phase 64
+    assert data["next_run_time"] is None
 
 
 def test_get_schedule_no_schedule(client, admin_headers, test_connector):
@@ -208,7 +195,8 @@ def test_resume_schedule(client, admin_headers, test_connector):
     assert response.status_code == 200
     data = response.json()
     assert data["schedule_enabled"] is True
-    assert data["next_run_time"] is not None
+    # next_run_time is None until Phase 64
+    assert data["next_run_time"] is None
 
 
 def test_delete_schedule(client, admin_headers, test_connector):
@@ -239,11 +227,6 @@ def test_delete_schedule(client, admin_headers, test_connector):
         headers=admin_headers,
     )
     assert get_response.json()["cron_schedule"] is None
-
-    # Verify scheduler job removed
-    scheduler = get_scheduler()
-    job = scheduler.get_job(f"connector_{test_connector.id}")
-    assert job is None
 
 
 def test_clear_schedule_via_put(client, admin_headers, test_connector):
@@ -336,8 +319,8 @@ def test_schedule_rbac_operator_can_view(client, operator_headers, test_connecto
     assert data["cron_schedule"] == "0 */4 * * *"
 
 
-def test_schedule_survives_restart(client, admin_headers, test_connector):
-    """Test that schedule persists after scheduler reconciliation (simulates restart)."""
+def test_schedule_persists_in_database(client, admin_headers, test_connector, db_session):
+    """Test that schedule persists in the database (replaces scheduler reconciliation test)."""
     # Set a schedule
     client.put(
         f"/api/v1/connectors/{test_connector.id}/schedule",
@@ -350,14 +333,10 @@ def test_schedule_survives_restart(client, admin_headers, test_connector):
         headers=admin_headers,
     )
 
-    # Simulate restart by running reconciliation
-    from app.scheduler.scheduler_service import reconcile_jobs_on_startup
-    scheduler = get_scheduler()
-    reconcile_jobs_on_startup(scheduler)
-
-    # Verify job still exists
-    job = scheduler.get_job(f"connector_{test_connector.id}")
-    assert job is not None
+    # Verify database state directly
+    db_session.refresh(test_connector)
+    assert test_connector.cron_schedule == "0 */8 * * *"
+    assert test_connector.schedule_enabled is True
 
     # Verify can still retrieve schedule
     response = client.get(

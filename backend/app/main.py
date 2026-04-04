@@ -28,6 +28,7 @@ EXPECTED_TABLES = {
     "qualys_config",
     "run_history",
     "run_failures",
+    "run_events",
     "endpoint_run_logs",
     "users",
     "canvases",

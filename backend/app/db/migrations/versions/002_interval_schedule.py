@@ -1,7 +1,7 @@
 """Drop cron_schedule, add interval columns
 
 Revision ID: 002_interval_schedule
-Revises: c4d5e6f7a8b9
+Revises: 001_baseline
 """
 from typing import Union
 
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "002_interval_schedule"
-down_revision: Union[str, None] = "c4d5e6f7a8b9"
+down_revision: Union[str, None] = "001_baseline"
 branch_labels = None
 depends_on = None
 

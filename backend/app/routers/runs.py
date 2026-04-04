@@ -452,6 +452,7 @@ async def trigger_connector_run(
     db.commit()
 
     run = create_run(connector_id, db=db)
+    db.commit()  # Persist run before deferring async task
 
     try:
         await run_connector_sync.configure(

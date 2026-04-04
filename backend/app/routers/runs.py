@@ -2,7 +2,7 @@ from datetime import timedelta
 from datetime import datetime as _datetime
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select, desc, func, case
 from fastapi_pagination import Page, Params
@@ -17,8 +17,10 @@ from app.models.run_history import RunHistory, RunFailure, RunStatus, EndpointRu
 from app.models.run_event import RunEvent
 from app.schemas.run_history import RunHistoryResponse, RunFailureSummary, EndpointRunLogResponse, RunStatsResponse
 from app.schemas.run_event import StageEntry, EventEntry, RunEventsResponse
-from app.services.ingestion_service import create_run, run_ingestion
+from app.services.ingestion_service import create_run
 from app.services.validation import validate_endpoint_mappings
+from app.worker.tasks import run_connector_sync
+from procrastinate.exceptions import AlreadyEnqueued
 
 router = APIRouter(tags=["runs"])
 
@@ -386,9 +388,8 @@ def list_connector_runs(
 
 
 @router.post("/connectors/{connector_id}/runs", status_code=202)
-def trigger_connector_run(
+async def trigger_connector_run(
     connector_id: str,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _user=Depends(require_role("admin", "operator")),
     canvas_id: Optional[str] = Query(None, description="Optional canvas ID for single-canvas sync"),
@@ -450,21 +451,28 @@ def trigger_connector_run(
     connector.is_valid_mappings = True
     db.commit()
 
-    existing_run = (
-        db.query(RunHistory)
-        .filter(RunHistory.connector_id == connector_id, RunHistory.status == RunStatus.running)
-        .first()
-    )
-    if existing_run:
+    run = create_run(connector_id, db=db)
+
+    try:
+        await run_connector_sync.configure(
+            queueing_lock=f"connector_{connector_id}",
+            lock=f"connector_{connector_id}",
+        ).defer_async(
+            connector_id=str(connector_id),
+            run_id=str(run.id),
+            canvas_id=canvas_id,
+            triggered_by="manual",
+        )
+    except AlreadyEnqueued:
+        # Clean up the run record we just created
+        db.delete(run)
+        db.commit()
         raise HTTPException(
             status_code=409,
             detail=make_error(
                 "CONNECTOR_RUN_IN_PROGRESS",
-                "Connector run already in progress",
+                "Connector sync already queued",
                 {"connector_id": connector_id},
             ),
         )
-
-    run = create_run(connector_id, db=db)
-    background_tasks.add_task(run_ingestion, run.id, canvas_id)
     return {"run_id": run.id, "status": RunStatus.running.value}

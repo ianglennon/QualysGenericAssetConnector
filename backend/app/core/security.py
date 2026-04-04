@@ -8,6 +8,7 @@ import jwt
 from pwdlib import PasswordHash
 
 from app.core.settings import get_settings
+from app.core.errors import make_error
 from app.db.session import get_db
 
 pwd_hash = PasswordHash.recommended()
@@ -102,4 +103,17 @@ def require_role(*allowed_roles: str):
                 detail="AUTH_FORBIDDEN",
             )
         return user
+    return _inner
+
+
+def require_permission(permission: str):
+    """FastAPI dependency enforcing a specific permission from JWT."""
+    def _inner(user=Depends(get_current_user)):
+        if permission not in user.permissions:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=make_error("AUTH_FORBIDDEN", f"Missing permission: {permission}"),
+            )
+        return user
+    _inner._permission_required = permission  # Tag for route introspection test (D-04)
     return _inner

@@ -19,6 +19,7 @@ class User(Base):
     hashed_password: Mapped[str] = mapped_column(String, nullable=False)
     role_id: Mapped[str] = mapped_column(String, ForeignKey("roles.id"), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     refresh_token: Mapped[str | None] = mapped_column(String, nullable=True)
     refresh_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)

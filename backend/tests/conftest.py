@@ -154,3 +154,47 @@ def operator_token(client, db_session, operator_role):
         "password": "OperatorPass12!!"
     })
     return resp.json()["access_token"]
+
+
+@pytest.fixture(scope="function")
+def admin_user(db_session, admin_role):
+    """Seed an admin user and return the User object."""
+    from app.services.auth_service import create_user
+    user = create_user(db_session, "admin_fixture@test.com", "AdminPass12!!", role_id=admin_role.id)
+    db_session.flush()
+    return user
+
+
+@pytest.fixture(scope="function")
+def admin_user_id(admin_user):
+    """Return the admin user's ID."""
+    return admin_user.id
+
+
+@pytest.fixture(scope="function")
+def admin_token_and_id(client, db_session, admin_role):
+    """Create admin user and return (token, user_id) tuple."""
+    from app.services.auth_service import create_user
+    user = create_user(db_session, "admin_tid@test.com", "AdminPass12!!", role_id=admin_role.id)
+    db_session.flush()
+    resp = client.post("/api/v1/auth/login", json={
+        "email": "admin_tid@test.com",
+        "password": "AdminPass12!!"
+    })
+    return resp.json()["access_token"], user.id
+
+
+@pytest.fixture(scope="function")
+def test_role(db_session):
+    """Seed a non-system role for testing user creation."""
+    from app.models.role import Role
+    role = Role(name="TestRole", description="Non-system test role", is_system=False)
+    db_session.add(role)
+    db_session.flush()
+    return role
+
+
+@pytest.fixture(scope="function")
+def test_role_id(test_role):
+    """Return the test role's ID."""
+    return test_role.id

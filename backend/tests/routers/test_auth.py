@@ -1,4 +1,4 @@
-"""Tests for authentication endpoints.
+"""Tests for authentication endpoints including password change and must_change_password.
 
 Uses shared conftest.py fixtures for DB and client.
 Each test is self-contained (no cross-test state dependency).
@@ -32,33 +32,11 @@ def test_login_success_and_refresh(client, db_session, admin_role):
     assert "access_token" in resp2.json()
 
 
-def test_operator_cannot_access_admin_only_endpoint(client, db_session, operator_role):
-    """Verify AUTH-05: Operator gets 403 on admin-only endpoint."""
-    # Create operator user
-    create_user(db_session, "operator@test.com", "OperatorPass12!", role_id=operator_role.id)
-    db_session.flush()
-
-    # Login as operator
-    op_resp = client.post("/api/v1/auth/login", json={"email": "operator@test.com", "password": "OperatorPass12!"})
-    assert op_resp.status_code == 200
-    op_token = op_resp.json()["access_token"]
-
-    # Operator cannot access admin-only endpoint (AUTH-05)
-    resp = client.get("/api/v1/auth/admin-only", headers={"Authorization": f"Bearer {op_token}"})
+def test_operator_permission_enforcement(client, operator_token):
+    """Verify PERM-01: Operator gets 403 on endpoints requiring users:read permission."""
+    resp = client.get("/api/v1/users", headers={"Authorization": f"Bearer {operator_token}"})
     assert resp.status_code == 403
     assert resp.json()["error"]["code"] == "AUTH_FORBIDDEN"
-
-
-def test_admin_can_access_admin_only_endpoint(client, db_session, admin_role):
-    """Verify AUTH-03: Admin can access admin-only endpoints."""
-    create_user(db_session, "admin2@test.com", "AdminPass22!", role_id=admin_role.id)
-    db_session.flush()
-
-    admin_resp = client.post("/api/v1/auth/login", json={"email": "admin2@test.com", "password": "AdminPass22!"})
-    admin_token = admin_resp.json()["access_token"]
-
-    resp = client.get("/api/v1/auth/admin-only", headers={"Authorization": f"Bearer {admin_token}"})
-    assert resp.status_code == 200
 
 
 def test_invalid_token_returns_structured_error(client):
@@ -109,3 +87,129 @@ def test_jwt_contains_permissions(client, db_session, admin_role):
     assert len(payload["permissions"]) == 30
     assert "connectors:create" in payload["permissions"]
     assert payload["role"] == "Administrator"
+
+
+# --- Password change tests (USER-06) ---
+
+
+def test_change_password_success(client, db_session, admin_role):
+    """POST /auth/change-password with valid current_password + new_password returns new tokens."""
+    create_user(db_session, "changepw@test.com", "OldPassWord12!!", role_id=admin_role.id)
+    db_session.flush()
+    login_resp = client.post("/api/v1/auth/login", json={
+        "email": "changepw@test.com", "password": "OldPassWord12!!"
+    })
+    token = login_resp.json()["access_token"]
+
+    resp = client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "OldPassWord12!!", "new_password": "NewPassWord99!!"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "access_token" in data
+    assert "refresh_token" in data
+    assert data["token_type"] == "bearer"
+
+    # Verify new password works for login
+    login2 = client.post("/api/v1/auth/login", json={
+        "email": "changepw@test.com", "password": "NewPassWord99!!"
+    })
+    assert login2.status_code == 200
+
+
+def test_change_password_wrong_current(client, db_session, admin_role):
+    """Wrong current_password returns 401 AUTH_WRONG_PASSWORD."""
+    create_user(db_session, "wrongpw@test.com", "OldPassWord12!!", role_id=admin_role.id)
+    db_session.flush()
+    login_resp = client.post("/api/v1/auth/login", json={
+        "email": "wrongpw@test.com", "password": "OldPassWord12!!"
+    })
+    token = login_resp.json()["access_token"]
+
+    resp = client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "WrongOldPassWord12!!", "new_password": "NewPassWord99!!"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 401
+    assert resp.json()["error"]["code"] == "AUTH_WRONG_PASSWORD"
+
+
+def test_change_password_weak_new(client, db_session, admin_role):
+    """New password failing policy returns 422 AUTH_PASSWORD_POLICY."""
+    create_user(db_session, "weakpw@test.com", "OldPassWord12!!", role_id=admin_role.id)
+    db_session.flush()
+    login_resp = client.post("/api/v1/auth/login", json={
+        "email": "weakpw@test.com", "password": "OldPassWord12!!"
+    })
+    token = login_resp.json()["access_token"]
+
+    resp = client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "OldPassWord12!!", "new_password": "short"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "AUTH_PASSWORD_POLICY"
+
+
+# --- must_change_password enforcement tests ---
+
+
+def test_must_change_password_blocks_endpoints(client, db_session, admin_role):
+    """User with must_change_password=true gets 403 AUTH_PASSWORD_CHANGE_REQUIRED on non-exempt endpoints."""
+    from app.models.user import User
+    user = create_user(db_session, "mustchange@test.com", "TempPass12!!", role_id=admin_role.id)
+    user.must_change_password = True
+    db_session.flush()
+
+    login_resp = client.post("/api/v1/auth/login", json={
+        "email": "mustchange@test.com", "password": "TempPass12!!"
+    })
+    token = login_resp.json()["access_token"]
+
+    # Accessing /users should be blocked
+    resp = client.get(
+        "/api/v1/users",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["error"]["code"] == "AUTH_PASSWORD_CHANGE_REQUIRED"
+
+
+def test_must_change_password_allows_exempt_paths(client, db_session, admin_role):
+    """User with must_change_password=true can still access /auth/me and /auth/change-password."""
+    user = create_user(db_session, "mustchange2@test.com", "TempPass12!!", role_id=admin_role.id)
+    user.must_change_password = True
+    db_session.flush()
+
+    login_resp = client.post("/api/v1/auth/login", json={
+        "email": "mustchange2@test.com", "password": "TempPass12!!"
+    })
+    token = login_resp.json()["access_token"]
+
+    # /auth/me should work
+    me_resp = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert me_resp.status_code == 200
+
+    # /auth/change-password should work (not blocked by must_change_password)
+    change_resp = client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "TempPass12!!", "new_password": "NewSecurePass99!!"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert change_resp.status_code == 200
+    # After changing, must_change_password should be cleared
+    new_token = change_resp.json()["access_token"]
+
+    # Now accessing /users should work with new token
+    users_resp = client.get(
+        "/api/v1/users",
+        headers={"Authorization": f"Bearer {new_token}"},
+    )
+    assert users_resp.status_code == 200

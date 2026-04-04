@@ -20,13 +20,15 @@ def generate_temp_password(length: int = 16) -> str:
 
 def check_last_admin_guard(db: Session, user_id: str, new_role_id: str | None = None) -> None:
     """Raises 409 if operation would leave zero active system admins (per D-14, D-15, D-16)."""
-    admin_count = (
+    # Use len() instead of .count() because PostgreSQL disallows FOR UPDATE with aggregates
+    other_admins = (
         db.query(User)
         .join(Role)
         .filter(Role.is_system == True, User.is_active == True, User.id != user_id)
         .with_for_update()
-        .count()
+        .all()
     )
+    admin_count = len(other_admins)
     if admin_count == 0:
         if new_role_id:
             target_role = db.query(Role).filter(Role.id == new_role_id).first()

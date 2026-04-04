@@ -1,19 +1,15 @@
 """Integration tests for multi-endpoint ingestion pipeline.
 
-Exercises run_ingestion end-to-end against an in-memory SQLite DB.
+Exercises run_ingestion end-to-end against a real PostgreSQL DB.
 All external I/O (fetch_all_pages, submit_batch) is mocked.
+Uses shared conftest.py engine fixture.
 """
-import os
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
-
-from app.db.base import Base
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
 from app.models.field_mapping import FieldMapping
@@ -26,20 +22,17 @@ from app.services.source_client import SourceFetchResult
 
 
 # ---------------------------------------------------------------------------
-# DB fixture — function-scoped, in-memory SQLite
+# DB fixture — uses shared conftest engine
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture()
-def db_factory(monkeypatch):
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
+def db_factory(engine, monkeypatch):
     TestSession = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-    Base.metadata.create_all(bind=engine)
     monkeypatch.setattr("app.services.ingestion_service.SessionLocal", TestSession)
     db = TestSession()
     yield db, TestSession
     db.close()
-    Base.metadata.drop_all(bind=engine)
 
 
 # ---------------------------------------------------------------------------

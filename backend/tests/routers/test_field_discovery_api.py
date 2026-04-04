@@ -5,62 +5,14 @@ Endpoints under test:
   GET  /api/v1/connectors/{id}/fields/discover
   GET  /api/v1/qualys/schema
   PUT  /api/v1/connectors/{id}/mappings
+
+Uses shared conftest.py fixtures for DB and client.
 """
-import os
-import sys
 import pytest
 from unittest.mock import patch, AsyncMock
-from fastapi.testclient import TestClient
-
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_field_discovery_api.db")
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-
-from app.main import create_app
-from app.db.session import SessionLocal, engine
-from app.db.base import Base
-from app.services.auth_service import create_user
-from app.models.user import UserRole
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(scope="module")
-def client():
-    # Ensure all tables exist (idempotent, bypasses Alembic version check)
-    Base.metadata.create_all(bind=engine)
-    app = create_app()
-    with TestClient(app) as c:
-        yield c
-
-
-def _ensure_user(email: str, password: str, role: UserRole) -> None:
-    """Create the test user if it doesn't already exist (idempotent)."""
-    from app.models.user import User
-    db = SessionLocal()
-    try:
-        if not db.query(User).filter(User.email == email).first():
-            create_user(db, email, password, role)
-    finally:
-        db.close()
-
-
-@pytest.fixture(scope="module")
-def admin_token(client):
-    _ensure_user("fd_admin@test.com", "AdminPass12!", UserRole.admin)
-    resp = client.post("/api/v1/auth/login", json={"email": "fd_admin@test.com", "password": "AdminPass12!"})
-    return resp.json()["access_token"]
-
-
-@pytest.fixture(scope="module")
-def operator_token(client):
-    _ensure_user("fd_op@test.com", "OperatorPass12!", UserRole.operator)
-    resp = client.post("/api/v1/auth/login", json={"email": "fd_op@test.com", "password": "OperatorPass12!"})
-    return resp.json()["access_token"]
-
-
-@pytest.fixture(scope="module")
+@pytest.fixture
 def connector_id(client, admin_token):
     """Create a connector to use in discover and batch-replace tests."""
     resp = client.post(
@@ -82,18 +34,9 @@ def connector_id(client, admin_token):
 # ---------------------------------------------------------------------------
 
 def test_discover_success(client, admin_token, connector_id):
-    """Discover endpoint returns 200 with a fields list when source API responds OK.
-
-    The source API call is mocked to return {"items": [{"id": 1, "name": "host"}]}.
-    Response must contain field entries for "id" and "name".
-    """
+    """Discover endpoint returns 200 with a fields list when source API responds OK."""
     mock_result_data = [{"id": 1, "name": "host"}]
 
-    # Patch the internal fetch so no real HTTP call is made.
-    # The discover service fetches the first page via source_client; we mock the
-    # result at the service boundary. The exact patch path will be
-    # app.services.field_discovery.fetch_first_page or similar — using a broad patch
-    # on source_client._fetch_with_retries so the test works regardless of internals.
     with patch(
         "app.services.source_client._fetch_with_retries",
         new_callable=AsyncMock,
@@ -126,7 +69,6 @@ def test_discover_502(client, admin_token, connector_id):
 
     assert resp.status_code == 502
     body = resp.json()
-    # Matches error format: {"detail": {"error_code": ..., "error_message": ..., "context": {}}}
     detail = body.get("detail", body)
     error_code = detail.get("error_code") or detail.get("code")
     assert error_code == "SOURCE_UNREACHABLE"
@@ -146,11 +88,7 @@ def test_discover_rbac(client, operator_token, connector_id):
 # ---------------------------------------------------------------------------
 
 def test_schema(client, admin_token):
-    """Schema endpoint returns 200 with a fields list.
-
-    - "sourceNativeKey" must be present with is_identity=True.
-    - "operatingSystem" must be present with is_identity=False.
-    """
+    """Schema endpoint returns 200 with a fields list."""
     resp = client.get(
         "/api/v1/qualys/schema",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -182,7 +120,7 @@ def test_schema_operator(client, operator_token):
 # ---------------------------------------------------------------------------
 
 def test_batch_replace(client, admin_token, connector_id):
-    """Batch-replace with a valid direct_copy mapping → 200, replaced=1, is_valid_mappings=true."""
+    """Batch-replace with a valid direct_copy mapping -> 200, replaced=1, is_valid_mappings=true."""
     payload = {
         "mappings": [
             {
@@ -208,7 +146,7 @@ def test_batch_replace(client, admin_token, connector_id):
 
 
 def test_batch_replace_empty(client, admin_token, connector_id):
-    """Batch-replace with empty mappings list → 200, replaced=0, is_valid_mappings=false."""
+    """Batch-replace with empty mappings list -> 200, replaced=0, is_valid_mappings=false."""
     payload = {"mappings": []}
     resp = client.put(
         f"/api/v1/connectors/{connector_id}/mappings",
@@ -222,10 +160,7 @@ def test_batch_replace_empty(client, admin_token, connector_id):
 
 
 def test_batch_replace_rollback(client, admin_token, connector_id):
-    """Batch-replace with an invalid mapping_type fails with 422 or 400.
-
-    Existing mappings must remain unchanged (transaction rolled back).
-    """
+    """Batch-replace with an invalid mapping_type fails with 422 or 400."""
     # First, set a known good mapping
     good_payload = {
         "mappings": [
@@ -247,7 +182,7 @@ def test_batch_replace_rollback(client, admin_token, connector_id):
     )
     assert setup_resp.status_code == 200
 
-    # Now attempt a replace with an invalid mapping_type — should fail
+    # Now attempt a replace with an invalid mapping_type -- should fail
     bad_payload = {
         "mappings": [
             {
@@ -266,12 +201,9 @@ def test_batch_replace_rollback(client, admin_token, connector_id):
         headers={"Authorization": f"Bearer {admin_token}"},
         json=bad_payload,
     )
-    # Should be rejected at schema level (422) or application level (400)
     assert fail_resp.status_code in (400, 422)
 
-    # Verify the previously-set mapping is still in place (rollback worked)
-    # Re-run the good batch-replace and confirm it works — if rollback failed,
-    # the connector state would be corrupted and this might behave differently.
+    # Verify the previously-set mapping is still in place
     verify_resp = client.put(
         f"/api/v1/connectors/{connector_id}/mappings",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -293,11 +225,7 @@ def test_batch_replace_rbac(client, operator_token, connector_id):
 
 
 def test_schema_instanceuuidsource_is_not_identity(client, admin_token):
-    """instanceUuidSource must NOT be flagged as identity in the schema response.
-
-    It lives in the Qualys payload identityAttributes block but is not a valid
-    identity gate field for connector validation (not in IDENTITY_ATTRIBUTES).
-    """
+    """instanceUuidSource must NOT be flagged as identity in the schema response."""
     resp = client.get(
         "/api/v1/qualys/schema",
         headers={"Authorization": f"Bearer {admin_token}"},

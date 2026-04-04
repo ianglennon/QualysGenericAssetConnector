@@ -1,42 +1,32 @@
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from app.db.base import Base
 from app.services.auth_service import create_user, authenticate_user
 from app.core.security import validate_password_policy
 from app.models.user import UserRole
 
 
-@pytest.fixture(scope="module")
-def db():
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-    Base.metadata.create_all(bind=engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
-    Base.metadata.drop_all(bind=engine)
-
-
-def test_create_user_and_authenticate(db):
-    user = create_user(db, "svc@test.com", "ServicePass1!", UserRole.operator)
+def test_create_user_and_authenticate(db_session):
+    user = create_user(db_session, "svc@test.com", "ServicePass1!", UserRole.operator)
     assert user.id is not None
     assert user.hashed_password != "ServicePass1!"  # stored hashed
 
 
-def test_authenticate_user_valid(db):
-    result = authenticate_user(db, "svc@test.com", "ServicePass1!")
+def test_authenticate_user_valid(db_session):
+    create_user(db_session, "svc_valid@test.com", "ServicePass1!", UserRole.operator)
+    db_session.flush()
+    result = authenticate_user(db_session, "svc_valid@test.com", "ServicePass1!")
     assert result is not None
-    assert result.email == "svc@test.com"
+    assert result.email == "svc_valid@test.com"
 
 
-def test_authenticate_user_invalid_password(db):
-    result = authenticate_user(db, "svc@test.com", "wrong")
+def test_authenticate_user_invalid_password(db_session):
+    create_user(db_session, "svc_inv@test.com", "ServicePass1!", UserRole.operator)
+    db_session.flush()
+    result = authenticate_user(db_session, "svc_inv@test.com", "wrong")
     assert result is None
 
 
-def test_authenticate_user_unknown_email(db):
-    result = authenticate_user(db, "noone@test.com", "any")
+def test_authenticate_user_unknown_email(db_session):
+    result = authenticate_user(db_session, "noone@test.com", "any")
     assert result is None
 
 

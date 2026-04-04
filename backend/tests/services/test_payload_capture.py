@@ -1,14 +1,14 @@
-"""Tests for payload_capture utility module."""
+"""Tests for payload_capture utility module.
+
+Uses shared conftest.py fixtures for DB-backed cleanup tests.
+"""
 
 import uuid
 from datetime import datetime, timedelta
 
 import httpx
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from app.db.base import Base
 from app.models.connector import Connector
 from app.models.connector_endpoint import ConnectorEndpoint
 from app.models.run_history import EndpointRunLog, RunHistory, RunStatus
@@ -180,17 +180,6 @@ def test_capture_request_body_override_none_uses_content():
 # --------------- Cleanup Old Payloads Tests ---------------
 
 
-@pytest.fixture
-def db_session():
-    """Create an in-memory SQLite database with all tables."""
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
-
-
 def _make_connector(db_session) -> str:
     """Create a minimal Connector and return its id."""
     cid = str(uuid.uuid4())
@@ -217,7 +206,7 @@ def _make_endpoint(db_session, connector_id: str) -> str:
             connector_id=connector_id,
             name="test-endpoint",
             path="/test",
-            is_enabled=1,
+            is_enabled=True,
             display_order=0,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),

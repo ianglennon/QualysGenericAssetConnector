@@ -1,88 +1,38 @@
-"""Integration tests for schedule CRUD endpoints."""
-import os
-import sys
+"""Integration tests for schedule CRUD endpoints.
+
+Uses shared conftest.py fixtures for DB and client.
+"""
 import pytest
-from fastapi.testclient import TestClient
 
-# Setup test database and path
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test_schedules.db")
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
-
-from app.main import create_app
-from app.db.session import SessionLocal
-from app.services.auth_service import create_user
-from app.models.user import UserRole
 from app.models.connector import Connector, AuthMethod
 from app.scheduler.scheduler_service import get_scheduler
 
 
-@pytest.fixture(scope="module")
-def client():
-    """Create test client with test database."""
-    db_path = os.path.abspath("test_schedules.db")
-    if os.path.exists(db_path):
-        os.remove(db_path)
-    app = create_app()
-    with TestClient(app) as c:
-        yield c
-    if os.path.exists(db_path):
-        os.remove(db_path)
+@pytest.fixture
+def test_connector(db_session):
+    """Create a test connector for schedule tests."""
+    connector = Connector(
+        name="Test Connector",
+        base_url="https://api.example.com",
+        auth_method=AuthMethod.bearer_token.value,
+        encrypted_token="test_encrypted_token",
+        pagination_config=[],
+    )
+    db_session.add(connector)
+    db_session.flush()
+    return connector
 
 
-@pytest.fixture(scope="module")
-def admin_token(client):
-    """Create admin user and return auth token."""
-    db = SessionLocal()
-    create_user(db, "sched_admin@test.com", "AdminPass12!", UserRole.admin)
-    db.close()
-    resp = client.post("/api/v1/auth/login", json={"email": "sched_admin@test.com", "password": "AdminPass12!"})
-    return resp.json()["access_token"]
-
-
-@pytest.fixture(scope="module")
+@pytest.fixture
 def admin_headers(admin_token):
     """Return admin auth headers."""
     return {"Authorization": f"Bearer {admin_token}"}
 
 
-@pytest.fixture(scope="module")
-def operator_token(client):
-    """Create operator user and return auth token."""
-    db = SessionLocal()
-    create_user(db, "sched_op@test.com", "OperatorPass12!", UserRole.operator)
-    db.close()
-    resp = client.post("/api/v1/auth/login", json={"email": "sched_op@test.com", "password": "OperatorPass12!"})
-    return resp.json()["access_token"]
-
-
-@pytest.fixture(scope="module")
+@pytest.fixture
 def operator_headers(operator_token):
     """Return operator auth headers."""
     return {"Authorization": f"Bearer {operator_token}"}
-
-
-@pytest.fixture
-def test_connector():
-    """Create a test connector for schedule tests."""
-    db = SessionLocal()
-    try:
-        connector = Connector(
-            name="Test Connector",
-            base_url="https://api.example.com",
-            auth_method=AuthMethod.bearer_token.value,
-            encrypted_token="test_encrypted_token",
-            pagination_config=[],
-        )
-        db.add(connector)
-        db.commit()
-        db.refresh(connector)
-        connector_id = connector.id
-        yield connector
-        # Cleanup: remove connector after test
-        db.query(Connector).filter(Connector.id == connector_id).delete()
-        db.commit()
-    finally:
-        db.close()
 
 
 def test_set_schedule_success(client, admin_headers, test_connector):
@@ -98,14 +48,14 @@ def test_set_schedule_success(client, admin_headers, test_connector):
         },
         headers=admin_headers,
     )
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["cron_schedule"] == "0 */6 * * *"
     assert data["schedule_enabled"] is True
     assert data["execution_timeout"] == 300
     assert data["next_run_time"] is not None
-    
+
     # Verify scheduler job exists
     scheduler = get_scheduler()
     job = scheduler.get_job(f"connector_{test_connector.id}")
@@ -124,7 +74,7 @@ def test_set_schedule_invalid_interval_too_small(client, admin_headers, test_con
         },
         headers=admin_headers,
     )
-    
+
     assert response.status_code == 422  # Validation error
 
 
@@ -140,7 +90,7 @@ def test_set_schedule_invalid_interval_too_large(client, admin_headers, test_con
         },
         headers=admin_headers,
     )
-    
+
     assert response.status_code == 422  # Validation error
 
 
@@ -157,13 +107,13 @@ def test_get_schedule_enabled(client, admin_headers, test_connector):
         },
         headers=admin_headers,
     )
-    
+
     # Get schedule
     response = client.get(
         f"/api/v1/connectors/{test_connector.id}/schedule",
         headers=admin_headers,
     )
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["cron_schedule"] == "0 0 */1 * *"
@@ -177,7 +127,7 @@ def test_get_schedule_no_schedule(client, admin_headers, test_connector):
         f"/api/v1/connectors/{test_connector.id}/schedule",
         headers=admin_headers,
     )
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["cron_schedule"] is None
@@ -198,13 +148,13 @@ def test_pause_schedule(client, admin_headers, test_connector):
         },
         headers=admin_headers,
     )
-    
+
     # Pause schedule
     response = client.post(
         f"/api/v1/connectors/{test_connector.id}/schedule/pause",
         headers=admin_headers,
     )
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["cron_schedule"] == "0 */12 * * *"
@@ -218,7 +168,7 @@ def test_pause_schedule_no_schedule(client, admin_headers, test_connector):
         f"/api/v1/connectors/{test_connector.id}/schedule/pause",
         headers=admin_headers,
     )
-    
+
     assert response.status_code == 400
 
 
@@ -239,13 +189,13 @@ def test_resume_schedule(client, admin_headers, test_connector):
         f"/api/v1/connectors/{test_connector.id}/schedule/pause",
         headers=admin_headers,
     )
-    
+
     # Resume schedule
     response = client.post(
         f"/api/v1/connectors/{test_connector.id}/schedule/resume",
         headers=admin_headers,
     )
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["schedule_enabled"] is True
@@ -265,22 +215,22 @@ def test_delete_schedule(client, admin_headers, test_connector):
         },
         headers=admin_headers,
     )
-    
+
     # Delete schedule
     response = client.delete(
         f"/api/v1/connectors/{test_connector.id}/schedule",
         headers=admin_headers,
     )
-    
+
     assert response.status_code == 204
-    
+
     # Verify via GET that schedule is cleared
     get_response = client.get(
         f"/api/v1/connectors/{test_connector.id}/schedule",
         headers=admin_headers,
     )
     assert get_response.json()["cron_schedule"] is None
-    
+
     # Verify scheduler job removed
     scheduler = get_scheduler()
     job = scheduler.get_job(f"connector_{test_connector.id}")
@@ -300,7 +250,7 @@ def test_clear_schedule_via_put(client, admin_headers, test_connector):
         },
         headers=admin_headers,
     )
-    
+
     # Clear schedule
     response = client.put(
         f"/api/v1/connectors/{test_connector.id}/schedule",
@@ -309,7 +259,7 @@ def test_clear_schedule_via_put(client, admin_headers, test_connector):
         },
         headers=admin_headers,
     )
-    
+
     assert response.status_code == 200
     data = response.json()
     assert data["cron_schedule"] is None
@@ -330,21 +280,21 @@ def test_schedule_rbac_operator_cannot_mutate(client, operator_headers, test_con
         headers=operator_headers,
     )
     assert response.status_code == 403
-    
+
     # Operator cannot pause
     response = client.post(
         f"/api/v1/connectors/{test_connector.id}/schedule/pause",
         headers=operator_headers,
     )
     assert response.status_code == 403
-    
+
     # Operator cannot resume
     response = client.post(
         f"/api/v1/connectors/{test_connector.id}/schedule/resume",
         headers=operator_headers,
     )
     assert response.status_code == 403
-    
+
     # Operator cannot delete
     response = client.delete(
         f"/api/v1/connectors/{test_connector.id}/schedule",
@@ -366,7 +316,7 @@ def test_schedule_rbac_operator_can_view(client, operator_headers, test_connecto
         },
         headers=admin_headers,
     )
-    
+
     # Operator can view
     response = client.get(
         f"/api/v1/connectors/{test_connector.id}/schedule",
@@ -390,16 +340,16 @@ def test_schedule_survives_restart(client, admin_headers, test_connector):
         },
         headers=admin_headers,
     )
-    
+
     # Simulate restart by running reconciliation
     from app.scheduler.scheduler_service import reconcile_jobs_on_startup
     scheduler = get_scheduler()
     reconcile_jobs_on_startup(scheduler)
-    
+
     # Verify job still exists
     job = scheduler.get_job(f"connector_{test_connector.id}")
     assert job is not None
-    
+
     # Verify can still retrieve schedule
     response = client.get(
         f"/api/v1/connectors/{test_connector.id}/schedule",

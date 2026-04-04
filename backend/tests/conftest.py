@@ -29,6 +29,7 @@ from app.models.canvas_endpoint import CanvasEndpoint  # noqa: F401
 from app.models.field_mapping import FieldMapping  # noqa: F401
 from app.models.qualys_config import QualysConfig  # noqa: F401
 from app.models.run_history import RunHistory, RunFailure, EndpointRunLog  # noqa: F401
+from app.models.run_event import RunEvent  # noqa: F401
 
 
 @pytest.fixture(scope="session")

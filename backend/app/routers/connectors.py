@@ -32,9 +32,9 @@ def _to_response(connector: Connector) -> ConnectorResponse:
         api_key_name=connector.api_key_name,
         source_retry_limit=connector.source_retry_limit,
         qualys_retry_limit=connector.qualys_retry_limit,
-        verify_ssl=bool(connector.verify_ssl),
-        fault_diagnosis=bool(connector.fault_diagnosis),
-        has_valid_endpoints=bool(connector.is_valid_mappings),
+        verify_ssl=connector.verify_ssl,
+        fault_diagnosis=connector.fault_diagnosis,
+        has_valid_endpoints=connector.is_valid_mappings,
         created_at=connector.created_at,
         updated_at=connector.updated_at,
     )
@@ -202,7 +202,7 @@ async def _discover_fields_from_url(
     """
     headers = _build_headers(connector)
 
-    async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=bool(connector.verify_ssl)) as client:
+    async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=connector.verify_ssl) as client:
         fetch_result = await _source_client._fetch_with_retries(
             client,
             url,

@@ -9,15 +9,9 @@ Approach: Call batch_replace_endpoint_mappings() directly as a Python function
 test infrastructure when using TestClient.
 """
 
-import os
 import uuid
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
-
-os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 from app.db.base import Base
 from app.models.connector import Connector
@@ -27,21 +21,6 @@ from app.models.canvas_endpoint import CanvasEndpoint
 from app.models.field_mapping import FieldMapping
 from app.schemas.field_mapping import BatchReplaceRequest, FieldMappingCreate
 from app.routers.field_mappings import batch_replace_endpoint_mappings
-
-
-@pytest.fixture
-def db_session():
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(bind=engine)
-    Session = sessionmaker(bind=engine)
-    db = Session()
-    yield db
-    db.close()
-    Base.metadata.drop_all(bind=engine)
 
 
 def _setup_connector_with_two_endpoints_in_canvas(db):
@@ -188,7 +167,7 @@ def test_no_collision_batch_replace_does_not_produce_false_positive(db_session):
         mappings=[
             FieldMappingCreate(
                 mapping_type="direct_copy",
-                target_field="ipAddress",  # different from ep1's hostName — no collision
+                target_field="ipAddress",  # different from ep1's hostName -- no collision
                 source_field="ip",
                 order=0,
             )
@@ -202,7 +181,7 @@ def test_no_collision_batch_replace_does_not_produce_false_positive(db_session):
         db=db_session,
     )
 
-    # No collision — ep1 has hostName (identity), ep2 now has ipAddress — should be valid
+    # No collision -- ep1 has hostName (identity), ep2 now has ipAddress -- should be valid
     assert response.is_valid_mappings is True, (
         f"Expected is_valid_mappings=True for non-colliding mapping, "
         f"got {response.is_valid_mappings}. validation_errors={response.validation_errors}"

@@ -239,7 +239,7 @@ async def discover_canvas_endpoint_fields(
     headers = _build_headers(connector)
     root_url = connector.base_url.rstrip("/") + "/" + root_ep.path.lstrip("/")
 
-    async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=bool(connector.verify_ssl)) as client:
+    async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=connector.verify_ssl) as client:
         # Fetch root records
         root_fetch = await _source_client._fetch_with_retries(
             client, root_url, headers, None, retry_limit=1,
@@ -417,7 +417,7 @@ async def dry_run_canvas(
 
     root_url = connector.base_url.rstrip("/") + "/" + root_ep.path.lstrip("/")
 
-    async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=bool(connector.verify_ssl)) as client:
+    async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=connector.verify_ssl) as client:
         source_result = await fetch_all_pages(
             connector, url=root_url, client=client,
             data_root=root_ep.data_root,

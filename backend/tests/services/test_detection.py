@@ -1,9 +1,6 @@
-"""Unit tests for base endpoint detection — find_base_endpoint()."""
+"""Unit tests for base endpoint detection -- find_base_endpoint()."""
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.db.base import Base
 from app.models.connector import Connector
@@ -13,22 +10,6 @@ from app.models.canvas_endpoint import CanvasEndpoint
 from app.models.field_mapping import FieldMapping
 from app.services.detection import find_base_endpoint, BaseDetectionResult
 from app.services.validation import IDENTITY_ATTRIBUTES
-
-
-@pytest.fixture
-def db_session():
-    """Create an in-memory SQLite database for testing."""
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    session = SessionLocal()
-    yield session
-    session.close()
-    engine.dispose()
 
 
 def _make_connector(db, connector_id="connector-1"):
@@ -236,7 +217,7 @@ def test_tree_order_determines_sibling_order(db_session):
     # Child B has lower tree_order, so it should be visited first
     _make_canvas_endpoint(db_session, "ce-b", "canvas-1", "ep-child-b", parent_ref_id="ce-root", tree_order=0)
     _make_canvas_endpoint(db_session, "ce-a", "canvas-1", "ep-child-a", parent_ref_id="ce-root", tree_order=1)
-    # Only Child B has identity mapping — it should be found first due to tree_order
+    # Only Child B has identity mapping -- it should be found first due to tree_order
     _make_mapping(db_session, "ep-child-b", "map-b", target_field="hostName")
 
     result = find_base_endpoint("canvas-1", db_session)

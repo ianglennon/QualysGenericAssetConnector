@@ -5,16 +5,12 @@ via execute_tree (REAL, not mocked), _parent.* merge, apply_mappings (REAL),
 and Qualys batch submission. Only HTTP boundaries are mocked: fetch_all_pages
 and submit_batch.
 """
-import os
 from contextlib import contextmanager
 from datetime import datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
-os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
 from app.db.base import Base
 from app.models.canvas import Canvas
@@ -31,21 +27,22 @@ from app.services.source_client import SourceFetchResult
 
 
 # ---------------------------------------------------------------------------
-# DB fixture -- function-scoped, in-memory SQLite
+# DB fixture -- use conftest engine, monkeypatch SessionLocal
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture()
-def db_factory(monkeypatch):
-    engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
-    TestSession = sessionmaker(bind=engine, autocommit=False, autoflush=False)
-    Base.metadata.create_all(bind=engine)
+@pytest.fixture(autouse=True)
+def _patch_session(monkeypatch, engine):
+    TestSession = sessionmaker(bind=engine)
     monkeypatch.setattr("app.services.ingestion_service.SessionLocal", TestSession)
     monkeypatch.setattr("app.services.fan_out_executor.SessionLocal", TestSession, raising=False)
-    db = TestSession()
-    yield db, TestSession
-    db.close()
-    Base.metadata.drop_all(bind=engine)
+
+
+@pytest.fixture()
+def db_factory(engine, db_session):
+    """Compatibility fixture: yields (db_session, sessionmaker) tuple."""
+    TestSession = sessionmaker(bind=engine)
+    yield db_session, TestSession
 
 
 # ---------------------------------------------------------------------------

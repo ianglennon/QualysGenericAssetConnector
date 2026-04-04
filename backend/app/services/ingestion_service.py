@@ -702,7 +702,7 @@ async def run_ingestion(run_id: str, canvas_id: str | None = None) -> None:
 
         collector = EventCollector(
             run_id=run.id,
-            fault_diagnosis=bool(getattr(connector, 'fault_diagnosis', False)),
+            fault_diagnosis=connector.fault_diagnosis,
         )
 
         qualys_config = db.query(QualysConfig).first()
@@ -741,7 +741,7 @@ async def run_ingestion(run_id: str, canvas_id: str | None = None) -> None:
         total_submitted = 0
         total_failed = 0
 
-        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=bool(connector.verify_ssl)) as client:
+        async with httpx.AsyncClient(timeout=HTTPX_TIMEOUT, verify=connector.verify_ssl) as client:
             # === CANVAS PATH (D-01/D-03): Execute canvas trees first ===
             if canvas_id:
                 canvases = (

@@ -127,7 +127,10 @@ async def _procrastinate_lifecycle(settings):
     )
     sync_app = procrastinate.App(connector=sync_connector)
     with sync_app.open():
-        sync_app.admin.apply_schema()
+        try:
+            sync_app.schema_manager.apply_schema()
+        except procrastinate.exceptions.ConnectorException:
+            pass  # Schema already exists — safe to continue
 
     # D-01: Open async connection pool and start worker
     async with procrastinate_app.open_async():

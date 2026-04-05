@@ -30,9 +30,11 @@ for mod_name in [
         sys.modules[mod_name] = MagicMock()
 
 # Ensure AlreadyEnqueued is a real exception class for catch blocks
-sys.modules["procrastinate.exceptions"].AlreadyEnqueued = type(
-    "AlreadyEnqueued", (Exception,), {}
-)
+# (only needed when we mocked the module; don't corrupt the real one)
+if "procrastinate.exceptions" in _modules_patched:
+    sys.modules["procrastinate.exceptions"].AlreadyEnqueued = type(
+        "AlreadyEnqueued", (Exception,), {}
+    )
 
 # ---------------------------------------------------------------------------
 # Force-reload the worker package so it picks up our mocked modules

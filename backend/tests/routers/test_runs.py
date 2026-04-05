@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -197,9 +197,19 @@ def test_list_connector_runs_not_found(client, admin_token):
     assert resp.json()["error"]["code"] == "CONNECTOR_NOT_FOUND"
 
 
+def _mock_run_connector_sync():
+    """Create a mock run_connector_sync task with configure/defer_async chain."""
+    mock_configured_task = MagicMock()
+    mock_configured_task.defer_async = AsyncMock(return_value=None)
+    mock_task = MagicMock()
+    mock_task.configure = MagicMock(return_value=mock_configured_task)
+    return mock_task, mock_configured_task
+
+
 def test_trigger_run_as_admin_returns_202(client, admin_token, db_session):
     connector_id = _create_connector_with_valid_endpoint(db_session, name="Runs Trigger Admin")
-    with patch("app.routers.runs.run_ingestion", new_callable=AsyncMock) as mock_run:
+    mock_task, mock_configured = _mock_run_connector_sync()
+    with patch("app.routers.runs.run_connector_sync", mock_task):
         resp = client.post(
             f"/api/v1/connectors/{connector_id}/runs",
             headers={"Authorization": f"Bearer {admin_token}"},
@@ -209,12 +219,13 @@ def test_trigger_run_as_admin_returns_202(client, admin_token, db_session):
     data = resp.json()
     assert data["status"] == "running"
     assert "run_id" in data
-    mock_run.assert_awaited_once_with(data["run_id"], None)
+    mock_configured.defer_async.assert_awaited_once()
 
 
 def test_trigger_run_as_operator_returns_202(client, operator_token, db_session):
     connector_id = _create_connector_with_valid_endpoint(db_session, name="Runs Trigger Operator")
-    with patch("app.routers.runs.run_ingestion", new_callable=AsyncMock) as mock_run:
+    mock_task, mock_configured = _mock_run_connector_sync()
+    with patch("app.routers.runs.run_connector_sync", mock_task):
         resp = client.post(
             f"/api/v1/connectors/{connector_id}/runs",
             headers={"Authorization": f"Bearer {operator_token}"},
@@ -222,38 +233,46 @@ def test_trigger_run_as_operator_returns_202(client, operator_token, db_session)
 
     assert resp.status_code == 202
     data = resp.json()
-    mock_run.assert_awaited_once_with(data["run_id"], None)
+    mock_configured.defer_async.assert_awaited_once()
 
 
 def test_trigger_run_conflict_when_running_exists(client, admin_token, db_session):
     connector_id = _create_connector_with_valid_endpoint(db_session, name="Runs Trigger Conflict")
-    run = RunHistory(
-        connector_id=connector_id,
-        status=RunStatus.running,
-        started_at=datetime.utcnow(),
-    )
-    db_session.add(run)
-    db_session.flush()
 
-    resp = client.post(
-        f"/api/v1/connectors/{connector_id}/runs",
-        headers={"Authorization": f"Bearer {admin_token}"},
-    )
-    assert resp.status_code == 409
+    # Use the SAME AlreadyEnqueued class that the router imported, to avoid
+    # class identity issues if test_schedule_poller replaces the module attribute.
+    import app.routers.runs as _runs_mod
+    _AlreadyEnqueued = _runs_mod.AlreadyEnqueued
+    mock_configured_task = MagicMock()
+    mock_configured_task.defer_async = AsyncMock(side_effect=_AlreadyEnqueued())
+    mock_task = MagicMock()
+    mock_task.configure = MagicMock(return_value=mock_configured_task)
+
+    with patch("app.routers.runs.run_connector_sync", mock_task):
+        resp = client.post(
+            f"/api/v1/connectors/{connector_id}/runs",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+    assert resp.status_code == 409, f"Expected 409, got {resp.status_code}: {resp.text}"
     assert resp.json()["error"]["code"] == "CONNECTOR_RUN_IN_PROGRESS"
 
 
 def test_trigger_run_updates_status_on_completion(client, admin_token, db_session):
     connector_id = _create_connector_with_valid_endpoint(db_session, name="Runs Trigger Status")
 
-    async def _complete_run(run_id: str, canvas_id=None):
-        db_session.expire_all()
-        run = db_session.query(RunHistory).filter(RunHistory.id == run_id).first()
-        run.status = RunStatus.success
-        run.finished_at = datetime.utcnow()
-        db_session.flush()
+    # Mock the procrastinate task; the actual completion would happen in the worker
+    mock_task, mock_configured = _mock_run_connector_sync()
 
-    with patch("app.routers.runs.run_ingestion", new=_complete_run):
+    # Capture the run_id from the defer call so we can simulate completion
+    captured_run_id = []
+
+    async def capture_defer(**kwargs):
+        captured_run_id.append(kwargs.get("run_id"))
+        return None
+
+    mock_configured.defer_async = AsyncMock(side_effect=capture_defer)
+
+    with patch("app.routers.runs.run_connector_sync", mock_task):
         resp = client.post(
             f"/api/v1/connectors/{connector_id}/runs",
             headers={"Authorization": f"Bearer {admin_token}"},
@@ -261,6 +280,13 @@ def test_trigger_run_updates_status_on_completion(client, admin_token, db_sessio
 
     assert resp.status_code == 202
     run_id = resp.json()["run_id"]
+
+    # Simulate worker completing the run
+    db_session.expire_all()
+    run = db_session.query(RunHistory).filter(RunHistory.id == run_id).first()
+    run.status = RunStatus.success
+    run.finished_at = datetime.utcnow()
+    db_session.flush()
 
     db_session.expire_all()
     run = db_session.query(RunHistory).filter(RunHistory.id == run_id).first()
@@ -382,7 +408,8 @@ def test_trigger_returns_202_when_endpoints_valid(client, admin_token, db_sessio
     """Trigger returns 202 when all enabled endpoints have identity mappings."""
     connector_id = _create_connector_with_valid_endpoint(db_session, name="Runs Trigger Valid CONN-02")
 
-    with patch("app.routers.runs.run_ingestion", new_callable=AsyncMock) as mock_run:
+    mock_task, mock_configured = _mock_run_connector_sync()
+    with patch("app.routers.runs.run_connector_sync", mock_task):
         resp = client.post(
             f"/api/v1/connectors/{connector_id}/runs",
             headers={"Authorization": f"Bearer {admin_token}"},

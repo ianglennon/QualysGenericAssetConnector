@@ -55,13 +55,16 @@ def test_duplicate_defer_raises_already_enqueued_returns_409(client, admin_token
     the trigger endpoint must respond with 409 CONNECTOR_RUN_IN_PROGRESS
     and delete the orphaned RunHistory record.
     """
-    from procrastinate.exceptions import AlreadyEnqueued
+    # Use the SAME AlreadyEnqueued class that the router imported, to avoid
+    # class identity issues if test_schedule_poller replaces the module attribute.
+    import app.routers.runs as _runs_mod
+    _AlreadyEnqueued = _runs_mod.AlreadyEnqueued
 
     connector_id = _create_connector_with_endpoint(db_session, name="Deferral Conflict Connector")
 
     # Build a mock configure chain that raises AlreadyEnqueued on defer_async
     mock_configured_task = MagicMock()
-    mock_configured_task.defer_async = AsyncMock(side_effect=AlreadyEnqueued())
+    mock_configured_task.defer_async = AsyncMock(side_effect=_AlreadyEnqueued())
     mock_configure = MagicMock(return_value=mock_configured_task)
 
     with patch("app.routers.runs.run_connector_sync") as mock_task:

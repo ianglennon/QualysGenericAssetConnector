@@ -208,7 +208,7 @@ def test_dry_run_endpoint_accessible_to_operator_role(client, db_session):
         id = "mock-op-id"
         email = "op@test.local"
         is_active = True
-        permissions = []
+        permissions = ["canvases:read", "runs:read", "connectors:read"]
         role_id = "mock-op-role-id"
         role = _MockOpRole()
 

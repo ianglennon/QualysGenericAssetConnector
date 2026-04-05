@@ -93,11 +93,29 @@ def test_discover_502(client, admin_token, connector_id, endpoint_id):
     assert error_code == "SOURCE_UNREACHABLE"
 
 
-def test_discover_rbac(client, operator_token, connector_id, endpoint_id):
-    """Operator role receives 403 on discover endpoint (admin-only)."""
+def test_discover_rbac(client, db_session, connector_id, endpoint_id):
+    """A user without connectors:read permission receives 403 on discover endpoint."""
+    from app.models.role import Role, RolePermission
+    from app.services.auth_service import create_user
+
+    # Create a role with only runs:read (no connectors:read)
+    role = Role(name="NoConnectorsRole", description="No connector access", is_system=False)
+    db_session.add(role)
+    db_session.flush()
+    db_session.add(RolePermission(role_id=role.id, permission="runs:read"))
+    db_session.flush()
+
+    create_user(db_session, "noconnectors@test.com", "NoConnPass12!!", role_id=role.id)
+    db_session.flush()
+    login_resp = client.post("/api/v1/auth/login", json={
+        "email": "noconnectors@test.com",
+        "password": "NoConnPass12!!"
+    })
+    token = login_resp.json()["access_token"]
+
     resp = client.get(
         f"/api/v1/connectors/{connector_id}/endpoints/{endpoint_id}/fields/discover",
-        headers={"Authorization": f"Bearer {operator_token}"},
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 403
 

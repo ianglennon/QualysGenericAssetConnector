@@ -1,7 +1,7 @@
 """Integration tests for schedule CRUD endpoints.
 
 Uses shared conftest.py fixtures for DB and client.
-Schedule routes are now database-only (APScheduler removed in 63-02).
+Schedule routes are now interval-based (Phase 64: interval_type/interval_value columns).
 """
 import pytest
 
@@ -50,11 +50,10 @@ def test_set_schedule_success(client, admin_headers, test_connector):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["cron_schedule"] == "0 */6 * * *"
+    assert data["interval_type"] == "hours"
+    assert data["interval_value"] == 6
     assert data["schedule_enabled"] is True
     assert data["execution_timeout"] == 300
-    # next_run_time is None until Phase 64 computes it from interval columns
-    assert data["next_run_time"] is None
 
 
 def test_set_schedule_invalid_interval_too_small(client, admin_headers, test_connector):
@@ -111,10 +110,9 @@ def test_get_schedule_enabled(client, admin_headers, test_connector):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["cron_schedule"] == "0 0 */1 * *"
+    assert data["interval_type"] == "days"
+    assert data["interval_value"] == 1
     assert data["schedule_enabled"] is True
-    # next_run_time is None until Phase 64
-    assert data["next_run_time"] is None
 
 
 def test_get_schedule_no_schedule(client, admin_headers, test_connector):
@@ -126,9 +124,10 @@ def test_get_schedule_no_schedule(client, admin_headers, test_connector):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["cron_schedule"] is None
+    assert data["interval_type"] is None
+    assert data["interval_value"] is None
     assert data["schedule_enabled"] is False
-    assert data["next_run_time"] is None
+    assert data["next_run_at"] is None
 
 
 def test_pause_schedule(client, admin_headers, test_connector):
@@ -153,9 +152,10 @@ def test_pause_schedule(client, admin_headers, test_connector):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["cron_schedule"] == "0 */12 * * *"
+    assert data["interval_type"] == "hours"
+    assert data["interval_value"] == 12
     assert data["schedule_enabled"] is False
-    assert data["next_run_time"] is None  # Paused jobs have no next run
+    assert data["next_run_at"] is None  # Paused jobs have no next run
 
 
 def test_pause_schedule_no_schedule(client, admin_headers, test_connector):
@@ -195,8 +195,8 @@ def test_resume_schedule(client, admin_headers, test_connector):
     assert response.status_code == 200
     data = response.json()
     assert data["schedule_enabled"] is True
-    # next_run_time is None until Phase 64
-    assert data["next_run_time"] is None
+    # next_run_at should be recomputed on resume
+    assert data["next_run_at"] is not None
 
 
 def test_delete_schedule(client, admin_headers, test_connector):
@@ -226,7 +226,7 @@ def test_delete_schedule(client, admin_headers, test_connector):
         f"/api/v1/connectors/{test_connector.id}/schedule",
         headers=admin_headers,
     )
-    assert get_response.json()["cron_schedule"] is None
+    assert get_response.json()["interval_type"] is None
 
 
 def test_clear_schedule_via_put(client, admin_headers, test_connector):
@@ -254,7 +254,8 @@ def test_clear_schedule_via_put(client, admin_headers, test_connector):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["cron_schedule"] is None
+    assert data["interval_type"] is None
+    assert data["interval_value"] is None
     assert data["schedule_enabled"] is False
 
 
@@ -316,11 +317,12 @@ def test_schedule_rbac_operator_can_view(client, operator_headers, test_connecto
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["cron_schedule"] == "0 */4 * * *"
+    assert data["interval_type"] == "hours"
+    assert data["interval_value"] == 4
 
 
 def test_schedule_persists_in_database(client, admin_headers, test_connector, db_session):
-    """Test that schedule persists in the database (replaces scheduler reconciliation test)."""
+    """Test that schedule persists in the database."""
     # Set a schedule
     client.put(
         f"/api/v1/connectors/{test_connector.id}/schedule",
@@ -335,7 +337,8 @@ def test_schedule_persists_in_database(client, admin_headers, test_connector, db
 
     # Verify database state directly
     db_session.refresh(test_connector)
-    assert test_connector.cron_schedule == "0 */8 * * *"
+    assert test_connector.interval_type == "hours"
+    assert test_connector.interval_value == 8
     assert test_connector.schedule_enabled is True
 
     # Verify can still retrieve schedule
@@ -345,5 +348,6 @@ def test_schedule_persists_in_database(client, admin_headers, test_connector, db
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["cron_schedule"] == "0 */8 * * *"
+    assert data["interval_type"] == "hours"
+    assert data["interval_value"] == 8
     assert data["schedule_enabled"] is True

@@ -82,7 +82,26 @@ def test_get_qualys_config_includes_platform_fields(client, admin_token):
     assert data["api_gateway_url"].startswith("https://")
 
 
-def test_operator_cannot_access_qualys_config(client, operator_token):
-    resp = client.get("/api/v1/qualys/config", headers={"Authorization": f"Bearer {operator_token}"})
+def test_user_without_settings_read_cannot_access_qualys_config(client, db_session):
+    """A user without settings:read permission gets 403 on qualys config."""
+    from app.models.role import Role, RolePermission
+    from app.services.auth_service import create_user
+
+    # Create a role with only runs:read (no settings:read)
+    role = Role(name="NoSettingsRole", description="No settings access", is_system=False)
+    db_session.add(role)
+    db_session.flush()
+    db_session.add(RolePermission(role_id=role.id, permission="runs:read"))
+    db_session.flush()
+
+    create_user(db_session, "nosettings@test.com", "NoSettingsPass12!!", role_id=role.id)
+    db_session.flush()
+    login_resp = client.post("/api/v1/auth/login", json={
+        "email": "nosettings@test.com",
+        "password": "NoSettingsPass12!!"
+    })
+    token = login_resp.json()["access_token"]
+
+    resp = client.get("/api/v1/qualys/config", headers={"Authorization": f"Bearer {token}"})
     assert resp.status_code == 403
     assert resp.json()["error"]["code"] == "AUTH_FORBIDDEN"

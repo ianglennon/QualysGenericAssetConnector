@@ -107,7 +107,7 @@ class TestCanvasListAggregation:
         _new_canvas_endpoint(db_session, canvas.id, ep.id)
         _new_field_mapping(db_session, ep.id, "hostName", canvas_id=canvas.id)
 
-        result = list_canvases(connector_id=connector.id, db=db_session, _=None)
+        result = list_canvases(connector_id=connector.id, db=db_session, _user=None)
 
         assert len(result) == 1
         item = result[0]
@@ -149,7 +149,7 @@ class TestCanvasListAggregation:
         db_session.add(log)
         db_session.flush()
 
-        result = list_canvases(connector_id=connector.id, db=db_session, _=None)
+        result = list_canvases(connector_id=connector.id, db=db_session, _user=None)
 
         assert len(result) == 1
         assert result[0].last_run_status == "success"
@@ -160,7 +160,7 @@ class TestCanvasListAggregation:
         from app.routers.canvases import list_canvases
 
         connector = _new_connector(db_session)
-        result = list_canvases(connector_id=connector.id, db=db_session, _=None)
+        result = list_canvases(connector_id=connector.id, db=db_session, _user=None)
         assert result == []
 
     def test_canvas_list_zero_counts_when_no_endpoints_or_mappings(self, db_session: Session):
@@ -169,7 +169,7 @@ class TestCanvasListAggregation:
 
         connector = _new_connector(db_session)
         _new_canvas(db_session, connector.id)
-        result = list_canvases(connector_id=connector.id, db=db_session, _=None)
+        result = list_canvases(connector_id=connector.id, db=db_session, _user=None)
 
         assert result[0].endpoint_count == 0
         assert result[0].field_mapping_count == 0
@@ -183,10 +183,11 @@ class TestCanvasListAggregation:
 class TestSingleCanvasSyncTrigger:
     """MC-02: trigger_connector_run accepts canvas_id and validates it exists."""
 
-    def test_trigger_run_returns_404_for_nonexistent_canvas(self, db_session: Session):
+    @pytest.mark.asyncio
+    async def test_trigger_run_returns_404_for_nonexistent_canvas(self, db_session: Session):
         """Returns 404 if canvas_id does not exist under the connector."""
         from app.routers.runs import trigger_connector_run
-        from fastapi import BackgroundTasks, HTTPException
+        from fastapi import HTTPException
 
         connector = _new_connector(db_session)
         ep = _new_endpoint(db_session, connector.id)
@@ -194,9 +195,8 @@ class TestSingleCanvasSyncTrigger:
         _new_field_mapping(db_session, ep.id, "hostName")
 
         with pytest.raises(HTTPException) as exc_info:
-            trigger_connector_run(
+            await trigger_connector_run(
                 connector_id=connector.id,
-                background_tasks=BackgroundTasks(),
                 db=db_session,
                 _user=MagicMock(),
                 canvas_id="nonexistent-canvas-id",
@@ -205,10 +205,11 @@ class TestSingleCanvasSyncTrigger:
         assert exc_info.value.status_code == 404
         assert exc_info.value.detail["error"]["code"] == "CANVAS_NOT_FOUND"
 
-    def test_trigger_run_returns_400_for_disabled_canvas(self, db_session: Session):
+    @pytest.mark.asyncio
+    async def test_trigger_run_returns_400_for_disabled_canvas(self, db_session: Session):
         """Returns 400 if canvas_id refers to a disabled canvas."""
         from app.routers.runs import trigger_connector_run
-        from fastapi import BackgroundTasks, HTTPException
+        from fastapi import HTTPException
 
         connector = _new_connector(db_session)
         ep = _new_endpoint(db_session, connector.id)
@@ -216,9 +217,8 @@ class TestSingleCanvasSyncTrigger:
         canvas = _new_canvas(db_session, connector.id, enabled=False)
 
         with pytest.raises(HTTPException) as exc_info:
-            trigger_connector_run(
+            await trigger_connector_run(
                 connector_id=connector.id,
-                background_tasks=BackgroundTasks(),
                 db=db_session,
                 _user=MagicMock(),
                 canvas_id=canvas.id,
@@ -227,10 +227,11 @@ class TestSingleCanvasSyncTrigger:
         assert exc_info.value.status_code == 400
         assert exc_info.value.detail["error"]["code"] == "CANVAS_DISABLED"
 
-    def test_trigger_run_returns_404_for_canvas_wrong_connector(self, db_session: Session):
+    @pytest.mark.asyncio
+    async def test_trigger_run_returns_404_for_canvas_wrong_connector(self, db_session: Session):
         """Returns 404 if canvas_id belongs to a different connector."""
         from app.routers.runs import trigger_connector_run
-        from fastapi import BackgroundTasks, HTTPException
+        from fastapi import HTTPException
 
         connector1 = _new_connector(db_session)
         connector2 = _new_connector(db_session)
@@ -239,9 +240,8 @@ class TestSingleCanvasSyncTrigger:
         canvas_for_other = _new_canvas(db_session, connector2.id)
 
         with pytest.raises(HTTPException) as exc_info:
-            trigger_connector_run(
+            await trigger_connector_run(
                 connector_id=connector1.id,
-                background_tasks=BackgroundTasks(),
                 db=db_session,
                 _user=MagicMock(),
                 canvas_id=canvas_for_other.id,

@@ -59,6 +59,8 @@ class TestExpectedTablesConstant:
             "canvases",
             "canvas_endpoints",
             "run_events",
+            "roles",
+            "role_permissions",
         }
         assert EXPECTED_TABLES == expected
 
@@ -202,9 +204,9 @@ def _run_alembic_upgrade_on_test_db(target: str = "head") -> None:
 
 class TestAlembicSingleHead:
     def test_alembic_has_exactly_one_head_revision(self):
-        """DB-03(a): The Alembic script tree has exactly one head — 001_baseline.
+        """DB-03(a): The Alembic script tree has exactly one head.
 
-        This verifies no stray SQLite-era migration files remain that would
+        This verifies no stray migration files remain that would
         create a multi-head situation causing 'alembic upgrade head' to fail.
         """
         cfg = Config(ALEMBIC_INI)
@@ -214,9 +216,6 @@ class TestAlembicSingleHead:
         assert len(heads) == 1, (
             f"Expected exactly 1 Alembic head, found {len(heads)}: {heads}. "
             "Multiple heads mean 'alembic upgrade head' will fail."
-        )
-        assert heads[0] == "001_baseline", (
-            f"Expected head revision '001_baseline', got '{heads[0]}'."
         )
 
 

@@ -4,22 +4,29 @@ import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 import { ROUTES } from '@/routes/constants'
 
-const navigation = [
-  { name: 'Dashboard', href: ROUTES.DASHBOARD, icon: Home, roles: ['admin', 'operator'] },
-  { name: 'Connectors', href: ROUTES.CONNECTORS, icon: Database, roles: ['admin', 'operator'] },
-  { name: 'Run History', href: ROUTES.RUNS, icon: History, roles: ['admin', 'operator'] },
-  { name: 'Settings', href: ROUTES.SETTINGS, icon: Settings, roles: ['admin'] },
+const navigation: {
+  name: string
+  href: string
+  icon: typeof Home
+  permission?: string
+  permissions?: string[]
+}[] = [
+  { name: 'Dashboard', href: ROUTES.DASHBOARD, icon: Home },
+  { name: 'Connectors', href: ROUTES.CONNECTORS, icon: Database, permission: 'connectors:read' },
+  { name: 'Run History', href: ROUTES.RUNS, icon: History, permission: 'runs:read' },
+  { name: 'Settings', href: ROUTES.SETTINGS, icon: Settings, permissions: ['users:read', 'roles:read', 'settings:read'] },
 ]
 
 export function Sidebar() {
   const location = useLocation()
-  const { user } = useAuth()
+  const { hasPermission, mustChangePassword } = useAuth()
 
-  if (!user) return null
-
-  const allowedNavigation = navigation.filter(item => 
-    item.roles.includes(user.role)
-  )
+  const allowedNavigation = navigation.filter(item => {
+    if (!item.permission && !item.permissions) return true
+    if (item.permission) return hasPermission(item.permission)
+    if (item.permissions) return item.permissions.some(p => hasPermission(p))
+    return false
+  })
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r bg-background">
@@ -31,7 +38,7 @@ export function Sidebar() {
 
         {/* Navigation */}
         <nav className="flex flex-1 flex-col">
-          <ul role="list" className="flex flex-1 flex-col gap-y-2">
+          <ul role="list" className={cn('flex flex-1 flex-col gap-y-2', mustChangePassword && 'pointer-events-none opacity-50')}>
             {allowedNavigation.map((item) => {
               const isActive = location.pathname === item.href || location.pathname.startsWith(item.href + '/')
               return (

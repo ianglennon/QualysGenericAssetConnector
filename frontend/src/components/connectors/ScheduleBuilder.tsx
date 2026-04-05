@@ -33,7 +33,7 @@ function validateInterval(type: string, value: number): string | null {
 }
 
 export function ScheduleBuilder({ connectorId, connector }: ScheduleBuilderProps) {
-  const { user } = useAuth()
+  const { hasPermission } = useAuth()
   const { toast } = useToast()
 
   const saveMutation = useSaveSchedule(connectorId)
@@ -60,8 +60,8 @@ export function ScheduleBuilder({ connectorId, connector }: ScheduleBuilderProps
     setValidationError(validateInterval(localType, parsed))
   }, [localType, localValue])
 
-  // Admin-only gate (after all hooks per rules-of-hooks)
-  if (user?.role !== 'admin') return null
+  // Permission gate (after all hooks per rules-of-hooks)
+  if (!hasPermission('schedules:update')) return null
 
   const handleToggle = async () => {
     try {

@@ -1,6 +1,7 @@
 import { useForm } from 'react-hook-form'
 import { useAuth } from '@/hooks/useAuth'
 import { useChangePassword, useUpdatePreferences } from '@/hooks/queries/useUser'
+import { setTokens } from '@/lib/api-client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,7 +17,7 @@ interface PasswordFormData {
 }
 
 export const UserProfileForm = () => {
-  const { user } = useAuth()
+  const { user, mustChangePassword } = useAuth()
   const changePassword = useChangePassword()
   const updatePreferences = useUpdatePreferences()
   const [fontSize, setFontSize] = useState<'normal' | 'large' | 'x-large'>('normal')
@@ -40,12 +41,19 @@ export const UserProfileForm = () => {
         new_password: data.new_password,
       },
       {
-        onSuccess: () => {
+        onSuccess: (data: any) => {
+          if (data?.access_token && data?.refresh_token) {
+            setTokens(data.access_token, data.refresh_token)
+          }
           toast({
             title: 'Success',
             description: 'Password changed successfully',
           })
           reset()
+          // Reload to refresh user state (clears must_change_password)
+          if (mustChangePassword) {
+            window.location.reload()
+          }
         },
         onError: (error: any) => {
           toast({
@@ -91,6 +99,11 @@ export const UserProfileForm = () => {
 
   return (
     <div className="space-y-6">
+      {mustChangePassword && (
+        <div className="rounded-md border border-destructive bg-destructive/10 p-4 text-destructive text-sm font-medium">
+          You must change your password before continuing.
+        </div>
+      )}
       <Card>
         <CardHeader>
           <CardTitle>User Information</CardTitle>
@@ -103,7 +116,7 @@ export const UserProfileForm = () => {
           </div>
           <div className="space-y-2">
             <Label>Role</Label>
-            <Input value={user?.role || ''} disabled className="capitalize" />
+            <Input value={user?.role.name || ''} disabled className="capitalize" />
           </div>
         </CardContent>
       </Card>

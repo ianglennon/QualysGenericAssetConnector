@@ -8,17 +8,15 @@ import { useConnectors } from '@/hooks/queries/useConnectors'
 import { useRunStats } from '@/hooks/queries/useRunStats'
 
 export default function Dashboard() {
-  const { user } = useAuth()
+  const { user, hasPermission } = useAuth()
   const { data: connectors = [] } = useConnectors()
   const { data: stats } = useRunStats()
-
-  const isAdmin = user?.role === 'admin'
 
   return (
     <PageContainer
       title="Dashboard"
       actions={
-        isAdmin ? (
+        hasPermission('connectors:create') ? (
           <Button>
             <Plus className="mr-2 h-4 w-4" />
             Create Connector
@@ -34,7 +32,7 @@ export default function Dashboard() {
           </CardHeader>
           <CardContent>
             <p className="text-sm text-muted-foreground">
-              Role: <span className="capitalize font-medium">{user?.role}</span>
+              Role: <span className="capitalize font-medium">{user?.role.name}</span>
             </p>
           </CardContent>
         </Card>

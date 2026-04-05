@@ -42,9 +42,15 @@ vi.mock('@/hooks/queries/useRuns', () => ({
   })),
 }))
 
+const adminPermissions = ['connectors:create', 'connectors:read', 'connectors:update', 'connectors:delete']
+
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: vi.fn(() => ({
-    user: { role: 'admin' },
+    user: {
+      id: '1', email: 'admin@example.com', is_active: true, must_change_password: false,
+      role: { id: 'r1', name: 'Administrator', is_system: true, permissions: adminPermissions },
+    },
+    hasPermission: (p: string) => adminPermissions.includes(p),
   })),
 }))
 

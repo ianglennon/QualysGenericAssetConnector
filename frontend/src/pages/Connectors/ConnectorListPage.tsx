@@ -17,7 +17,7 @@ import { useToast } from '@/hooks/use-toast'
 import type { Connector, ConnectorCreate } from '@/types/api'
 
 export function ConnectorListPage() {
-  const { user } = useAuth()
+  const { hasPermission } = useAuth()
   const { data: connectors, isLoading } = useConnectors()
   const createMutation = useCreateConnector()
   const updateMutation = useUpdateConnector()
@@ -30,8 +30,6 @@ export function ConnectorListPage() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false)
   const [selectedConnector, setSelectedConnector] = useState<Connector | null>(null)
   const [syncSuccessId, setSyncSuccessId] = useState<string | null>(null)
-
-  const isAdmin = user?.role === 'admin'
 
   const handleCreate = async (data: ConnectorCreate) => {
     try {
@@ -121,7 +119,7 @@ export function ConnectorListPage() {
       <PageContainer
         title="Connectors"
         actions={
-          isAdmin ? (
+          hasPermission('connectors:create') ? (
             <Button onClick={() => setIsCreateOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               Create Connector
@@ -132,8 +130,8 @@ export function ConnectorListPage() {
         <ConnectorList
           connectors={connectors}
           isLoading={isLoading}
-          onEdit={isAdmin ? handleEdit : undefined}
-          onDelete={isAdmin ? handleDeleteClick : undefined}
+          onEdit={hasPermission('connectors:update') ? handleEdit : undefined}
+          onDelete={hasPermission('connectors:delete') ? handleDeleteClick : undefined}
           onTriggerSync={handleTriggerSync}
           syncSuccessId={syncSuccessId}
         />

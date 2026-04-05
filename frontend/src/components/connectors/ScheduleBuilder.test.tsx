@@ -37,10 +37,16 @@ vi.mock('@/hooks/queries/useSchedule', () => ({
   })),
 }))
 
-// Default: admin user
-let mockUserRole: string | null = 'admin'
+// Default: user with schedules:update permission
+let mockHasPermission = true
 vi.mock('@/hooks/useAuth', () => ({
-  useAuth: vi.fn(() => ({ user: { role: mockUserRole } })),
+  useAuth: vi.fn(() => ({
+    user: {
+      id: '1', email: 'admin@example.com', is_active: true, must_change_password: false,
+      role: { id: 'r1', name: 'Administrator', is_system: true, permissions: ['schedules:update'] },
+    },
+    hasPermission: (p: string) => mockHasPermission && p === 'schedules:update',
+  })),
 }))
 
 import { ScheduleBuilder } from './ScheduleBuilder'
@@ -88,7 +94,7 @@ function renderBuilder(connector: Connector = makeConnector()) {
 
 describe('ScheduleBuilder — UI-01: Interval picker configuration', () => {
   beforeEach(() => {
-    mockUserRole = 'admin'
+    mockHasPermission = true
     mockSaveMutateAsync.mockClear()
     mockToast.mockClear()
   })
@@ -124,7 +130,7 @@ describe('ScheduleBuilder — UI-01: Interval picker configuration', () => {
     renderBuilder(makeConnector({ interval_type: 'hours', interval_value: 6, schedule_enabled: true }))
 
     const input = screen.getByPlaceholderText('Value')
-    // Change value so it differs from server state (interval_value=6 → 8)
+    // Change value so it differs from server state (interval_value=6 -> 8)
     fireEvent.change(input, { target: { value: '8' } })
 
     const btn = screen.getByRole('button', { name: /Save Schedule/i })
@@ -140,10 +146,10 @@ describe('ScheduleBuilder — UI-01: Interval picker configuration', () => {
     })
   })
 
-  it('does not render schedule panel for operator users', () => {
-    mockUserRole = 'operator'
+  it('does not render schedule panel for users without schedules:update permission', () => {
+    mockHasPermission = false
     const { container } = renderBuilder()
-    // ScheduleBuilder returns null for non-admins
+    // ScheduleBuilder returns null when permission is missing
     expect(container.firstChild).toBeNull()
   })
 })
@@ -154,7 +160,7 @@ describe('ScheduleBuilder — UI-01: Interval picker configuration', () => {
 
 describe('ScheduleBuilder — UI-02: Frontend validation', () => {
   beforeEach(() => {
-    mockUserRole = 'admin'
+    mockHasPermission = true
     mockSaveMutateAsync.mockClear()
     mockToast.mockClear()
   })
@@ -251,7 +257,7 @@ describe('ScheduleBuilder — UI-02: Frontend validation', () => {
 
 describe('ScheduleBuilder — UI-04: Enable/disable toggle', () => {
   beforeEach(() => {
-    mockUserRole = 'admin'
+    mockHasPermission = true
     mockPauseMutateAsync.mockClear()
     mockResumeMutateAsync.mockClear()
     mockToast.mockClear()
@@ -322,7 +328,7 @@ describe('ScheduleBuilder — UI-04: Enable/disable toggle', () => {
     }))
     // The interval picker wrapper has opacity-50 applied only in paused state.
     // We verify the input itself is NOT inside a div with opacity-50.
-    // (Radix Select chevron may carry opacity-50 internally — scope to divs only.)
+    // (Radix Select chevron may carry opacity-50 internally -- scope to divs only.)
     const dimmedDiv = Array.from(container.querySelectorAll('div.opacity-50'))
     expect(dimmedDiv).toHaveLength(0)
   })
@@ -357,7 +363,7 @@ describe('ScheduleBuilder — UI-04: Enable/disable toggle', () => {
 
 describe('ScheduleBuilder — UI-01: Empty state', () => {
   beforeEach(() => {
-    mockUserRole = 'admin'
+    mockHasPermission = true
   })
 
   it('shows empty state text when no schedule is configured and no value entered', () => {

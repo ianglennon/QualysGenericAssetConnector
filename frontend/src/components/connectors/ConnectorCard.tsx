@@ -11,7 +11,6 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
 import { ScheduleBadge } from '@/components/connectors/ScheduleBadge'
-import { useAuth } from '@/hooks/useAuth'
 import type { Connector } from '@/types/api'
 
 interface ConnectorCardProps {
@@ -23,10 +22,7 @@ interface ConnectorCardProps {
 }
 
 export function ConnectorCard({ connector, onEdit, onDelete, onTriggerSync, isSyncSucceeded }: ConnectorCardProps) {
-  const { user } = useAuth()
   const navigate = useNavigate()
-
-  const isAdmin = user?.role === 'admin'
 
   return (
     <Card className="cursor-pointer hover:border-primary/50 transition-colors" onClick={() => navigate(ROUTES.connectorDetail(connector.id))}>
@@ -49,7 +45,7 @@ export function ConnectorCard({ connector, onEdit, onDelete, onTriggerSync, isSy
               {isSyncSucceeded ? <Check className="h-4 w-4" /> : <Play className="h-4 w-4" />}
             </Button>
           )}
-          {isAdmin && (onEdit || onDelete) && (
+          {(onEdit || onDelete) && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="sm">

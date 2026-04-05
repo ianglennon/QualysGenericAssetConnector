@@ -195,7 +195,7 @@ POST /api/v1/connectors/{id}/endpoints
 | DELETE | `/connectors/{id}/canvases/{cid}/endpoints/{rid}` | Remove from canvas | canvases:delete |
 | GET | `/connectors/{id}/canvases/{cid}/endpoints/validate` | Validate tree structure | canvases:read |
 | GET | `/connectors/{id}/canvases/{cid}/endpoints/{rid}/fields/discover` | Discover fields (with parent context) | canvases:read |
-| POST | `/connectors/{id}/canvases/{cid}/dry-run` | Dry run canvas | runs:trigger |
+| POST | `/connectors/{id}/canvases/{cid}/dry-run` | Dry run canvas | canvases:read |
 
 ### Add Endpoint to Canvas
 ```json
@@ -256,7 +256,7 @@ PUT /api/v1/connectors/{id}/endpoints/{eid}/mappings
 | GET | `/runs/stats` | Dashboard statistics | runs:read |
 | GET | `/runs/{id}` | Get run detail with endpoint logs | runs:read |
 | GET | `/connectors/{id}/runs` | List runs for connector (paginated) | runs:read |
-| POST | `/connectors/{id}/runs` | Trigger manual sync | runs:trigger |
+| POST | `/connectors/{id}/runs` | Trigger manual sync | runs:trigger_sync |
 
 ### Trigger Sync
 

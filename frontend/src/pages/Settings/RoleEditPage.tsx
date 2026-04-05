@@ -284,7 +284,7 @@ export function RoleEditPage() {
                     Cancel
                   </AlertDialogCancel>
                   <AlertDialogAction
-                    onClick={(e) => {
+                    onClick={(e: React.MouseEvent) => {
                       e.preventDefault()
                       handleDelete()
                     }}

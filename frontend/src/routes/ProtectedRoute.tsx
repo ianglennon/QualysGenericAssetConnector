@@ -10,7 +10,7 @@ interface ProtectedRouteProps {
 }
 
 export default function ProtectedRoute({ children, requiredPermission, requiredPermissions }: ProtectedRouteProps) {
-  const { user, isAuthenticated, isLoading, hasPermission, mustChangePassword } = useAuth()
+  const { isAuthenticated, isLoading, hasPermission, mustChangePassword } = useAuth()
   const location = useLocation()
 
   if (isLoading) {

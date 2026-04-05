@@ -110,7 +110,7 @@ export function PermissionMatrix({ roleId, permissions, disabled }: PermissionMa
                         id={permission}
                         aria-label={permission}
                         checked={disabled || localPermissions.includes(permission)}
-                        onCheckedChange={(checked) => handleToggle(permission, !!checked)}
+                        onCheckedChange={(checked: boolean) => handleToggle(permission, !!checked)}
                         disabled={disabled}
                       />
                     </TableCell>
@@ -128,7 +128,7 @@ export function PermissionMatrix({ roleId, permissions, disabled }: PermissionMa
                               disabled ||
                               localPermissions.includes(`${resource}:${SPECIAL_ACTIONS[resource]}`)
                             }
-                            onCheckedChange={(checked) =>
+                            onCheckedChange={(checked: boolean) =>
                               handleToggle(`${resource}:${SPECIAL_ACTIONS[resource]}`, !!checked)
                             }
                             disabled={disabled}

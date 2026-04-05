@@ -1,82 +1,105 @@
 # Getting Started
 
-This guide walks you through first-time setup after deploying the application.
+This guide walks you from a fresh clone to your first login in about five minutes. For production hardening (TLS, backups, resource limits), see the [[Deployment Guide]].
 
-## Step 1: Log In
+## Prerequisites
 
-1. Open your browser and navigate to `http://<your-host>` (default: `http://localhost`)
-2. You'll be redirected to the login page
-3. Enter the admin credentials you configured in `.env` (`ADMIN_EMAIL` / `ADMIN_PASSWORD`)
-4. Click **Login**
+- [Docker](https://docs.docker.com/get-docker/) 20.10+ with Docker Compose v2+
+- [Git](https://git-scm.com/)
+- A terminal (bash examples shown throughout)
 
-## Step 2: Configure Qualys CSAM Credentials
+## Clone the Repository
 
-Before you can sync data to Qualys, you need to configure your Qualys subscription:
+```bash
+git clone <repository-url>
+cd QualysGenericAssetConnector
+```
 
-1. Go to **Settings > Qualys Configuration** (admin only)
-2. Enter your **Qualys username** (e.g., `quays_user_us2`) -- the platform is auto-detected from the username
-3. Enter the **Qualys CSAM Connector UUID** from your Qualys subscription
-4. Enter your **Qualys password**
-5. Click **Save**
+## Configure Environment
 
-The system auto-detects your Qualys platform (US1, US2, US3, EU1, etc.) and derives the correct API server and gateway URLs from your username.
+Copy the example environment file:
 
-## Step 3: Create a Connector
+```bash
+cp .env.example .env
+```
 
-1. Go to **Connectors** in the sidebar
-2. Click **Create Connector**
-3. Fill in:
-   - **Name** -- a descriptive name (e.g., "ServiceNow CMDB", "Crowdstrike Hosts")
-   - **Base URL** -- the root URL of the source API (e.g., `https://api.example.com`)
-   - **Auth Method** -- choose Bearer Token, Basic Auth, or API Key Header
-   - **Credentials** -- enter the appropriate credentials for your chosen auth method
-4. Click **Create**
+Open `.env` in your editor and set the following values.
 
-See [[Creating a Connector]] for detailed instructions.
+### Generate SECRET_KEY
 
-## Step 4: Add Endpoints
+Used to sign JWT authentication tokens.
 
-1. From the connector detail page, add one or more **API endpoints** (the specific paths to fetch data from)
-2. Use **Discover Fields** to auto-detect available fields from the source API
+```bash
+openssl rand -hex 32
+```
 
-See [[Endpoints and Field Discovery]] for details.
+Paste the output as the `SECRET_KEY` value.
 
-## Step 5: Create a Canvas and Map Fields
+### Generate FERNET_KEY
 
-1. Create a **Canvas** (a named data flow representing one Qualys asset type)
-2. Add your endpoints to the canvas (optionally chain parent/child endpoints)
-3. Open the **Field Mapping** editor for each endpoint
-4. Map source fields to Qualys CSAM target fields using drag-and-drop or the mapping editor
+Used to encrypt stored credentials at rest.
 
-See [[Canvases and Endpoint Chaining]] and [[Field Mapping]] for details.
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
 
-## Step 6: Dry Run
+Paste the output as the `FERNET_KEY` value.
 
-Before syncing to Qualys, test your configuration:
+### Generate POSTGRES_PASSWORD
 
-1. From the canvas page, click **Dry Run**
-2. Review the transformed records to verify the mapping produces the expected output
-3. Fix any issues with your field mappings
+The password for the PostgreSQL database.
 
-## Step 7: Run a Sync
+```bash
+openssl rand -hex 16
+```
 
-1. From the connector detail page, click **Sync Now**
-2. Monitor progress in **Run History**
-3. Review the results, including per-endpoint status and any failures
+Paste the output as the `POSTGRES_PASSWORD` value. You can leave `POSTGRES_USER` at its default (`qualys`).
 
-See [[Scheduling]] for details.
+> **Note:** `docker-compose.yml` automatically constructs `DATABASE_URL` from `POSTGRES_USER` and `POSTGRES_PASSWORD`, so you do not need to edit `DATABASE_URL` manually. The placeholder value in `.env.example` is overridden at runtime by Docker Compose.
 
-## Step 8: Schedule Automatic Syncs (Optional)
+### Set Admin Credentials
 
-1. From the connector detail page, configure a **Schedule**
-2. Choose an interval (every N minutes, hours, days, or weeks)
-3. Enable the schedule
+Set `ADMIN_EMAIL` to a valid email address and `ADMIN_PASSWORD` to a strong password meeting the following policy:
 
-See [[Scheduling]] for details.
+- 12 or more characters
+- At least 2 numeric digits
+- At least 1 non-alphanumeric character (e.g., `!@#$%^&*`)
 
-## Next Steps
+> **Warning:** `ADMIN_EMAIL` and `ADMIN_PASSWORD` are only used on the very first startup when no users exist. Changing these values later has no effect. To reset the admin password, use the [[User Management]] page.
 
-- [[Creating a Connector]] -- Detailed connector configuration
-- [[Field Mapping]] -- All mapping types explained
-- [[Canvases and Endpoint Chaining]] -- Combine data from multiple API endpoints
-- [[Troubleshooting]] -- Common issues and solutions
+## Start the Application
+
+```bash
+docker compose up --build
+```
+
+Or use the shorthand:
+
+```bash
+make dev
+```
+
+On startup, the following happens:
+
+1. PostgreSQL 16 database starts and passes its health check
+2. Backend runs database migrations automatically
+3. Admin user is seeded from `ADMIN_EMAIL` and `ADMIN_PASSWORD` (first startup only)
+4. Procrastinate task worker starts for background job processing
+5. nginx starts serving the web UI on port 80
+
+Once all services are healthy, the application is available at **http://localhost**.
+
+## Log In
+
+1. Open **http://localhost** in your browser
+2. Enter the `ADMIN_EMAIL` and `ADMIN_PASSWORD` you configured in `.env`
+3. Click **Login** to reach the dashboard
+
+## What's Next
+
+- [[Qualys Configuration]] -- Connect to your Qualys subscription
+- [[Creating a Connector]] -- Set up your first data source
+- [[Scheduling]] -- Automate recurring syncs
+- [[Deployment Guide]] -- Harden for production use
+
+Having trouble? See [[Troubleshooting]].

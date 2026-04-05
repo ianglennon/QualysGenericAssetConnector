@@ -1,6 +1,6 @@
 # Qualys Configuration
 
-> **Setup:** [[Getting Started]] > [[Deployment Guide]] > **Qualys Configuration**
+> **Setup:** [[Getting Started]] > **Qualys Configuration**
 
 Before running any syncs, you must configure your Qualys CSAM subscription credentials.
 

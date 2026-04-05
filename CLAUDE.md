@@ -93,10 +93,10 @@ Environment is injected from `.env` (copy from `.env.example`). Required vars: `
 ## Error Response Format
 ```json
 {
-  "detail": {
-    "error_code": "STRING",
-    "error_message": "STRING",
-    "context": {}
+  "error": {
+    "code": "STRING",
+    "message": "STRING",
+    "details": {}
   }
 }
 ```

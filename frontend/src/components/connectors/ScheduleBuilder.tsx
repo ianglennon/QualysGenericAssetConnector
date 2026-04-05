@@ -61,7 +61,9 @@ export function ScheduleBuilder({ connectorId, connector }: ScheduleBuilderProps
   }, [localType, localValue])
 
   // Permission gate (after all hooks per rules-of-hooks)
-  if (!hasPermission('schedules:update')) return null
+  if (!hasPermission('schedules:read')) return null
+
+  const canEdit = hasPermission('schedules:update')
 
   const handleToggle = async () => {
     try {
@@ -122,7 +124,7 @@ export function ScheduleBuilder({ connectorId, connector }: ScheduleBuilderProps
             id="schedule-enabled"
             checked={connector.schedule_enabled}
             onCheckedChange={handleToggle}
-            disabled={!connector.interval_type || pauseMutation.isPending || resumeMutation.isPending}
+            disabled={!canEdit || !connector.interval_type || pauseMutation.isPending || resumeMutation.isPending}
             aria-label="Enable or disable automatic schedule"
           />
         </div>
@@ -139,11 +141,11 @@ export function ScheduleBuilder({ connectorId, connector }: ScheduleBuilderProps
             onChange={handleValueChange}
             min={INTERVAL_CONSTRAINTS[localType]?.min}
             max={INTERVAL_CONSTRAINTS[localType]?.max}
-            disabled={isPaused}
+            disabled={!canEdit || isPaused}
             placeholder="Value"
             aria-describedby={validationError ? 'interval-error' : undefined}
           />
-          <Select value={localType} onValueChange={handleTypeChange} disabled={isPaused}>
+          <Select value={localType} onValueChange={handleTypeChange} disabled={!canEdit || isPaused}>
             <SelectTrigger className="w-32">
               <SelectValue />
             </SelectTrigger>
@@ -174,9 +176,11 @@ export function ScheduleBuilder({ connectorId, connector }: ScheduleBuilderProps
       )}
 
       {/* Save button */}
-      <Button onClick={handleSave} disabled={saveDisabled}>
-        Save Schedule
-      </Button>
+      {canEdit && (
+        <Button onClick={handleSave} disabled={saveDisabled}>
+          Save Schedule
+        </Button>
+      )}
     </div>
   )
 }

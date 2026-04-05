@@ -37,15 +37,15 @@ vi.mock('@/hooks/queries/useSchedule', () => ({
   })),
 }))
 
-// Default: user with schedules:update permission
-let mockHasPermission = true
+// Default: user with schedules:read and schedules:update permissions
+let mockPermissions = ['schedules:read', 'schedules:update']
 vi.mock('@/hooks/useAuth', () => ({
   useAuth: vi.fn(() => ({
     user: {
       id: '1', email: 'admin@example.com', is_active: true, must_change_password: false,
-      role: { id: 'r1', name: 'Administrator', is_system: true, permissions: ['schedules:update'] },
+      role: { id: 'r1', name: 'Administrator', is_system: true, permissions: mockPermissions },
     },
-    hasPermission: (p: string) => mockHasPermission && p === 'schedules:update',
+    hasPermission: (p: string) => mockPermissions.includes(p),
   })),
 }))
 
@@ -94,7 +94,7 @@ function renderBuilder(connector: Connector = makeConnector()) {
 
 describe('ScheduleBuilder — UI-01: Interval picker configuration', () => {
   beforeEach(() => {
-    mockHasPermission = true
+    mockPermissions = ['schedules:read', 'schedules:update']
     mockSaveMutateAsync.mockClear()
     mockToast.mockClear()
   })
@@ -146,11 +146,19 @@ describe('ScheduleBuilder — UI-01: Interval picker configuration', () => {
     })
   })
 
-  it('does not render schedule panel for users without schedules:update permission', () => {
-    mockHasPermission = false
+  it('does not render schedule panel for users without schedules:read permission', () => {
+    mockPermissions = []
     const { container } = renderBuilder()
-    // ScheduleBuilder returns null when permission is missing
+    // ScheduleBuilder returns null when read permission is missing
     expect(container.firstChild).toBeNull()
+  })
+
+  it('renders schedule panel as read-only for users with only schedules:read', () => {
+    mockPermissions = ['schedules:read']
+    renderBuilder({ interval_type: 'hours', interval_value: 4 })
+    expect(screen.getByText('Schedule')).toBeInTheDocument()
+    // Save button should not be visible without update permission
+    expect(screen.queryByText('Save Schedule')).not.toBeInTheDocument()
   })
 })
 
@@ -160,7 +168,7 @@ describe('ScheduleBuilder — UI-01: Interval picker configuration', () => {
 
 describe('ScheduleBuilder — UI-02: Frontend validation', () => {
   beforeEach(() => {
-    mockHasPermission = true
+    mockPermissions = ['schedules:read', 'schedules:update']
     mockSaveMutateAsync.mockClear()
     mockToast.mockClear()
   })
@@ -257,7 +265,7 @@ describe('ScheduleBuilder — UI-02: Frontend validation', () => {
 
 describe('ScheduleBuilder — UI-04: Enable/disable toggle', () => {
   beforeEach(() => {
-    mockHasPermission = true
+    mockPermissions = ['schedules:read', 'schedules:update']
     mockPauseMutateAsync.mockClear()
     mockResumeMutateAsync.mockClear()
     mockToast.mockClear()
@@ -363,7 +371,7 @@ describe('ScheduleBuilder — UI-04: Enable/disable toggle', () => {
 
 describe('ScheduleBuilder — UI-01: Empty state', () => {
   beforeEach(() => {
-    mockHasPermission = true
+    mockPermissions = ['schedules:read', 'schedules:update']
   })
 
   it('shows empty state text when no schedule is configured and no value entered', () => {

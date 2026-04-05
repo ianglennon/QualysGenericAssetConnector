@@ -1,7 +1,14 @@
 export interface User {
   id: string
   email: string
-  role: 'admin' | 'operator'
+  is_active: boolean
+  must_change_password: boolean
+  role: {
+    id: string
+    name: string
+    is_system: boolean
+    permissions: string[]
+  }
 }
 
 export interface LoginRequest {

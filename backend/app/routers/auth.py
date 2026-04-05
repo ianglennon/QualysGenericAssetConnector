@@ -31,6 +31,7 @@ def get_me(
         id=user.id,
         email=user.email,
         is_active=user.is_active,
+        must_change_password=user.must_change_password,
         role=RoleResponse(
             id=role.id,
             name=role.name,

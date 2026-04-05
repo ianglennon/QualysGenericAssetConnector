@@ -18,6 +18,8 @@ export const ROUTES = {
   SETTINGS: '/settings',
   SETTINGS_QUALYS: '/settings/qualys',
   SETTINGS_TRANSFORM_RULES: '/settings/transform-rules',
+  SETTINGS_USERS: '/settings/users',
+  SETTINGS_ROLES: '/settings/roles',
 
   /** Returns the absolute path to a connector's detail page. */
   connectorDetail: (id: string | number): string => `/connectors/${id}`,
@@ -36,4 +38,7 @@ export const ROUTES = {
 
   /** Returns the absolute path to a run's detail page. */
   runDetail: (id: string | number): string => `/runs/${id}`,
+
+  /** Returns the absolute path to a role's edit page. */
+  roleEdit: (roleId: string): string => `/settings/roles/${roleId}`,
 } as const

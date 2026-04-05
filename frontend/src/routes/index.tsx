@@ -10,11 +10,15 @@ import { DryRunResultsPage } from '@/pages/Connectors/DryRunResultsPage'
 import { QualysConfig } from '@/pages/Settings/QualysConfig'
 import { TransformRules } from '@/pages/Settings/TransformRules'
 import { UserProfile } from '@/pages/Settings/UserProfile'
+import { UsersPage } from '@/pages/Settings/UsersPage'
+import { RolesPage } from '@/pages/Settings/RolesPage'
+import { RoleEditPage } from '@/pages/Settings/RoleEditPage'
 import RunHistoryPage from '@/pages/RunHistory/RunHistoryPage'
 import RunDetailPage from '@/pages/RunHistory/RunDetailPage'
 import ProtectedRoute from './ProtectedRoute'
 import { AuthProvider } from '@/providers/AuthProvider'
 import { MainLayout } from '@/components/layout/MainLayout'
+import { SettingsTabBar } from '@/components/layout/SettingsTabBar'
 
 // Root layout that provides auth context
 function RootLayout() {
@@ -22,6 +26,16 @@ function RootLayout() {
     <AuthProvider>
       <Outlet />
     </AuthProvider>
+  )
+}
+
+// Settings layout with tab navigation
+function SettingsLayout() {
+  return (
+    <div>
+      <SettingsTabBar />
+      <Outlet />
+    </div>
   )
 }
 
@@ -44,7 +58,7 @@ export const router = createBrowserRouter([
           {
             index: true,
             element: <Navigate to={ROUTES.DASHBOARD} replace />,
-},
+          },
           {
             path: 'dashboard',
             element: <Dashboard />,
@@ -84,8 +98,8 @@ export const router = createBrowserRouter([
           {
             path: 'settings',
             element: (
-              <ProtectedRoute allowedRoles={['admin']}>
-                <Outlet />
+              <ProtectedRoute requiredPermissions={['users:read', 'roles:read', 'settings:read']}>
+                <SettingsLayout />
               </ProtectedRoute>
             ),
             children: [
@@ -100,6 +114,18 @@ export const router = createBrowserRouter([
               {
                 path: 'transform-rules',
                 element: <TransformRules />,
+              },
+              {
+                path: 'users',
+                element: <UsersPage />,
+              },
+              {
+                path: 'roles',
+                element: <RolesPage />,
+              },
+              {
+                path: 'roles/:roleId',
+                element: <RoleEditPage />,
               },
             ],
           },

@@ -32,6 +32,7 @@ class MeResponse(BaseModel):
     id: str
     email: str
     is_active: bool
+    must_change_password: bool
     role: RoleResponse
 
 

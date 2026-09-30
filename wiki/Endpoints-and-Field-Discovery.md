@@ -19,30 +19,8 @@ Endpoints define which API resources a connector fetches. Each endpoint maps to 
 |-------|----------|---------|-------------|
 | Name | Yes | -- | Display name for the endpoint |
 | Path | Yes | -- | Relative URL path, appended to connector base URL. Supports `{{variable}}` template syntax for chained endpoints. |
-| Data Root | No | Auto-detected | Dot-notation path to the array of records in the API response (e.g., `data.results`) |
 | Pagination | No | -- | JSON configuration for paginated APIs |
 | Enabled | Yes | true | Whether this endpoint participates in syncs |
-| Display Order | No | 0 | Controls ordering in the UI and execution sequence |
-
-## Data Root
-
-The data root tells the system where to find the array of records in the API response. Many APIs wrap their results inside a container object. For example, given this response:
-
-```json
-{
-  "status": "ok",
-  "data": {
-    "items": [
-      {"id": 1, "name": "host-1"},
-      {"id": 2, "name": "host-2"}
-    ]
-  }
-}
-```
-
-Set the data root to `data.items` to point the system at the record array.
-
-**Auto-detection:** When field discovery runs, it automatically detects the data root if the response is a single-key wrapper containing an array (e.g., `{"results": [...]}`). The auto-detected value appears in the field discovery results and can be overridden manually.
 
 ## Template Variables
 

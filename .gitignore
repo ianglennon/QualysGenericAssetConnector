@@ -19,3 +19,8 @@ node_modules/
 
 # Vendored packages (cloned separately)
 QualysAPIConnectionManager/
+
+.planning/
+CLAUDE.md
+.claude/
+claude_session.txt

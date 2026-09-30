@@ -33,25 +33,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      # backend/Dockerfile installs the private qualys_client package from the
-      # repo root, so it has to be checked out alongside this repo.
-      - name: Check private dependency token
-        if: matrix.image == 'backend'
-        env:
-          TOKEN: ${{ secrets.QUALYS_CLIENT_TOKEN }}
-        run: |
-          if [ -z "$TOKEN" ]; then
-            echo "::error::Secret QUALYS_CLIENT_TOKEN is not set. Add a fine-grained PAT with Contents: read on ianglennon/QualysAPIConnectionManager."
-            exit 1
-          fi
-
+      # backend/Dockerfile installs qualys_client from the repo root, and that
+      # package lives in a separate repo, so check it out alongside this one.
       - name: Checkout QualysAPIConnectionManager
         if: matrix.image == 'backend'
         uses: actions/checkout@v5
         with:
           repository: ianglennon/QualysAPIConnectionManager
           ref: main
-          token: ${{ secrets.QUALYS_CLIENT_TOKEN }}
           path: QualysAPIConnectionManager
 
       - name: Set up Docker Buildx

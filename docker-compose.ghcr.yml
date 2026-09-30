@@ -4,6 +4,10 @@
 #   docker compose -f docker-compose.ghcr.yml up -d
 # Pin a release with IMAGE_TAG (e.g. IMAGE_TAG=sha-c810c0a or 1.2.0); defaults to latest.
 
+# Separate project name so a dev `docker compose up` in the source checkout
+# does not take over these containers or the database volume.
+name: qualys-connector
+
 services:
   db:
     image: postgres:16-alpine

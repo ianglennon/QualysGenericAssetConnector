@@ -21,17 +21,57 @@ No coding required.
 
 ## Quick Start
 
-Prerequisites: [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
+Prerequisites: [Docker](https://docs.docker.com/get-docker/) with Docker Compose v2. No source checkout or build is needed; the prebuilt images are pulled from GitHub Container Registry.
+
+**1. Download the compose file and example settings**
+
+```bash
+mkdir qualys-connector && cd qualys-connector
+curl -fsSLO https://raw.githubusercontent.com/ianglennon/QualysGenericAssetConnector/master/docker-compose.ghcr.yml
+curl -fsSL -o .env https://raw.githubusercontent.com/ianglennon/QualysGenericAssetConnector/master/.env.example
+```
+
+**2. Generate secrets**
+
+```bash
+docker run --rm ghcr.io/ianglennon/qualys-connector-backend python -c "import secrets; from cryptography.fernet import Fernet; print('SECRET_KEY=' + secrets.token_hex(32)); print('FERNET_KEY=' + Fernet.generate_key().decode()); print('POSTGRES_PASSWORD=' + secrets.token_hex(16))"
+```
+
+**3. Edit `.env`**
+
+- Replace `SECRET_KEY`, `FERNET_KEY` and `POSTGRES_PASSWORD` with the values from step 2.
+- Set `ADMIN_EMAIL` and `ADMIN_PASSWORD` for the first admin account. The password needs 12+ characters, at least 2 digits and 1 symbol. These are only used on first startup.
+- Optional: `HTTP_PORT` if port 80 is taken, `IMAGE_TAG` to pin a version, `DOCS_ENABLED=false` to hide the API docs.
+
+Keep `FERNET_KEY` safe: it encrypts the stored connector credentials, and they cannot be decrypted without it.
+
+**4. Start it**
+
+```bash
+docker compose -f docker-compose.ghcr.yml up -d
+```
+
+Open http://localhost (or the host name and `HTTP_PORT` you chose) and log in with the admin credentials from `.env`.
+
+**Updating** to the latest images:
+
+```bash
+docker compose -f docker-compose.ghcr.yml pull && docker compose -f docker-compose.ghcr.yml up -d
+```
+
+### Building from source
+
+For development, clone this repo and put [QualysAPIConnectionManager](https://github.com/ianglennon/QualysAPIConnectionManager) in its root (the backend image installs it from there), then build:
 
 ```bash
 git clone https://github.com/ianglennon/QualysGenericAssetConnector.git
 cd QualysGenericAssetConnector
-cp .env.example .env
-# Edit .env with your SECRET_KEY, FERNET_KEY, and admin credentials
-docker compose up -d
+git clone https://github.com/ianglennon/QualysAPIConnectionManager.git
+cp .env.example .env   # then fill it in as above
+docker compose up --build
 ```
 
-Open http://localhost in your browser and log in with the admin credentials from `.env`.
+This also applies `docker-compose.override.yml` (auto-reload, source mounted into the backend, API docs on).
 
 ## Documentation
 

@@ -43,4 +43,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and contribution gu
 
 ## License
 
-GPL v3 -- see [LICENSE.md](LICENSE.md).
+MIT -- see [LICENSE](LICENSE).
